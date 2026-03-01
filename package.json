@@ -1,0 +1,16 @@
+{
+  "name": "trading-engine",
+  "version": "1.0.0",
+  "description": "Live trading engine ported from MQL/StereoTrader",
+  "main": "dist/trading-engine.js",
+  "types": "dist/trading-engine.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "build:watch": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}

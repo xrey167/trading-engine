@@ -1,0 +1,1554 @@
+// ============================================================
+//  Live Trading Engine — TypeScript
+//  All business logic ported from _StereoAPI_MT5.mqh
+//  (StereoTrader by Dirk Hilger) — no StereoTrader dependency.
+//
+//  Supports:
+//   • Long and short positions simultaneously (hedging)
+//   • Market, Limit, Stop, Trailing-entry, MIT orders
+//   • OCO / CO / CS / REV / bracket order attributes
+//   • Limit-pullback (trailing pending order)
+//   • All trailing-stop modes: Dst, EOP, MA, PlhPeak, PlhClose, Prx
+//   • SL / TP / Break-even with activation flags
+//   • ATR, RSI, SMA, local-high/low calculations
+// ============================================================
+
+// ─────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────
+
+export const enum Side {
+  None  =  0,
+  Long  =  1,
+  Short = -1,
+}
+
+export const enum TrailMode {
+  None     = 0,
+  Dst      = 1,  // fixed distance from latest high/low
+  Eop      = 2,  // lowest-low / highest-high over N periods
+  Ma       = 3,  // moving average ± distance
+  PlhPeak  = 5,  // peak/low tracker — updates only on new extreme
+  PlhClose = 6,  // same, triggered by new close extreme
+  Prx      = 7,  // close-based, distance can be relative to bar range
+}
+
+export const enum AtrMethod { Sma = 0, Ema = 1 }
+
+export const enum LimitConfirm {
+  None       = 0,
+  Wick       = 1,       // price must wick back from limit level
+  WickBreak  = 2,       // wick + body must break back
+  WickColor  = 3,       // wick + confirming candle color
+}
+
+// ─────────────────────────────────────────────────────────────
+// OHLC / Candle
+// ─────────────────────────────────────────────────────────────
+
+export interface OHLC {
+  open: number; high: number; low: number; close: number;
+  time: Date; volume?: number | undefined;
+}
+
+export class Candle implements OHLC {
+  constructor(
+    public open:   number,
+    public high:   number,
+    public low:    number,
+    public close:  number,
+    public time:   Date,
+    public volume?: number,
+  ) {}
+
+  isBullish(): boolean { return this.close > this.open; }
+  isBearish(): boolean { return this.close < this.open; }
+  isDoji(tol = 0): boolean { return Math.abs(this.open - this.close) <= tol; }
+
+  range():     number { return this.high - this.low; }
+  wickRange(): number { return this.high - Math.max(this.open, this.close); }
+  tailRange(): number { return Math.min(this.open, this.close) - this.low; }
+  bodyRange(): number { return Math.abs(this.open - this.close); }
+
+  bodyPart(): number { const r = this.range(); return r === 0 ? 0 : this.bodyRange() / r; }
+  tailPart(): number { const r = this.range(); return r === 0 ? 0 : this.tailRange() / r; }
+  wickPart(): number { const r = this.range(); return r === 0 ? 0 : this.wickRange() / r; }
+
+  isHammer(tailMin = 0.55): boolean {
+    return this.tailPart() >= tailMin && this.wickPart() <= this.tailPart() * 0.5;
+  }
+  isShootingStar(wickMin = 0.55): boolean {
+    return this.wickPart() >= wickMin && this.tailPart() <= this.wickPart() * 0.5;
+  }
+  isSolid(wickMax = 0.15, tailMax = 0.15): boolean {
+    return this.tailPart() <= tailMax && this.wickPart() <= wickMax;
+  }
+  isSolidBullish(wickMax = 0.15): boolean { return this.isBullish() && this.wickPart() <= wickMax; }
+  isSolidBearish(tailMax = 0.15): boolean { return this.isBearish() && this.tailPart() <= tailMax; }
+
+  isBreaking(price: number): boolean {
+    return (this.open > price && this.close < price) || (this.open < price && this.close > price);
+  }
+  isBreakingLong(price: number, exceed = 0): boolean {
+    return this.open < price && this.close > price && this.close > price + exceed;
+  }
+  isBreakingShort(price: number, exceed = 0): boolean {
+    return this.open > price && this.close < price && this.close < price - exceed;
+  }
+  isCrossing(price: number): boolean { return this.high >= price && this.low <= price; }
+  isTouchingLow(price: number): boolean {
+    return this.low <= price && Math.min(this.open, this.close) >= price;
+  }
+  isTouchingHigh(price: number): boolean {
+    return this.high >= price && Math.max(this.open, this.close) <= price;
+  }
+
+  isInTimeRange(beginH: number, beginM: number, endH: number, endM: number): boolean {
+    const begin = beginH * 60 + beginM;
+    const end   = endH   * 60 + endM;
+    const cur   = this.time.getUTCHours() * 60 + this.time.getUTCMinutes();
+    if (end < begin) return cur >= begin || cur <= end;  // overnight
+    return cur >= begin && cur <= end;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Bars series (index 0 = most-recent closed bar)
+// ─────────────────────────────────────────────────────────────
+
+export class Bars {
+  constructor(private readonly data: OHLC[]) {}
+
+  get length(): number { return this.data.length; }
+
+  candle(shift = 0): Candle {
+    const b = this.data[shift];
+    if (!b) throw new RangeError(`shift ${shift} out of range (len=${this.data.length})`);
+    return new Candle(b.open, b.high, b.low, b.close, b.time, b.volume);
+  }
+
+  high(shift = 0):  number { return this.data[shift].high;  }
+  low(shift = 0):   number { return this.data[shift].low;   }
+  open(shift = 0):  number { return this.data[shift].open;  }
+  close(shift = 0): number { return this.data[shift].close; }
+  time(shift = 0):  Date   { return this.data[shift].time;  }
+
+  highestHigh(periods: number, shift = 0): number {
+    let max = -Infinity;
+    for (let i = shift; i < shift + periods && i < this.data.length; i++) {
+      if (this.data[i].high > max) max = this.data[i].high;
+    }
+    return max;
+  }
+
+  lowestLow(periods: number, shift = 0): number {
+    let min = Infinity;
+    for (let i = shift; i < shift + periods && i < this.data.length; i++) {
+      if (this.data[i].low < min) min = this.data[i].low;
+    }
+    return min;
+  }
+
+  sma(periods: number, shift = 0): number {
+    let sum = 0, cnt = 0;
+    for (let i = shift; i < shift + periods && i < this.data.length; i++) {
+      sum += this.data[i].close; cnt++;
+    }
+    return cnt === 0 ? 0 : sum / cnt;
+  }
+
+  atr(periods: number, shift = 0, method: AtrMethod = AtrMethod.Sma): number {
+    const trs: number[] = [];
+    for (let i = shift; i < shift + periods && i + 1 < this.data.length; i++) {
+      const c = this.data[i], p = this.data[i + 1];
+      trs.push(Math.max(c.high - c.low, Math.abs(c.high - p.close), Math.abs(c.low - p.close)));
+    }
+    if (trs.length === 0) return 0;
+    if (method === AtrMethod.Sma) return trs.reduce((a, b) => a + b, 0) / trs.length;
+    const k = 2 / (trs.length + 1);
+    return trs.reduce((ema, v, i) => i === 0 ? v : v * k + ema * (1 - k), 0);
+  }
+
+  rsi(periods = 14, shift = 0): number {
+    if (this.data.length < shift + periods + 1) return 50;
+    let gains = 0, losses = 0;
+    for (let i = shift; i < shift + periods; i++) {
+      const diff = this.data[i].close - this.data[i + 1].close;
+      diff > 0 ? (gains += diff) : (losses -= diff);
+    }
+    const ag = gains / periods, al = losses / periods;
+    return al === 0 ? 100 : 100 - 100 / (1 + ag / al);
+  }
+
+  isLocalHigh(lookback: number, shift = 0, tol = 0): boolean {
+    const peak = this.data[shift].high;
+    for (let i = shift + 1; i < shift + lookback && i < this.data.length; i++) {
+      if (this.data[i].high + tol > peak) return false;
+    }
+    return true;
+  }
+
+  isLocalLow(lookback: number, shift = 0, tol = 0): boolean {
+    const trough = this.data[shift].low;
+    for (let i = shift + 1; i < shift + lookback && i < this.data.length; i++) {
+      if (this.data[i].low - tol < trough) return false;
+    }
+    return true;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Symbol metadata
+// ─────────────────────────────────────────────────────────────
+
+export class SymbolInfo {
+  readonly pointSize: number;
+
+  constructor(public readonly name: string, public readonly digits: number) {
+    this.pointSize = Math.pow(10, -digits);
+  }
+
+  priceToPoints(price: number): number  { return price / this.pointSize; }
+  pointsToPrice(points: number): number { return points * this.pointSize; }
+  normalize(price: number): number { return parseFloat(price.toFixed(this.digits)); }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Trailing-stop calculation (per-bar, pure function)
+// ─────────────────────────────────────────────────────────────
+
+export interface TrailConfig {
+  mode:        TrailMode;
+  distancePts: number;
+  periods:     number;
+}
+
+export interface TrailState {
+  active: boolean;
+  plhRef: number;
+}
+
+/**
+ * Returns the updated SL price after applying the trail rule.
+ * Call once per new closed bar while a position is open.
+ */
+export function calcTrailingSL(p: {
+  side:          Side;
+  bar:           Candle;
+  bars:          Bars;
+  posPrice:      number;
+  currentSL:     number;   // -1 = not yet set
+  spreadAbs:     number;
+  trailBeginPts: number;
+  trail:         TrailConfig;
+  state:         TrailState; // mutable
+  symbol:        SymbolInfo;
+}): number {
+  const { side, bar, bars, posPrice, spreadAbs, trail, state, symbol } = p;
+  let { currentSL } = p;
+  if (trail.mode === TrailMode.None) return currentSL;
+
+  const beginPrice = symbol.pointsToPrice(p.trailBeginPts);
+  const distPrice  = symbol.pointsToPrice(Math.abs(trail.distancePts));
+  const distFrac   = trail.distancePts < 0 ? Math.abs(trail.distancePts) / 1000 : 0;
+
+  if (side === Side.Long) {
+    if (bar.high < posPrice + beginPrice) return currentSL;
+    state.active = true;
+    let cand = -Infinity;
+    switch (trail.mode) {
+      case TrailMode.Dst:      cand = bar.high - distPrice; break;
+      case TrailMode.Eop:      cand = bars.lowestLow(trail.periods)  - distPrice; break;
+      case TrailMode.Ma:       cand = bars.sma(trail.periods)        - distPrice; break;
+      case TrailMode.PlhPeak:  if (bar.high > state.plhRef) { state.plhRef = bar.high;  cand = bar.low  - distPrice; } break;
+      case TrailMode.PlhClose: if (bar.close > state.plhRef){ state.plhRef = bar.close; cand = bar.low  - distPrice; } break;
+      case TrailMode.Prx:
+        if (bar.close > state.plhRef) {
+          state.plhRef = bar.high;
+          cand = distFrac > 0 ? bar.low - bar.range() * distFrac : bar.low - distPrice;
+        }
+        break;
+    }
+    if (cand > -Infinity) currentSL = Math.max(currentSL === -1 ? -Infinity : currentSL, cand);
+
+  } else if (side === Side.Short) {
+    if (bar.low + spreadAbs > posPrice - beginPrice) return currentSL;
+    state.active = true;
+    let cand = Infinity;
+    switch (trail.mode) {
+      case TrailMode.Dst:      cand = bar.low  + distPrice; break;
+      case TrailMode.Eop:      cand = bars.highestHigh(trail.periods) + distPrice; break;
+      case TrailMode.Ma:       cand = bars.sma(trail.periods)         + distPrice; break;
+      case TrailMode.PlhPeak:  if (bar.low  < state.plhRef) { state.plhRef = bar.low;   cand = bar.high + distPrice; } break;
+      case TrailMode.PlhClose: if (bar.close < state.plhRef){ state.plhRef = bar.close; cand = bar.high + distPrice; } break;
+      case TrailMode.Prx:
+        if (bar.close < state.plhRef) {
+          state.plhRef = bar.low;
+          cand = distFrac > 0 ? bar.high + bar.range() * distFrac : bar.high + distPrice;
+        }
+        break;
+    }
+    cand += spreadAbs;
+    if (cand < Infinity)
+      currentSL = currentSL === -1 ? cand : Math.min(currentSL, cand);
+  }
+
+  return currentSL;
+}
+
+// ─────────────────────────────────────────────────────────────
+// SL/TP hit detection (pure function)
+// ─────────────────────────────────────────────────────────────
+
+export type ExitReason = 'SL' | 'TP' | 'SL_BOTH' | 'TP_BOTH';
+
+export interface HitResult {
+  reason:    ExitReason;
+  exitPrice: number;
+}
+
+export function checkSLTP(p: {
+  side:        Side;
+  bar:         Candle;
+  sl:          number;      // -1 = disabled
+  tp:          number;      // -1 = disabled
+  slActive:    boolean;
+  tpActive:    boolean;
+  trailActive: boolean;     // trail started → SL is enforced
+  spreadAbs:   number;
+}): HitResult | null {
+  const { side, bar, sl, tp, slActive, tpActive, trailActive, spreadAbs } = p;
+  const slOn = (slActive || trailActive) && sl > 0;
+  const tpOn = tpActive && tp > 0;
+
+  if (side === Side.Long) {
+    const slHit = slOn && bar.low  <= sl;
+    const tpHit = tpOn && bar.high >= tp;
+    if (!slHit && !tpHit) return null;
+    if (slHit && tpHit) {
+      return bar.isBullish()
+        ? { reason: 'TP_BOTH', exitPrice: Math.min(bar.open, tp)  }   // open may gap above tp
+        : { reason: 'SL_BOTH', exitPrice: Math.max(bar.open, sl)  };  // open may gap below sl
+    }
+    if (slHit) return { reason: 'SL', exitPrice: Math.max(bar.open, sl)  };
+    return          { reason: 'TP', exitPrice: Math.min(bar.open, tp)  };
+  }
+
+  if (side === Side.Short) {
+    const slHit = slOn && bar.high + spreadAbs >= sl;
+    const tpHit = tpOn && bar.low  + spreadAbs <= tp;
+    if (!slHit && !tpHit) return null;
+    if (slHit && tpHit) {
+      return bar.isBullish()
+        ? { reason: 'TP_BOTH', exitPrice: Math.max(bar.open, tp)  }
+        : { reason: 'SL_BOTH', exitPrice: Math.min(bar.open, sl)  };
+    }
+    if (slHit) return { reason: 'SL', exitPrice: Math.min(bar.open, sl)  };
+    return          { reason: 'TP', exitPrice: Math.max(bar.open, tp)  };
+  }
+
+  return null;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Order book — pending orders with all special attributes
+// ─────────────────────────────────────────────────────────────
+
+export type OrderEntryType =
+  | 'BUY_LIMIT'    // filled when price drops to limit
+  | 'BUY_STOP'     // filled when price rises to stop
+  | 'SELL_LIMIT'   // filled when price rises to limit
+  | 'SELL_STOP'    // filled when price drops to stop
+  | 'BUY_MIT'      // Market-if-Touched — buy at market when price touches level
+  | 'SELL_MIT';    // Market-if-Touched — sell at market when price touches level
+
+export interface PendingOrderAttributes {
+  /** One-Cancels-Other: when filled, cancel all other pending orders */
+  oco?: boolean;
+  /** Close-Opposite: when filled, close the opposite position */
+  co?: boolean;
+  /** Cancel-Same: when filled, cancel all same-direction pending orders */
+  cs?: boolean;
+  /** Reverse: when filled, reverse the current position */
+  rev?: boolean;
+  /** Bracket: automatic SL/TP applied when filled */
+  bracketSL?: number;  // points
+  bracketTP?: number;  // points
+  /** Trailing entry: the pending order price follows the market */
+  trailEntry?: {
+    mode:   TrailMode;
+    distPts: number;
+    periods: number;
+  };
+  /** Limit-pullback: limit order that follows (trails) the price by pullbackPts */
+  pullbackPts?: number;
+  /** Limit-confirm: require candle confirmation before treating as filled */
+  limitConfirm?: LimitConfirm;
+}
+
+export interface PendingOrder {
+  id:         string;
+  type:       OrderEntryType;
+  side:       Side;          // Long or Short
+  price:      number;        // trigger price
+  size:       number;
+  time:       Date;
+  attributes: PendingOrderAttributes;
+  // Internal state for trailing entry / pullback
+  _trailRef?: number;       // highest/lowest reference for trailing entry
+}
+
+// ─────────────────────────────────────────────────────────────
+// Individual position slot
+// Hedging mode allows one Long and one Short simultaneously.
+// ─────────────────────────────────────────────────────────────
+
+export interface PositionSlot {
+  side:       Side;
+  size:       number;
+  openPrice:  number;
+  openTime:   Date;
+  sl:         number;   // -1 = not set
+  tp:         number;   // -1 = not set
+  slActive:   boolean;
+  tpActive:   boolean;
+  trailCfg:   TrailConfig;
+  trailState: TrailState;
+  trailActive: boolean;
+  trailBeginPts: number;
+  beActive:   boolean;
+  beAddPts:   number;
+}
+
+function emptySlot(side: Side): PositionSlot {
+  return {
+    side, size: 0, openPrice: -1, openTime: new Date(0),
+    sl: -1, tp: -1, slActive: false, tpActive: false,
+    trailCfg:   { mode: TrailMode.None, distancePts: 0, periods: 0 },
+    trailState: { active: false, plhRef: side === Side.Long ? 0 : 999_999_999 },
+    trailActive: false, trailBeginPts: 0,
+    beActive: false, beAddPts: 0,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Broker adapter interface
+// ─────────────────────────────────────────────────────────────
+
+export interface ExecutionReport {
+  price: number;
+  time:  Date;
+  id:    string;
+}
+
+export interface IBrokerAdapter {
+  /** Open a new position (or add to existing) at market. */
+  marketOrder(side: Side, size: number, info?: string): Promise<ExecutionReport>;
+  /** Close (or partially close) a position at market. */
+  closePosition(side: Side, size: number, info?: string): Promise<{ price: number }>;
+  /** Push SL/TP to broker (e.g. native stop-loss). Pass null to remove. */
+  updateSLTP(side: Side, sl: number | null, tp: number | null): Promise<void>;
+  /** Current bid-ask spread in price units. */
+  getSpread(symbol: string): Promise<number>;
+  /** Account data. */
+  getAccount(): Promise<{ equity: number; balance: number }>;
+}
+
+// ─────────────────────────────────────────────────────────────
+// TradingEngine — main state machine
+// ─────────────────────────────────────────────────────────────
+
+export class TradingEngine {
+  // Hedging: separate slots for long and short
+  private longPos:  PositionSlot = emptySlot(Side.Long);
+  private shortPos: PositionSlot = emptySlot(Side.Short);
+
+  private orders: PendingOrder[] = [];
+  private _orderSeq = 0;
+
+  // Defaults applied to next order/position
+  private _nextOrderSize      = 1;
+  private _nextBracketSL?: number;
+  private _nextBracketTP?: number;
+  private _nextTrailEntry?: PendingOrderAttributes['trailEntry'];
+  private _nextPullback?: number;
+  private _nextOCO     = false;
+  private _nextCO      = false;
+  private _nextCS      = false;
+  private _nextREV     = false;
+  private _nextMIT     = false;
+  private _nextLimitConfirm: LimitConfirm = LimitConfirm.None;
+  private _removeOrdersOnFlat = false;
+
+  // Spread cache
+  private _spreadAbs = 0;
+
+  constructor(
+    private readonly symbol:  SymbolInfo,
+    private readonly broker:  IBrokerAdapter,
+    private readonly hedging  = true,   // false = net-mode (like MT4 non-hedge)
+  ) {}
+
+  // ──────────────────────────────────────────────────────────
+  // Per-bar main loop
+  // ──────────────────────────────────────────────────────────
+
+  /**
+   * Call this on every new closed bar.
+   * Sequence: fill pending orders → update trailing stops → check SL/TP exits.
+   */
+  async onBar(bar: Candle, bars: Bars): Promise<void> {
+    this._spreadAbs = await this.broker.getSpread(this.symbol.name);
+
+    await this._updateTrailingEntryOrders(bar, bars);
+    await this._checkOrderFills(bar, bars);
+
+    for (const slot of [this.longPos, this.shortPos]) {
+      if (slot.size === 0) continue;
+      await this._updateTrailingSL(slot, bar, bars);
+      await this._updateBreakEven(slot, bar);
+      await this._checkExits(slot, bar);
+    }
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // Market order execution
+  // ──────────────────────────────────────────────────────────
+
+  async buy(size?: number, info?: string): Promise<boolean> {
+    const s = size ?? this._nextOrderSize;
+    if (!this.hedging && this.shortPos.size > 0) await this._closeSlot(this.shortPos, info);
+    const r = await this.broker.marketOrder(Side.Long, s, info);
+    this._applyFill(this.longPos, r.price, s, r.time);
+    await this._applyBracket(this.longPos);
+    await this._pushSLTP(this.longPos);
+    return true;
+  }
+
+  async sell(size?: number, info?: string): Promise<boolean> {
+    const s = size ?? this._nextOrderSize;
+    if (!this.hedging && this.longPos.size > 0) await this._closeSlot(this.longPos, info);
+    const r = await this.broker.marketOrder(Side.Short, s, info);
+    this._applyFill(this.shortPos, r.price, s, r.time);
+    await this._applyBracket(this.shortPos);
+    await this._pushSLTP(this.shortPos);
+    return true;
+  }
+
+  async closeBuy(minProfit = -Infinity):  Promise<boolean> {
+    if (this.longPos.size  === 0) return false;
+    if (this._slotPL(this.longPos, -1) < minProfit) return false;
+    return this._closeSlot(this.longPos);
+  }
+
+  async closeSell(minProfit = -Infinity): Promise<boolean> {
+    if (this.shortPos.size === 0) return false;
+    if (this._slotPL(this.shortPos, -1) < minProfit) return false;
+    return this._closeSlot(this.shortPos);
+  }
+
+  async closeAll(minProfit = -Infinity): Promise<boolean> {
+    const a = await this.closeBuy(minProfit);
+    const b = await this.closeSell(minProfit);
+    return a || b;
+  }
+
+  async flat(): Promise<boolean> {
+    await this.closeAll();
+    await this.deleteAllOrders();
+    return true;
+  }
+
+  async flatLong():  Promise<boolean> { await this.closeBuy();  await this.deleteBuyOrders();  return true; }
+  async flatShort(): Promise<boolean> { await this.closeSell(); await this.deleteSellOrders(); return true; }
+
+  async hedgeAll(): Promise<boolean> {
+    if (this.longPos.size  > 0) await this.sell(this.longPos.size);
+    if (this.shortPos.size > 0) await this.buy(this.shortPos.size);
+    return true;
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // Pending orders
+  // ──────────────────────────────────────────────────────────
+
+  /** Buy-limit: buy when price drops to `price`. */
+  addBuyLimit(price: number, size?: number): string {
+    return this._addOrder('BUY_LIMIT', Side.Long, price, size);
+  }
+
+  /** Buy-stop: buy when price rises to `price`. */
+  addBuyStop(price: number, size?: number): string {
+    return this._addOrder('BUY_STOP', Side.Long, price, size);
+  }
+
+  /** Sell-limit: sell when price rises to `price`. */
+  addSellLimit(price: number, size?: number): string {
+    return this._addOrder('SELL_LIMIT', Side.Short, price, size);
+  }
+
+  /** Sell-stop: sell when price drops to `price`. */
+  addSellStop(price: number, size?: number): string {
+    return this._addOrder('SELL_STOP', Side.Short, price, size);
+  }
+
+  /**
+   * MIT — Market If Touched.
+   * Buy: converts to market buy the first time price touches `price` (from above).
+   * Sell: converts to market sell the first time price touches `price` (from below).
+   */
+  addBuyMIT(price: number, size?: number): string {
+    return this._addOrder('BUY_MIT', Side.Long, price, size);
+  }
+
+  addSellMIT(price: number, size?: number): string {
+    return this._addOrder('SELL_MIT', Side.Short, price, size);
+  }
+
+  /**
+   * Trailing buy-limit — entry order whose price trails below the market.
+   * The limit price is set to market - distancePts, and re-anchored upward
+   * each bar as long as price rises.
+   */
+  addBuyLimitTrail(mode: TrailMode, distancePts: number, periods = 0): string {
+    const id = this._addOrder('BUY_LIMIT', Side.Long, 0, undefined);
+    const o = this._findOrder(id)!;
+    o.attributes.trailEntry = { mode, distPts: distancePts, periods };
+    o._trailRef = -Infinity;
+    return id;
+  }
+
+  addSellLimitTrail(mode: TrailMode, distancePts: number, periods = 0): string {
+    const id = this._addOrder('SELL_LIMIT', Side.Short, 0, undefined);
+    const o = this._findOrder(id)!;
+    o.attributes.trailEntry = { mode, distPts: distancePts, periods };
+    o._trailRef = Infinity;
+    return id;
+  }
+
+  /** Trailing buy-stop — stop price trails above the market. */
+  addBuyStopTrail(mode: TrailMode, distancePts: number, periods = 0): string {
+    const id = this._addOrder('BUY_STOP', Side.Long, 999_999_999, undefined);
+    const o = this._findOrder(id)!;
+    o.attributes.trailEntry = { mode, distPts: distancePts, periods };
+    o._trailRef = Infinity;
+    return id;
+  }
+
+  addSellStopTrail(mode: TrailMode, distancePts: number, periods = 0): string {
+    const id = this._addOrder('SELL_STOP', Side.Short, 0, undefined);
+    const o = this._findOrder(id)!;
+    o.attributes.trailEntry = { mode, distPts: distancePts, periods };
+    o._trailRef = -Infinity;
+    return id;
+  }
+
+  /**
+   * Bracket order: places an entry + auto SL + auto TP.
+   * Returns the entry order id.
+   */
+  addBracket(opts: {
+    entryType:  'BUY_LIMIT' | 'BUY_STOP' | 'SELL_LIMIT' | 'SELL_STOP';
+    entryPrice: number;
+    slPts:      number;
+    tpPts:      number;
+    size?:      number;
+  }): string {
+    const side = opts.entryType.startsWith('BUY') ? Side.Long : Side.Short;
+    const id = this._addOrder(opts.entryType, side, opts.entryPrice, opts.size);
+    const o  = this._findOrder(id)!;
+    o.attributes.bracketSL = opts.slPts;
+    o.attributes.bracketTP = opts.tpPts;
+    return id;
+  }
+
+  async deleteBuyOrders():  Promise<void> { this.orders = this.orders.filter(o => o.side !== Side.Long);  }
+  async deleteSellOrders(): Promise<void> { this.orders = this.orders.filter(o => o.side !== Side.Short); }
+  async deleteAllOrders():  Promise<void> { this.orders = []; }
+
+  moveOrder(id: string, price: number): boolean {
+    const o = this._findOrder(id);
+    if (!o) return false;
+    o.price = price;
+    return true;
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // Next-order attribute setters
+  // (set before calling buy/sell/addXxx to apply to that order)
+  // ──────────────────────────────────────────────────────────
+
+  orderSize(v: number): void { this._nextOrderSize = v; }
+  orderAttrOCO(flag = true):  void { this._nextOCO = flag; }
+  orderAttrCO(flag = true):   void { this._nextCO  = flag; }
+  orderAttrCS(flag = true):   void { this._nextCS  = flag; }
+  orderAttrREV(flag = true):  void { this._nextREV = flag; }
+  orderAttrMIT(flag = true):  void { this._nextMIT = flag; }
+  orderLimitConfirm(v: LimitConfirm): void { this._nextLimitConfirm = v; }
+  orderLimitPullback(pts: number): void { this._nextPullback = pts; }
+  bracketSL(pts: number): void { this._nextBracketSL = pts; }
+  bracketTP(pts: number): void { this._nextBracketTP = pts; }
+  aeRemoveOrdersFlat(flag: boolean): void { this._removeOrdersOnFlat = flag; }
+
+  // ──────────────────────────────────────────────────────────
+  // SL / TP / Trail setters per slot
+  // ──────────────────────────────────────────────────────────
+
+  sl(points: number): void {
+    this.longPos.sl  = this.symbol.pointsToPrice(points);
+    this.shortPos.sl = this.symbol.pointsToPrice(points);
+  }
+  tp(points: number): void {
+    this.longPos.tp  = this.symbol.pointsToPrice(points);
+    this.shortPos.tp = this.symbol.pointsToPrice(points);
+  }
+  slBuy(points: number):  void { this.longPos.sl  = this.symbol.pointsToPrice(points); }
+  slSell(points: number): void { this.shortPos.sl = this.symbol.pointsToPrice(points); }
+  tpBuy(points: number):  void { this.longPos.tp  = this.symbol.pointsToPrice(points); }
+  tpSell(points: number): void { this.shortPos.tp = this.symbol.pointsToPrice(points); }
+
+  slBuyAbsolute(price: number):  void { this.longPos.sl  = price; }
+  slSellAbsolute(price: number): void { this.shortPos.sl = price; }
+  tpBuyAbsolute(price: number):  void { this.longPos.tp  = price; }
+  tpSellAbsolute(price: number): void { this.shortPos.tp = price; }
+
+  slActivate(flag: boolean):     void { this.longPos.slActive  = flag; this.shortPos.slActive  = flag; }
+  tpActivate(flag: boolean):     void { this.longPos.tpActive  = flag; this.shortPos.tpActive  = flag; }
+  slActivateBuy(flag: boolean):  void { this.longPos.slActive  = flag; }
+  slActivateSell(flag: boolean): void { this.shortPos.slActive = flag; }
+  tpActivateBuy(flag: boolean):  void { this.longPos.tpActive  = flag; }
+  tpActivateSell(flag: boolean): void { this.shortPos.tpActive = flag; }
+
+  trailMode(mode: TrailMode, distPts: number, periods = 0): void {
+    this.longPos.trailCfg  = { mode, distancePts: distPts, periods };
+    this.shortPos.trailCfg = { mode, distancePts: distPts, periods };
+  }
+  trailModeBuy(mode: TrailMode, distPts: number, periods = 0):  void { this.longPos.trailCfg  = { mode, distancePts: distPts, periods }; }
+  trailModeSell(mode: TrailMode, distPts: number, periods = 0): void { this.shortPos.trailCfg = { mode, distancePts: distPts, periods }; }
+
+  trailBegin(pts: number):     void { this.longPos.trailBeginPts  = pts; this.shortPos.trailBeginPts  = pts; }
+  trailBeginBuy(pts: number):  void { this.longPos.trailBeginPts  = pts; }
+  trailBeginSell(pts: number): void { this.shortPos.trailBeginPts = pts; }
+
+  trailDistance(pts: number):     void { this.longPos.trailCfg.distancePts  = pts; this.shortPos.trailCfg.distancePts  = pts; }
+  trailDistanceBuy(pts: number):  void { this.longPos.trailCfg.distancePts  = pts; }
+  trailDistanceSell(pts: number): void { this.shortPos.trailCfg.distancePts = pts; }
+
+  trailActivate(flag: boolean):     void { this.longPos.trailActive  = flag; this.shortPos.trailActive  = flag; }
+  trailActivateBuy(flag: boolean):  void { this.longPos.trailActive  = flag; }
+  trailActivateSell(flag: boolean): void { this.shortPos.trailActive = flag; }
+
+  be(pts: number):             void { this.longPos.beAddPts  = pts; this.shortPos.beAddPts  = pts; }
+  beBuy(pts: number):          void { this.longPos.beAddPts  = pts; }
+  beSell(pts: number):         void { this.shortPos.beAddPts = pts; }
+  beActivate(flag: boolean):   void { this.longPos.beActive   = flag; this.shortPos.beActive   = flag; }
+  beActivateBuy(flag: boolean): void { this.longPos.beActive   = flag; }
+  beActivateSell(flag: boolean):void { this.shortPos.beActive  = flag; }
+
+  /** Set SL, TP, trail and break-even all at once. */
+  setPoolPanelValues(opts: {
+    sl?: number; tp?: number;
+    trailBegin?: number; trailDistance?: number;
+    trailMode?: TrailMode; trailPeriods?: number;
+    separateSides?: boolean;
+  }): void {
+    const { sl, tp, trailBegin, trailDistance, trailMode: mode, trailPeriods = 0, separateSides = false } = opts;
+    if (separateSides) {
+      if (sl != null) { this.slBuy(sl); this.slSell(sl); }
+      if (tp != null) { this.tpBuy(tp); this.tpSell(tp); }
+      if (mode != null) { this.trailModeBuy(mode, trailDistance ?? 0, trailPeriods); this.trailModeSell(mode, trailDistance ?? 0, trailPeriods); }
+      else { if (trailBegin != null) { this.trailBeginBuy(trailBegin); this.trailBeginSell(trailBegin); } if (trailDistance != null) { this.trailDistanceBuy(trailDistance); this.trailDistanceSell(trailDistance); } }
+    } else {
+      if (sl != null) this.sl(sl);
+      if (tp != null) this.tp(tp);
+      if (mode != null) this.trailMode(mode, trailDistance ?? 0, trailPeriods);
+      else { if (trailBegin != null) this.trailBegin(trailBegin); if (trailDistance != null) this.trailDistance(trailDistance); }
+    }
+  }
+
+  setPoolPanelValuesByFactor(factor: number, opts: Parameters<TradingEngine['setPoolPanelValues']>[0]): void {
+    if (factor === 0) return;
+    const s = { ...opts };
+    if (s.sl != null)            s.sl            *= factor;
+    if (s.tp != null)            s.tp            *= factor;
+    if (s.trailBegin != null)    s.trailBegin    *= factor;
+    if (s.trailDistance != null) s.trailDistance *= factor;
+    this.setPoolPanelValues(s);
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // Counters / getters
+  // ──────────────────────────────────────────────────────────
+
+  getCntPosBuy():     number  { return this.longPos.size  > 0 ? 1 : 0; }
+  getCntPosSell():    number  { return this.shortPos.size > 0 ? 1 : 0; }
+  getCntPos():        number  { return this.getCntPosBuy() + this.getCntPosSell(); }
+  getCntOrdersBuy():  number  { return this.orders.filter(o => o.side === Side.Long).length;  }
+  getCntOrdersSell(): number  { return this.orders.filter(o => o.side === Side.Short).length; }
+  getCntOrders():     number  { return this.orders.length; }
+  isLong():           boolean { return this.longPos.size  > 0; }
+  isShort():          boolean { return this.shortPos.size > 0; }
+  isFlat(inclOrders = false): boolean {
+    return inclOrders
+      ? this.getCntPos() === 0 && this.getCntOrders() === 0
+      : this.getCntPos() === 0;
+  }
+
+  getSLBuy():  number { return this.longPos.sl;  }
+  getSLSell(): number { return this.shortPos.sl; }
+  getTPBuy():  number { return this.longPos.tp;  }
+  getTPSell(): number { return this.shortPos.tp; }
+
+  getBEBuy():  number { return this.longPos.openPrice;  }
+  getBESell(): number { return this.shortPos.openPrice; }
+
+  getSizeBuy():  number { return this.longPos.size;  }
+  getSizeSell(): number { return this.shortPos.size; }
+  getSize():     number { return this.longPos.size + this.shortPos.size; }
+
+  getPLBuy(price: number):  number { return this._slotPL(this.longPos,  price); }
+  getPLSell(price: number): number { return this._slotPL(this.shortPos, price); }
+  getPL(price: number):     number { return this.getPLBuy(price) + this.getPLSell(price); }
+
+  // ──────────────────────────────────────────────────────────
+  // Private — order book processing
+  // ──────────────────────────────────────────────────────────
+
+  private _addOrder(
+    type:  OrderEntryType,
+    side:  Side,
+    price: number,
+    size?: number,
+  ): string {
+    const id = `ord_${++this._orderSeq}`;
+    this.orders.push({
+      id,
+      type,
+      side,
+      price,
+      size: size ?? this._nextOrderSize,
+      time: new Date(),
+      attributes: {
+        ...(this._nextOCO  && { oco:  true as const }),
+        ...(this._nextCO   && { co:   true as const }),
+        ...(this._nextCS   && { cs:   true as const }),
+        ...(this._nextREV  && { rev:  true as const }),
+        ...(this._nextBracketSL != null && { bracketSL: this._nextBracketSL }),
+        ...(this._nextBracketTP != null && { bracketTP: this._nextBracketTP }),
+        ...(this._nextPullback  != null && { pullbackPts: this._nextPullback }),
+        ...(this._nextLimitConfirm !== LimitConfirm.None && { limitConfirm: this._nextLimitConfirm }),
+      },
+    });
+    // Reset one-shot attributes
+    this._nextOCO = false; this._nextCO = false; this._nextCS = false;
+    this._nextREV = false; this._nextMIT = false;
+    this._nextBracketSL = undefined; this._nextBracketTP = undefined;
+    this._nextPullback  = undefined;
+    this._nextLimitConfirm = LimitConfirm.None;
+    return id;
+  }
+
+  private _findOrder(id: string): PendingOrder | undefined {
+    return this.orders.find(o => o.id === id);
+  }
+
+  /** Per-bar: update trailing-entry order prices */
+  private async _updateTrailingEntryOrders(bar: Candle, bars: Bars): Promise<void> {
+    for (const o of this.orders) {
+      // Limit-pullback: trailing pending limit that follows the market
+      if (o.attributes.pullbackPts != null) {
+        const pullDist = this.symbol.pointsToPrice(o.attributes.pullbackPts);
+        if (o.side === Side.Long) {
+          // Buy-limit follows price down: anchor = highest high, limit = anchor - pullback
+          if (bar.high > (o._trailRef ?? -Infinity)) {
+            o._trailRef = bar.high;
+            o.price = bar.high - pullDist;
+          }
+        } else {
+          // Sell-limit follows price up: anchor = lowest low, limit = anchor + pullback
+          if (bar.low < (o._trailRef ?? Infinity)) {
+            o._trailRef = bar.low;
+            o.price = bar.low + pullDist;
+          }
+        }
+      }
+
+      // Trailing entry (stop/limit that follows the market)
+      if (o.attributes.trailEntry) {
+        const te = o.attributes.trailEntry;
+        const dist = this.symbol.pointsToPrice(te.distPts);
+        if (o.type === 'BUY_LIMIT') {
+          // Anchor rises with the market; limit = anchor - dist
+          if (bar.high > (o._trailRef ?? -Infinity)) {
+            o._trailRef = bar.high;
+            o.price = bar.high - dist;
+          }
+        } else if (o.type === 'SELL_LIMIT') {
+          // Anchor falls with the market; limit = anchor + dist
+          if (bar.low < (o._trailRef ?? Infinity)) {
+            o._trailRef = bar.low;
+            o.price = bar.low + dist;
+          }
+        } else if (o.type === 'BUY_STOP') {
+          // Stop trails below, anchors down
+          if (bar.low < (o._trailRef ?? Infinity)) {
+            o._trailRef = bar.low;
+            o.price = bar.low + dist;
+          }
+        } else if (o.type === 'SELL_STOP') {
+          // Stop trails above, anchors up
+          if (bar.high > (o._trailRef ?? -Infinity)) {
+            o._trailRef = bar.high;
+            o.price = bar.high - dist;
+          }
+        }
+      }
+    }
+  }
+
+  /** Per-bar: check which pending orders were triggered */
+  private async _checkOrderFills(bar: Candle, bars: Bars): Promise<void> {
+    const toFill: PendingOrder[] = [];
+
+    for (const o of this.orders) {
+      let triggered = false;
+      switch (o.type) {
+        case 'BUY_LIMIT':  triggered = bar.low  <= o.price; break;
+        case 'BUY_STOP':   triggered = bar.high >= o.price; break;
+        case 'SELL_LIMIT': triggered = bar.high >= o.price; break;
+        case 'SELL_STOP':  triggered = bar.low  <= o.price; break;
+        case 'BUY_MIT':    triggered = bar.low  <= o.price; break;
+        case 'SELL_MIT':   triggered = bar.high >= o.price; break;
+      }
+      if (triggered) toFill.push(o);
+    }
+
+    for (const o of toFill) {
+      await this._fillOrder(o, bar, bars);
+    }
+  }
+
+  private async _fillOrder(o: PendingOrder, bar: Candle, bars: Bars): Promise<void> {
+    const attrs = o.attributes;
+
+    // Limit-confirm check (require wick / color confirmation)
+    if (attrs.limitConfirm != null) {
+      if (!this._checkLimitConfirm(o, bar, attrs.limitConfirm)) return;
+    }
+
+    // Remove this order from the book
+    this.orders = this.orders.filter(x => x.id !== o.id);
+
+    const fillPrice = o.price; // simplified — market fill at trigger price
+
+    // Apply order attributes before executing
+    if (attrs.oco) {
+      // Cancel all other pending orders
+      this.orders = [];
+    }
+    if (attrs.cs) {
+      // Cancel same-direction pending orders
+      this.orders = this.orders.filter(x => x.side !== o.side);
+    }
+    if (attrs.co) {
+      // Close opposite position
+      if (o.side === Side.Long  && this.shortPos.size > 0) await this._closeSlot(this.shortPos, 'CO');
+      if (o.side === Side.Short && this.longPos.size  > 0) await this._closeSlot(this.longPos,  'CO');
+    }
+
+    // Execute the fill
+    const slot = o.side === Side.Long ? this.longPos : this.shortPos;
+
+    if (attrs.rev) {
+      // Reverse: close current + open opposite of same size
+      const curSize = slot.size;
+      if (curSize > 0) await this._closeSlot(slot, 'REV');
+      if (o.side === Side.Long) {
+        await this.broker.marketOrder(Side.Long, o.size + curSize);
+        this._applyFill(this.longPos, fillPrice, o.size + curSize, bar.time);
+      } else {
+        await this.broker.marketOrder(Side.Short, o.size + curSize);
+        this._applyFill(this.shortPos, fillPrice, o.size + curSize, bar.time);
+      }
+    } else {
+      if (o.type === 'BUY_MIT' || o.type === 'SELL_MIT') {
+        // MIT: execute as market order
+        const r = await this.broker.marketOrder(o.side, o.size);
+        this._applyFill(slot, r.price, o.size, r.time);
+      } else {
+        // Limit / stop fill
+        this._applyFill(slot, fillPrice, o.size, bar.time);
+      }
+    }
+
+    // Apply bracket SL/TP
+    if (attrs.bracketSL != null) {
+      slot.sl = slot.side === Side.Long
+        ? slot.openPrice - this.symbol.pointsToPrice(attrs.bracketSL)
+        : slot.openPrice + this.symbol.pointsToPrice(attrs.bracketSL);
+      slot.slActive = true;
+    }
+    if (attrs.bracketTP != null) {
+      slot.tp = slot.side === Side.Long
+        ? slot.openPrice + this.symbol.pointsToPrice(attrs.bracketTP)
+        : slot.openPrice - this.symbol.pointsToPrice(attrs.bracketTP);
+      slot.tpActive = true;
+    }
+
+    await this._pushSLTP(slot);
+  }
+
+  /** Check limit-confirmation candle logic */
+  private _checkLimitConfirm(o: PendingOrder, bar: Candle, confirm: LimitConfirm): boolean {
+    switch (confirm) {
+      case LimitConfirm.Wick:
+        // Price must have wicked through the limit but closed on the other side
+        return o.side === Side.Long
+          ? bar.low <= o.price && bar.close > o.price
+          : bar.high >= o.price && bar.close < o.price;
+      case LimitConfirm.WickBreak:
+        // Wick + body must have crossed
+        return o.side === Side.Long
+          ? bar.low <= o.price && Math.min(bar.open, bar.close) > o.price
+          : bar.high >= o.price && Math.max(bar.open, bar.close) < o.price;
+      case LimitConfirm.WickColor:
+        return o.side === Side.Long
+          ? bar.low <= o.price && bar.close > o.price && bar.isBullish()
+          : bar.high >= o.price && bar.close < o.price && bar.isBearish();
+      default:
+        return true;
+    }
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // Private — per-slot updates
+  // ──────────────────────────────────────────────────────────
+
+  private async _updateTrailingSL(slot: PositionSlot, bar: Candle, bars: Bars): Promise<void> {
+    if (slot.trailCfg.mode === TrailMode.None) return;
+    const newSL = calcTrailingSL({
+      side:          slot.side,
+      bar, bars,
+      posPrice:      slot.openPrice,
+      currentSL:     slot.sl,
+      spreadAbs:     this._spreadAbs,
+      trailBeginPts: slot.trailBeginPts,
+      trail:         slot.trailCfg,
+      state:         slot.trailState,
+      symbol:        this.symbol,
+    });
+    if (newSL !== slot.sl) {
+      slot.sl          = newSL;
+      slot.trailActive = slot.trailState.active;
+      await this._pushSLTP(slot);
+    }
+  }
+
+  private async _updateBreakEven(slot: PositionSlot, bar: Candle): Promise<void> {
+    if (!slot.beActive || slot.openPrice < 0) return;
+    const triggerDist = this.symbol.pointsToPrice(slot.trailBeginPts);
+    const beDist      = this.symbol.pointsToPrice(slot.beAddPts);
+    let newSL         = slot.sl;
+    if (slot.side === Side.Long && bar.high >= slot.openPrice + triggerDist) {
+      newSL = Math.max(newSL === -1 ? -Infinity : newSL, slot.openPrice + beDist);
+    } else if (slot.side === Side.Short && bar.low + this._spreadAbs <= slot.openPrice - triggerDist) {
+      newSL = newSL === -1 ? slot.openPrice - beDist : Math.min(newSL, slot.openPrice - beDist);
+    }
+    if (newSL !== slot.sl) {
+      slot.sl = newSL;
+      await this._pushSLTP(slot);
+    }
+  }
+
+  private async _checkExits(slot: PositionSlot, bar: Candle): Promise<void> {
+    const hit = checkSLTP({
+      side:        slot.side,
+      bar,
+      sl:          slot.sl,
+      tp:          slot.tp,
+      slActive:    slot.slActive,
+      tpActive:    slot.tpActive,
+      trailActive: slot.trailActive,
+      spreadAbs:   this._spreadAbs,
+    });
+    if (!hit) return;
+    await this.broker.closePosition(slot.side, slot.size, hit.reason);
+    this._resetSlot(slot);
+    if (this._removeOrdersOnFlat && this.getCntPos() === 0) this.orders = [];
+  }
+
+  private async _closeSlot(slot: PositionSlot, info?: string): Promise<boolean> {
+    if (slot.size === 0) return false;
+    await this.broker.closePosition(slot.side, slot.size, info);
+    this._resetSlot(slot);
+    return true;
+  }
+
+  private _applyFill(slot: PositionSlot, price: number, size: number, time: Date): void {
+    if (slot.size === 0) {
+      slot.openPrice = price;
+      slot.openTime  = time;
+      slot.trailState = { active: false, plhRef: slot.side === Side.Long ? 0 : 999_999_999 };
+    } else {
+      // Average into existing position
+      slot.openPrice = (slot.openPrice * slot.size + price * size) / (slot.size + size);
+    }
+    slot.size += size;
+  }
+
+  private async _applyBracket(slot: PositionSlot): Promise<void> {
+    if (this._nextBracketSL != null) {
+      slot.sl = slot.side === Side.Long
+        ? slot.openPrice - this.symbol.pointsToPrice(this._nextBracketSL)
+        : slot.openPrice + this.symbol.pointsToPrice(this._nextBracketSL);
+      slot.slActive = true;
+    }
+    if (this._nextBracketTP != null) {
+      slot.tp = slot.side === Side.Long
+        ? slot.openPrice + this.symbol.pointsToPrice(this._nextBracketTP)
+        : slot.openPrice - this.symbol.pointsToPrice(this._nextBracketTP);
+      slot.tpActive = true;
+    }
+  }
+
+  private _resetSlot(slot: PositionSlot): void {
+    const side = slot.side;
+    Object.assign(slot, emptySlot(side));
+  }
+
+  private async _pushSLTP(slot: PositionSlot): Promise<void> {
+    await this.broker.updateSLTP(
+      slot.side,
+      slot.sl > 0 && (slot.slActive || slot.trailActive) ? slot.sl : null,
+      slot.tp > 0 && slot.tpActive ? slot.tp : null,
+    );
+  }
+
+  private _slotPL(slot: PositionSlot, currentPrice: number): number {
+    if (slot.size === 0 || currentPrice < 0) return 0;
+    const diff = slot.side === Side.Long
+      ? currentPrice - slot.openPrice
+      : slot.openPrice - currentPrice;
+    return diff * slot.size;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Strategy: CandleATR_03  (port of CandleATR_03.mq5)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Evaluates one bar.  Call this inside your data-feed's onBar handler.
+ *
+ * Logic:
+ *  - Prev bar range > 2× ATR(14)
+ *  - Bearish bar, tail < 50%, is local low of last 5 bars → Sell
+ *  - Bullish bar, wick < 50%, is local high of last 5 bars → Buy
+ *  - Trail: PlhPeak mode, begin at half bar range, 2-point distance
+ */
+export async function evaluateCandleATR03(
+  bars:   Bars,
+  engine: TradingEngine,
+  symbol: SymbolInfo,
+): Promise<void> {
+  const prev  = bars.candle(1);
+  const atr14 = bars.atr(14, 1);
+
+  if (prev.range() < atr14 * 2.0) return;
+
+  if (prev.isBearish() && engine.getCntPosSell() === 0) {
+    if (prev.tailPart() < 0.5 && bars.isLocalLow(5, 1)) {
+      await engine.closeBuy();
+      engine.slSellAbsolute(prev.high + symbol.pointsToPrice(5));
+      engine.slActivateSell(true);
+      engine.trailBeginSell(symbol.priceToPoints(prev.range() / 2));
+      engine.trailModeSell(TrailMode.PlhPeak, 2);
+      engine.trailActivateSell(true);
+      await engine.sell();
+    }
+  } else if (prev.isBullish() && engine.getCntPosBuy() === 0) {
+    if (prev.wickPart() < 0.5 && bars.isLocalHigh(5, 1)) {
+      await engine.closeSell();
+      engine.slBuyAbsolute(prev.low - symbol.pointsToPrice(5));
+      engine.slActivateBuy(true);
+      engine.trailBeginBuy(symbol.priceToPoints(prev.range() / 2));
+      engine.trailModeBuy(TrailMode.PlhPeak, 2);
+      engine.trailActivateBuy(true);
+      await engine.buy();
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// ATR Module  (port of ATR-Base.mq5 + the ATR panel logic)
+//
+// On each new bar, reads ATR and pushes SL/TP/trail values
+// to the engine scaled by the configured ATR multipliers.
+// ─────────────────────────────────────────────────────────────
+
+export interface AtrModuleConfig {
+  /** ATR lookback period */
+  period:       number;
+  /** ATR smoothing method */
+  method:       AtrMethod;
+  /** ATR shift (1 = use last fully-closed bar) */
+  shift:        number;
+  /** SL = slMultiplier × ATR  (0 = disabled) */
+  slMultiplier:  number;
+  /** TP = tpMultiplier × ATR  (0 = disabled) */
+  tpMultiplier:  number;
+  /** Trail-begin = trailBeginMultiplier × ATR  (0 = disabled) */
+  trailBeginMultiplier: number;
+  /** Trail-distance = trailDistMultiplier × ATR  (0 = disabled) */
+  trailDistMultiplier:  number;
+  /**
+   * When true: only update SL/TP when there is no open position.
+   * When false: update every bar regardless.
+   */
+  onlyWhenFlat: boolean;
+}
+
+/**
+ * ATR Module — updates pool-panel SL / TP / trail values on each bar
+ * using a multiple of the current ATR reading.
+ *
+ * Call `onBar()` inside your bar-handler before the strategy runs.
+ */
+export class AtrModule {
+  constructor(
+    private readonly cfg:    AtrModuleConfig,
+    private readonly engine: TradingEngine,
+    private readonly symbol: SymbolInfo,
+  ) {}
+
+  onBar(bars: Bars): void {
+    const atrPrice = bars.atr(this.cfg.period, this.cfg.shift, this.cfg.method);
+    if (atrPrice === 0) return;
+    const atrPts = this.symbol.priceToPoints(atrPrice);
+
+    const isFlat = this.engine.isFlat();
+    const update = !this.cfg.onlyWhenFlat || isFlat;
+
+    if (update) {
+      if (this.cfg.slMultiplier   > 0) this.engine.sl(atrPts * this.cfg.slMultiplier);
+      if (this.cfg.tpMultiplier   > 0) this.engine.tp(atrPts * this.cfg.tpMultiplier);
+      if (this.cfg.trailBeginMultiplier > 0)
+        this.engine.trailBegin(atrPts * this.cfg.trailBeginMultiplier);
+    }
+    // Trail distance updated unconditionally (matches MQL logic)
+    if (this.cfg.trailDistMultiplier > 0)
+      this.engine.trailDistance(atrPts * this.cfg.trailDistMultiplier);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Scaled Order Engine  (SOrder — port of StrategicOrders.xml logic)
+//
+// Places a grid of limit / stop orders at progressive ATR-based
+// distances, matching all presets in StrategicOrders.xml.
+// ─────────────────────────────────────────────────────────────
+
+export type AtrModeString =
+  | 'None'
+  | `ATR ${number}`      // current-timeframe ATR, e.g. "ATR 14"
+  | `ATR ${number}d`;    // daily-timeframe ATR, e.g. "ATR 14d"
+
+export interface ScaledOrderPreset {
+  /** Human-readable name */
+  name:                 string;
+  /** ATR source (current timeframe or daily) */
+  atrMode:              AtrModeString;
+  /** Base distance as ATR multiplier (or raw points when atrMode="None") */
+  distance:             number;
+  /** Spacing multiplier between consecutive limit orders */
+  progressLimits:       number;
+  /** Spacing multiplier between consecutive stop orders */
+  progressStops:        number;
+  /** Number of limit orders to place */
+  countLimits:          number;
+  /** Number of stop orders to place */
+  countStops:           number;
+  /** SL = slRel × base distance */
+  slRel:                number;
+  /** Trail trigger = trailBegin × base distance */
+  trailBegin:           number;
+  /** Trail distance = trailDistance × base distance */
+  trailDistance:        number;
+  /** Size multiplier for long side */
+  factorLong:           number;
+  /** Size multiplier for short side */
+  factorShort:          number;
+  /** OCO attribute on all orders */
+  attrOCO:              boolean;
+  /** CO (close opposite) attribute */
+  attrCO:               boolean;
+  /** REV (reverse) attribute */
+  attrREV:              boolean;
+  /** NET mode (reduce position, don't add) */
+  attrNET:              boolean;
+  /** How the first (instant) order executes: 'MTO' | 'Market' */
+  instantOrderType:     'MTO' | 'Market';
+  /** Instant order distance as ATR multiplier */
+  instantOrderDistance: number;
+  /** Chain limit orders: each fill of a closer limit cancels the more distant ones */
+  chainLimits:          boolean;
+  /** Evaluate on every tick vs. every bar */
+  eachTick:             boolean;
+}
+
+/** Parse ATR mode string into period + daily flag */
+function parseAtrMode(mode: AtrModeString): { period: number; daily: boolean } | null {
+  if (mode === 'None') return null;
+  const m = mode.match(/^ATR\s+(\d+)(d?)$/);
+  if (!m) return null;
+  return { period: parseInt(m[1]), daily: m[2] === 'd' };
+}
+
+/**
+ * All built-in presets from StrategicOrders.xml
+ */
+export const SCALED_ORDER_PRESETS: Record<string, ScaledOrderPreset> = {
+  '5xATR':          { name: '5x ATR',         atrMode: 'ATR 14',   distance: 1,    progressLimits: 1,    progressStops: 1,   countLimits: 5,  countStops: 1, slRel: 2.0, trailBegin: 0.8, trailDistance: 0.2, factorLong: 1, factorShort: 1, attrOCO: false, attrCO: false, attrREV: false, attrNET: false, instantOrderType: 'MTO', instantOrderDistance: 0.2, chainLimits: true,  eachTick: false },
+  '5xATR_2':        { name: '5x ATR/2',        atrMode: 'ATR 14d',  distance: 0.5,  progressLimits: 1,    progressStops: 1,   countLimits: 5,  countStops: 1, slRel: 2.0, trailBegin: 0.8, trailDistance: 0.2, factorLong: 1, factorShort: 1, attrOCO: false, attrCO: false, attrREV: false, attrNET: false, instantOrderType: 'MTO', instantOrderDistance: 0.2, chainLimits: true,  eachTick: false },
+  '5xATR_3':        { name: '5x ATR/3',        atrMode: 'ATR 14d',  distance: 0.33, progressLimits: 1,    progressStops: 1,   countLimits: 5,  countStops: 1, slRel: 2.0, trailBegin: 0.8, trailDistance: 0.2, factorLong: 1, factorShort: 1, attrOCO: false, attrCO: false, attrREV: false, attrNET: false, instantOrderType: 'MTO', instantOrderDistance: 0.2, chainLimits: true,  eachTick: false },
+  '5xATR_4':        { name: '5x ATR/4',        atrMode: 'ATR 14d',  distance: 0.25, progressLimits: 1,    progressStops: 1,   countLimits: 5,  countStops: 1, slRel: 2.0, trailBegin: 0.8, trailDistance: 0.2, factorLong: 1, factorShort: 1, attrOCO: false, attrCO: false, attrREV: false, attrNET: false, instantOrderType: 'MTO', instantOrderDistance: 0.2, chainLimits: true,  eachTick: false },
+  '10xATR':         { name: '10x ATR',         atrMode: 'ATR 20d',  distance: 1,    progressLimits: 1,    progressStops: 1,   countLimits: 10, countStops: 1, slRel: 4.0, trailBegin: 1.0, trailDistance: 0.2, factorLong: 1, factorShort: 1, attrOCO: false, attrCO: false, attrREV: false, attrNET: false, instantOrderType: 'MTO', instantOrderDistance: 0.2, chainLimits: true,  eachTick: false },
+  '10xATR_2':       { name: '10x ATR / 2',     atrMode: 'ATR 20d',  distance: 0.5,  progressLimits: 1,    progressStops: 1,   countLimits: 10, countStops: 1, slRel: 4.0, trailBegin: 1.0, trailDistance: 0.2, factorLong: 1, factorShort: 1, attrOCO: false, attrCO: false, attrREV: false, attrNET: false, instantOrderType: 'MTO', instantOrderDistance: 0.2, chainLimits: true,  eachTick: false },
+  '10xATR_3':       { name: '10x ATR / 3',     atrMode: 'ATR 20d',  distance: 0.5,  progressLimits: 1,    progressStops: 1,   countLimits: 10, countStops: 1, slRel: 4.0, trailBegin: 1.0, trailDistance: 0.2, factorLong: 1, factorShort: 1, attrOCO: false, attrCO: false, attrREV: false, attrNET: false, instantOrderType: 'MTO', instantOrderDistance: 0.2, chainLimits: true,  eachTick: false },
+  'Swing_I':        { name: 'Swing I',         atrMode: 'ATR 14d',  distance: 2,    progressLimits: 1.2,  progressStops: 0.8, countLimits: 8,  countStops: 4, slRel: 3.0, trailBegin: 2.0, trailDistance: 0.5, factorLong: 1, factorShort: 1, attrOCO: false, attrCO: false, attrREV: false, attrNET: false, instantOrderType: 'MTO', instantOrderDistance: 0.5, chainLimits: true,  eachTick: false },
+  'Swing_II':       { name: 'Swing II',        atrMode: 'ATR 14d',  distance: 2,    progressLimits: 1.33, progressStops: 0.8, countLimits: 10, countStops: 5, slRel: 3.0, trailBegin: 2.0, trailDistance: 0.5, factorLong: 1, factorShort: 1, attrOCO: false, attrCO: false, attrREV: false, attrNET: false, instantOrderType: 'MTO', instantOrderDistance: 0.5, chainLimits: true,  eachTick: false },
+  'Swing_III':      { name: 'Swing III',       atrMode: 'ATR 14d',  distance: 2,    progressLimits: 1.33, progressStops: 0.8, countLimits: 12, countStops: 6, slRel: 3.0, trailBegin: 2.0, trailDistance: 0.5, factorLong: 1, factorShort: 1, attrOCO: false, attrCO: false, attrREV: false, attrNET: false, instantOrderType: 'MTO', instantOrderDistance: 0.5, chainLimits: true,  eachTick: false },
+  'Scalper_I':      { name: 'Scalper I',       atrMode: 'None',     distance: 2,    progressLimits: 1.1,  progressStops: 1,   countLimits: 4,  countStops: 1, slRel: 3.0, trailBegin: 2.0, trailDistance: 0.5, factorLong: 1, factorShort: 1, attrOCO: false, attrCO: false, attrREV: false, attrNET: false, instantOrderType: 'MTO', instantOrderDistance: 0.2, chainLimits: true,  eachTick: false },
+  'Scalper_II':     { name: 'Scalper II',      atrMode: 'None',     distance: 0.25, progressLimits: 1.33, progressStops: 1,   countLimits: 4,  countStops: 1, slRel: 3.0, trailBegin: 0.5, trailDistance: 0.15,factorLong: 1, factorShort: 1, attrOCO: false, attrCO: false, attrREV: false, attrNET: false, instantOrderType: 'MTO', instantOrderDistance: 0.2, chainLimits: true,  eachTick: false },
+  'Scalper_III':    { name: 'Scalper III',     atrMode: 'ATR 14d',  distance: 0.25, progressLimits: 2,    progressStops: 1,   countLimits: 4,  countStops: 1, slRel: 3.0, trailBegin: 0.25,trailDistance: 0.1, factorLong: 1, factorShort: 1, attrOCO: false, attrCO: false, attrREV: false, attrNET: false, instantOrderType: 'MTO', instantOrderDistance: 0.2, chainLimits: true,  eachTick: false },
+  'Scalper_IV':     { name: 'Scalper IV',      atrMode: 'ATR 14d',  distance: 0.33, progressLimits: 2,    progressStops: 1,   countLimits: 4,  countStops: 1, slRel: 3.0, trailBegin: 0.5, trailDistance: 0.15,factorLong: 1, factorShort: 1, attrOCO: false, attrCO: false, attrREV: false, attrNET: false, instantOrderType: 'MTO', instantOrderDistance: 0.2, chainLimits: true,  eachTick: false },
+  'Market_Trail':   { name: 'Market Trail',    atrMode: 'None',     distance: 1,    progressLimits: 0,    progressStops: 0,   countLimits: 0,  countStops: 0, slRel: 0,   trailBegin: 0,   trailDistance: 0,   factorLong: 1, factorShort: 1, attrOCO: false, attrCO: false, attrREV: false, attrNET: false, instantOrderType: 'MTO', instantOrderDistance: 1,   chainLimits: false, eachTick: false },
+  'Market_Trail_ATR':{ name: 'Market Trail ATR',atrMode: 'ATR 14',  distance: 1,    progressLimits: 0,    progressStops: 0,   countLimits: 0,  countStops: 0, slRel: 0,   trailBegin: 0,   trailDistance: 0,   factorLong: 1, factorShort: 1, attrOCO: false, attrCO: false, attrREV: false, attrNET: false, instantOrderType: 'MTO', instantOrderDistance: 1,   chainLimits: false, eachTick: false },
+  'Martingale_Swing':{ name: 'Martingale Swing',atrMode: 'None',    distance: 20,   progressLimits: 1.33, progressStops: 0.8, countLimits: 10, countStops: 0, slRel: 3.0, trailBegin: 20,  trailDistance: 2,   factorLong: 1, factorShort: 1, attrOCO: false, attrCO: false, attrREV: false, attrNET: false, instantOrderType: 'Market',instantOrderDistance: 1,  chainLimits: false, eachTick: false },
+  'Progress_4_2':   { name: 'Progress 4/2',    atrMode: 'ATR 14d',  distance: 4,    progressLimits: 1.33, progressStops: 0.8, countLimits: 2,  countStops: 0, slRel: 3.0, trailBegin: 2.0, trailDistance: 0.5, factorLong: 1, factorShort: 1, attrOCO: false, attrCO: false, attrREV: false, attrNET: false, instantOrderType: 'MTO', instantOrderDistance: 0.5, chainLimits: true,  eachTick: false },
+  'Progress_4_4':   { name: 'Progress 4/4',    atrMode: 'ATR 14d',  distance: 4,    progressLimits: 1.33, progressStops: 0.8, countLimits: 4,  countStops: 0, slRel: 3.0, trailBegin: 2.0, trailDistance: 0.5, factorLong: 1, factorShort: 1, attrOCO: false, attrCO: false, attrREV: false, attrNET: false, instantOrderType: 'MTO', instantOrderDistance: 0.5, chainLimits: true,  eachTick: false },
+  'Progress_8_4':   { name: 'Progress 8/4',    atrMode: 'ATR 14d',  distance: 8,    progressLimits: 1.33, progressStops: 0.8, countLimits: 4,  countStops: 0, slRel: 3.0, trailBegin: 2.0, trailDistance: 0.5, factorLong: 1, factorShort: 1, attrOCO: false, attrCO: false, attrREV: false, attrNET: false, instantOrderType: 'MTO', instantOrderDistance: 0.5, chainLimits: true,  eachTick: false },
+  'Progress_8_8':   { name: 'Progress 8/8',    atrMode: 'ATR 14d',  distance: 8,    progressLimits: 1.33, progressStops: 0.8, countLimits: 8,  countStops: 0, slRel: 3.0, trailBegin: 2.0, trailDistance: 0.5, factorLong: 1, factorShort: 1, attrOCO: false, attrCO: false, attrREV: false, attrNET: false, instantOrderType: 'MTO', instantOrderDistance: 0.5, chainLimits: true,  eachTick: false },
+};
+
+/** Placement result of a single scaled-order run */
+export interface ScaledOrderResult {
+  /** IDs of all placed orders (instant + limits + stops) */
+  orderIds:    string[];
+  /** Effective base distance in price units */
+  baseDist:    number;
+  /** Computed SL in price units from the entry level */
+  slDist:      number;
+  /** Trail-begin in price units */
+  trailBeginDist: number;
+  /** Trail distance in price units */
+  trailDistDist:  number;
+}
+
+/**
+ * ScaledOrderEngine — places a full grid of orders from one preset.
+ *
+ * For each direction (Long / Short / Both):
+ *  1. Calculate ATR-based base distance
+ *  2. Place an instant (MIT or market) entry at `instantOrderDistance` from current price
+ *  3. Place `countLimits` additional buy/sell limits at progressive distances below/above
+ *  4. Place `countStops` stop orders on the same side (for pyramiding in momentum)
+ *  5. Apply SL, trail-begin, trail-distance via the engine setters
+ *
+ * "Chain limits" means each limit order carries the OCO attribute so that when
+ * the nearest one fills, all more-distant ones are cancelled.
+ */
+export class ScaledOrderEngine {
+  private _preset: ScaledOrderPreset;
+  private _dailyBars: Bars | null = null;
+
+  constructor(
+    private readonly engine:  TradingEngine,
+    private readonly symbol:  SymbolInfo,
+    preset: ScaledOrderPreset | string,
+  ) {
+    this._preset = typeof preset === 'string'
+      ? SCALED_ORDER_PRESETS[preset] ?? (() => { throw new Error(`Unknown preset: ${preset}`); })()
+      : preset;
+  }
+
+  /** Provide daily bars for "ATR Nd" mode (optional, falls back to current bars) */
+  setDailyBars(bars: Bars): void { this._dailyBars = bars; }
+
+  // ──────────────────────────────────────────────────────────
+  // Entry points
+  // ──────────────────────────────────────────────────────────
+
+  /** Place the full grid for a long (buy) position */
+  async placeLong(currentBars: Bars, currentPrice: number): Promise<ScaledOrderResult> {
+    return this._place(Side.Long, currentBars, currentPrice);
+  }
+
+  /** Place the full grid for a short (sell) position */
+  async placeShort(currentBars: Bars, currentPrice: number): Promise<ScaledOrderResult> {
+    return this._place(Side.Short, currentBars, currentPrice);
+  }
+
+  /** Place grids for both long and short simultaneously */
+  async placeBoth(currentBars: Bars, currentPrice: number): Promise<{ long: ScaledOrderResult; short: ScaledOrderResult }> {
+    const [long, short] = await Promise.all([
+      this._place(Side.Long,  currentBars, currentPrice),
+      this._place(Side.Short, currentBars, currentPrice),
+    ]);
+    return { long, short };
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // Core placement logic
+  // ──────────────────────────────────────────────────────────
+
+  private async _place(side: Side, bars: Bars, currentPrice: number): Promise<ScaledOrderResult> {
+    const p     = this._preset;
+    const sym   = this.symbol;
+    const isLong = side === Side.Long;
+
+    // 1. Compute base distance in price units
+    const baseDist = this._calcBaseDist(p, bars);
+
+    // 2. Derived distances
+    const instantDist  = baseDist * p.instantOrderDistance;
+    const slDist       = baseDist * p.slRel;
+    const trailBegDist = baseDist * p.trailBegin;
+    const trailDstDist = baseDist * p.trailDistance;
+
+    const orderIds: string[] = [];
+    const sizeFactor = isLong ? p.factorLong : p.factorShort;
+
+    // 3. Configure SL / trail on the engine
+    if (slDist > 0) {
+      isLong ? this.engine.slBuy(sym.priceToPoints(slDist))
+             : this.engine.slSell(sym.priceToPoints(slDist));
+      isLong ? this.engine.slActivateBuy(true) : this.engine.slActivateSell(true);
+    }
+    if (trailBegDist > 0) {
+      isLong ? this.engine.trailBeginBuy(sym.priceToPoints(trailBegDist))
+             : this.engine.trailBeginSell(sym.priceToPoints(trailBegDist));
+    }
+    if (trailDstDist > 0) {
+      isLong ? this.engine.trailDistanceBuy(sym.priceToPoints(trailDstDist))
+             : this.engine.trailDistanceSell(sym.priceToPoints(trailDstDist));
+    }
+
+    // 4. Set order attributes
+    if (p.attrOCO) this.engine.orderAttrOCO(true);
+    if (p.attrCO)  this.engine.orderAttrCO(true);
+    if (p.attrREV) this.engine.orderAttrREV(true);
+    this.engine.orderSize(sizeFactor);
+
+    // 5. Instant (first) order
+    const instantPrice = isLong
+      ? currentPrice - instantDist   // buy below current price (MTO)
+      : currentPrice + instantDist;  // sell above current price (MTO)
+
+    let instantId: string;
+    if (p.instantOrderType === 'Market') {
+      // Market order — execute immediately
+      if (isLong) await this.engine.buy(sizeFactor);
+      else        await this.engine.sell(sizeFactor);
+      instantId = 'market';
+    } else {
+      // MIT — place limit and let it fill when price touches
+      instantId = isLong
+        ? this.engine.addBuyMIT(instantPrice, sizeFactor)
+        : this.engine.addSellMIT(instantPrice, sizeFactor);
+    }
+    orderIds.push(instantId);
+
+    // 6. Scale-in limit orders (below instant for longs, above for shorts)
+    let cumulativeDist = instantDist;
+    let stepDist       = baseDist;
+
+    for (let i = 0; i < p.countLimits; i++) {
+      cumulativeDist += stepDist;
+      const limitPrice = isLong
+        ? currentPrice - cumulativeDist
+        : currentPrice + cumulativeDist;
+
+      // Chain mode: each limit has OCO so nearest fill cancels the rest
+      if (p.chainLimits) this.engine.orderAttrOCO(true);
+      this.engine.orderSize(sizeFactor);
+
+      const id = isLong
+        ? this.engine.addBuyLimit(limitPrice, sizeFactor)
+        : this.engine.addSellLimit(limitPrice, sizeFactor);
+      orderIds.push(id);
+
+      stepDist *= p.progressLimits > 0 ? p.progressLimits : 1;
+    }
+
+    // 7. Stop orders (momentum continuation, same direction)
+    stepDist = baseDist;
+    let stopCumulDist = instantDist;
+    for (let i = 0; i < p.countStops; i++) {
+      stopCumulDist += stepDist;
+      // Stop orders go in the direction of momentum (above current for buy-stops)
+      const stopPrice = isLong
+        ? currentPrice + stopCumulDist
+        : currentPrice - stopCumulDist;
+
+      this.engine.orderSize(sizeFactor);
+      const id = isLong
+        ? this.engine.addBuyStop(stopPrice, sizeFactor)
+        : this.engine.addSellStop(stopPrice, sizeFactor);
+      orderIds.push(id);
+
+      stepDist *= p.progressStops > 0 ? p.progressStops : 1;
+    }
+
+    return { orderIds, baseDist, slDist, trailBeginDist: trailBegDist, trailDistDist: trailDstDist };
+  }
+
+  private _calcBaseDist(p: ScaledOrderPreset, bars: Bars): number {
+    const atrInfo = parseAtrMode(p.atrMode);
+    if (!atrInfo) {
+      // "None" mode — distance is in raw points
+      return this.symbol.pointsToPrice(p.distance);
+    }
+    const sourceBars = atrInfo.daily && this._dailyBars ? this._dailyBars : bars;
+    const atrPrice   = sourceBars.atr(atrInfo.period, 1);
+    return atrPrice * p.distance;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Usage wiring example
+// ─────────────────────────────────────────────────────────────
+/*
+// 1. Implement IBrokerAdapter for your broker
+class MyBroker implements IBrokerAdapter {
+  async marketOrder(side, size, info?) { ... }
+  async closePosition(side, size, info?) { ... }
+  async updateSLTP(side, sl, tp) { ... }
+  async getSpread(symbol) { return 0.0001; }
+  async getAccount() { return { equity: 10000, balance: 10000 }; }
+}
+
+// 2. Set up
+const symbol = new SymbolInfo('EURUSD', 5);
+const engine = new TradingEngine(symbol, new MyBroker(), true); // hedging=true
+
+// 3. Example: OCO bracket order
+engine.orderAttrOCO(true);
+engine.addBracket({ entryType: 'BUY_STOP', entryPrice: 1.10500, slPts: 20, tpPts: 40 });
+engine.orderAttrOCO(true);
+engine.addBracket({ entryType: 'SELL_STOP', entryPrice: 1.10300, slPts: 20, tpPts: 40 });
+
+// 4. Example: MIT order
+engine.addBuyMIT(1.10200);
+
+// 5. Example: trailing buy-limit (limit pullback)
+engine.orderLimitPullback(10);  // 10 points pullback from market high
+engine.addBuyLimit(0);          // price set dynamically each bar
+
+// 6. On each bar
+async function onBar(allBars: OHLC[]) {
+  const bars = new Bars(allBars);
+  await engine.onBar(bars.candle(0), bars);
+  await evaluateCandleATR03(bars, engine, symbol);
+}
+*/
