@@ -5,8 +5,6 @@ import {
   type PostBarsBody,
   OkResponseSchema,
 } from '../../schemas/index.js';
-import type {} from '../../types/index.js';
-
 const barsRoute: FastifyPluginAsync = async (fastify) => {
   // POST /bars — drives engine.onBar(); emits 'bar' event to WebSocket clients
   fastify.post<{ Body: PostBarsBody }>('/bars', {
@@ -33,6 +31,8 @@ const barsRoute: FastifyPluginAsync = async (fastify) => {
     broker.setPrice(bar.close);
 
     await engine.onBar(bar, bars);
+    // Unit 8 — AtrModule updates SL/TP/trail after each bar if configured
+    fastify.atrModule.onBar(bars);
     emitter.emit('bar', { type: 'bar', bar: req.body.bar });
 
     return reply.send({ ok: true });

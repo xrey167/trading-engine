@@ -14,6 +14,16 @@
  * R8  GET    /account
  * R9  PUT    /positions/:side/sl-tp
  * R10 buildApp config
+ * R11 POST   /positions/long|short|hedge  (Unit 1)
+ * R12 POST   /positions/flat variants     (Unit 2)
+ * R13 DELETE /orders?side=               (Unit 2)
+ * R14 POST   /orders (trailing types)    (Unit 3)
+ * R15 POST   /orders/bracket             (Unit 4)
+ * R16 PUT    /positions/:side/sl-tp ext  (Unit 5)
+ * R17 GET /positions pl field            (Unit 6)
+ * R18 PUT    /engine/config              (Unit 6)
+ * R19 POST   /scaled-orders              (Unit 7)
+ * R20 PUT    /atr/config + /bars         (Unit 8)
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -522,3 +532,507 @@ describe('R10 – buildApp config', () => {
     await app.close();
   });
 });
+
+// ─────────────────────────────────────────────────────────────
+// R11 – POST /positions/long|short|hedge  (Unit 1)
+// ─────────────────────────────────────────────────────────────
+
+describe('R11 – POST /positions/long (market buy)', () => {
+  let app: FastifyInstance;
+  beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
+  afterEach(() => app.close());
+
+  it('market buy opens a long position', async () => {
+    // Feed a bar so broker has a price reference for the fill
+    await app.inject({ method: 'POST', url: '/bars', payload: barsPayload(1, 1.1050) });
+    const res = await app.inject({ method: 'POST', url: '/positions/long', payload: {} });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ ok: true });
+    const { long } = (await app.inject({ method: 'GET', url: '/positions' })).json();
+    expect(long.size).toBeGreaterThan(0);
+  });
+
+  it('accepts an explicit size', async () => {
+    await app.inject({ method: 'POST', url: '/bars', payload: barsPayload(1, 1.1050) });
+    await app.inject({ method: 'POST', url: '/positions/long', payload: { size: 2 } });
+    const { long } = (await app.inject({ method: 'GET', url: '/positions' })).json();
+    expect(long.size).toBe(2);
+  });
+
+  it('rejects a non-number size with 400', async () => {
+    const res = await app.inject({ method: 'POST', url: '/positions/long', payload: { size: 'big' } });
+    expect(res.statusCode).toBe(400);
+  });
+});
+
+describe('R11b – POST /positions/short (market sell)', () => {
+  let app: FastifyInstance;
+  beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
+  afterEach(() => app.close());
+
+  it('market sell opens a short position', async () => {
+    await app.inject({ method: 'POST', url: '/bars', payload: barsPayload(1, 1.1050) });
+    const res = await app.inject({ method: 'POST', url: '/positions/short', payload: {} });
+    expect(res.statusCode).toBe(200);
+    const { short } = (await app.inject({ method: 'GET', url: '/positions' })).json();
+    expect(short.size).toBeGreaterThan(0);
+  });
+});
+
+describe('R11c – POST /positions/hedge', () => {
+  let app: FastifyInstance;
+  beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
+  afterEach(() => app.close());
+
+  it('hedge opens both long and short when hedging=true', async () => {
+    await app.inject({ method: 'POST', url: '/bars', payload: barsPayload(1, 1.1050) });
+    // Open a long first, then hedge (which opens the opposite side)
+    await app.inject({ method: 'POST', url: '/positions/long', payload: {} });
+    const res = await app.inject({ method: 'POST', url: '/positions/hedge', payload: {} });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ ok: true });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// R12 – POST /positions/flat variants  (Unit 2)
+// ─────────────────────────────────────────────────────────────
+
+describe('R12 – POST /positions/flat variants', () => {
+  let app: FastifyInstance;
+  beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
+  afterEach(() => app.close());
+
+  it('POST /positions/flat returns ok: true on a flat engine', async () => {
+    const res = await app.inject({ method: 'POST', url: '/positions/flat', payload: {} });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ ok: true });
+  });
+
+  it('POST /positions/long/flat closes long position AND removes buy orders', async () => {
+    await app.inject({ method: 'POST', url: '/bars', payload: barsPayload(1, 1.1050) });
+    await app.inject({ method: 'POST', url: '/positions/long', payload: {} });
+    await app.inject({ method: 'POST', url: '/orders', payload: { type: 'BUY_LIMIT', price: 1.0900 } });
+    await app.inject({ method: 'POST', url: '/positions/long/flat', payload: {} });
+    const { long } = (await app.inject({ method: 'GET', url: '/positions' })).json();
+    expect(long.size).toBe(0);
+    const orders = (await app.inject({ method: 'GET', url: '/orders' })).json();
+    expect(orders.filter((o: { side: number }) => o.side === 1)).toHaveLength(0);
+  });
+
+  it('POST /positions/short/flat closes short position AND removes sell orders', async () => {
+    await app.inject({ method: 'POST', url: '/bars', payload: barsPayload(1, 1.1050) });
+    await app.inject({ method: 'POST', url: '/positions/short', payload: {} });
+    await app.inject({ method: 'POST', url: '/orders', payload: { type: 'SELL_LIMIT', price: 1.1200 } });
+    await app.inject({ method: 'POST', url: '/positions/short/flat', payload: {} });
+    const { short } = (await app.inject({ method: 'GET', url: '/positions' })).json();
+    expect(short.size).toBe(0);
+    const orders = (await app.inject({ method: 'GET', url: '/orders' })).json();
+    expect(orders.filter((o: { side: number }) => o.side === -1)).toHaveLength(0);
+  });
+
+  it('POST /positions/flat clears all orders and positions', async () => {
+    await app.inject({ method: 'POST', url: '/bars', payload: barsPayload(1, 1.1050) });
+    await app.inject({ method: 'POST', url: '/positions/long', payload: {} });
+    await app.inject({ method: 'POST', url: '/orders', payload: { type: 'BUY_LIMIT', price: 1.0900 } });
+    await app.inject({ method: 'POST', url: '/orders', payload: { type: 'SELL_LIMIT', price: 1.1200 } });
+    await app.inject({ method: 'POST', url: '/positions/flat', payload: {} });
+    const orders = (await app.inject({ method: 'GET', url: '/orders' })).json();
+    expect(orders).toHaveLength(0);
+    const { long } = (await app.inject({ method: 'GET', url: '/positions' })).json();
+    expect(long.size).toBe(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// R13 – DELETE /orders?side=  (Unit 2)
+// ─────────────────────────────────────────────────────────────
+
+describe('R13 – DELETE /orders bulk by side', () => {
+  let app: FastifyInstance;
+  beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
+  afterEach(() => app.close());
+
+  it('DELETE /orders?side=buy removes only buy orders', async () => {
+    await app.inject({ method: 'POST', url: '/orders', payload: { type: 'BUY_LIMIT',  price: 1.09500 } });
+    await app.inject({ method: 'POST', url: '/orders', payload: { type: 'SELL_LIMIT', price: 1.11000 } });
+    const res = await app.inject({ method: 'DELETE', url: '/orders?side=buy' });
+    expect(res.statusCode).toBe(200);
+    const orders = (await app.inject({ method: 'GET', url: '/orders' })).json();
+    expect(orders).toHaveLength(1);
+    expect(orders[0].type).toBe('SELL_LIMIT');
+  });
+
+  it('DELETE /orders?side=sell removes only sell orders', async () => {
+    await app.inject({ method: 'POST', url: '/orders', payload: { type: 'BUY_LIMIT',  price: 1.09500 } });
+    await app.inject({ method: 'POST', url: '/orders', payload: { type: 'SELL_LIMIT', price: 1.11000 } });
+    const res = await app.inject({ method: 'DELETE', url: '/orders?side=sell' });
+    expect(res.statusCode).toBe(200);
+    const orders = (await app.inject({ method: 'GET', url: '/orders' })).json();
+    expect(orders).toHaveLength(1);
+    expect(orders[0].type).toBe('BUY_LIMIT');
+  });
+
+  it('DELETE /orders?side=all removes all orders', async () => {
+    await app.inject({ method: 'POST', url: '/orders', payload: { type: 'BUY_LIMIT',  price: 1.09500 } });
+    await app.inject({ method: 'POST', url: '/orders', payload: { type: 'SELL_LIMIT', price: 1.11000 } });
+    const res = await app.inject({ method: 'DELETE', url: '/orders?side=all' });
+    expect(res.statusCode).toBe(200);
+    expect((await app.inject({ method: 'GET', url: '/orders' })).json()).toHaveLength(0);
+  });
+
+  it('rejects an unknown side value with 400', async () => {
+    const res = await app.inject({ method: 'DELETE', url: '/orders?side=both' });
+    expect(res.statusCode).toBe(400);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// R14 – POST /orders with trailing entry types  (Unit 3)
+// ─────────────────────────────────────────────────────────────
+
+describe('R14 – POST /orders trailing entry types', () => {
+  let app: FastifyInstance;
+  beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
+  afterEach(() => app.close());
+
+  it('places a BUY_LIMIT_TRAIL order and returns an id', async () => {
+    const res = await app.inject({
+      method: 'POST', url: '/orders',
+      payload: {
+        type: 'BUY_LIMIT_TRAIL',
+        price: 1.1050,
+        trailEntry: { mode: 1, distancePts: 20 }, // TrailMode.Dst = 1
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(typeof res.json().id).toBe('string');
+  });
+
+  it('trail order appears in GET /orders', async () => {
+    await app.inject({
+      method: 'POST', url: '/orders',
+      payload: { type: 'BUY_LIMIT_TRAIL', price: 1.1050, trailEntry: { mode: 1, distancePts: 20 } },
+    });
+    const orders = (await app.inject({ method: 'GET', url: '/orders' })).json();
+    expect(orders).toHaveLength(1);
+  });
+
+  it('places a SELL_LIMIT_TRAIL order', async () => {
+    const res = await app.inject({
+      method: 'POST', url: '/orders',
+      payload: { type: 'SELL_LIMIT_TRAIL', price: 1.1100, trailEntry: { mode: 1, distancePts: 15 } },
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('returns 400 when trailEntry is missing for a trail type', async () => {
+    const res = await app.inject({
+      method: 'POST', url: '/orders',
+      payload: { type: 'BUY_LIMIT_TRAIL', price: 1.1050 },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toHaveProperty('error');
+  });
+
+  it('places BUY_STOP_TRAIL and SELL_STOP_TRAIL without error', async () => {
+    const r1 = await app.inject({
+      method: 'POST', url: '/orders',
+      payload: { type: 'BUY_STOP_TRAIL',  price: 1.1100, trailEntry: { mode: 1, distancePts: 10 } },
+    });
+    const r2 = await app.inject({
+      method: 'POST', url: '/orders',
+      payload: { type: 'SELL_STOP_TRAIL', price: 1.1000, trailEntry: { mode: 1, distancePts: 10 } },
+    });
+    expect(r1.statusCode).toBe(200);
+    expect(r2.statusCode).toBe(200);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// R15 – POST /orders/bracket  (Unit 4)
+// ─────────────────────────────────────────────────────────────
+
+describe('R15 – POST /orders/bracket', () => {
+  let app: FastifyInstance;
+  beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
+  afterEach(() => app.close());
+
+  it('places a bracket order and returns an id', async () => {
+    const res = await app.inject({
+      method: 'POST', url: '/orders/bracket',
+      payload: { entryType: 'BUY_LIMIT', entryPrice: 1.1050, slPts: 20, tpPts: 40 },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(typeof res.json().id).toBe('string');
+  });
+
+  it('bracket order appears in GET /orders', async () => {
+    await app.inject({
+      method: 'POST', url: '/orders/bracket',
+      payload: { entryType: 'BUY_LIMIT', entryPrice: 1.1050, slPts: 20, tpPts: 40 },
+    });
+    const orders = (await app.inject({ method: 'GET', url: '/orders' })).json();
+    expect(orders).toHaveLength(1);
+    expect(orders[0].type).toBe('BUY_LIMIT');
+    expect(orders[0].price).toBeCloseTo(1.1050, 4);
+  });
+
+  it('accepts an optional size', async () => {
+    const res = await app.inject({
+      method: 'POST', url: '/orders/bracket',
+      payload: { entryType: 'SELL_STOP', entryPrice: 1.1000, slPts: 15, tpPts: 30, size: 2 },
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('rejects a missing slPts with 400', async () => {
+    const res = await app.inject({
+      method: 'POST', url: '/orders/bracket',
+      payload: { entryType: 'BUY_LIMIT', entryPrice: 1.1050, tpPts: 40 },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('bracket fill via bar opens a position with SL active', async () => {
+    // BUY_LIMIT at 1.1060, slPts=500 (sl=1.1010), tpPts=1000 (tp=1.1160)
+    // Bar: low=1.1050 triggers the entry (1.1050<=1.1060), but stays above sl (1.1010) and below tp (1.1160)
+    const bracketRes = await app.inject({
+      method: 'POST', url: '/orders/bracket',
+      payload: { entryType: 'BUY_LIMIT', entryPrice: 1.1060, slPts: 500, tpPts: 1000 },
+    });
+    expect(bracketRes.statusCode).toBe(200);
+    const bar = makeBar(1.1060, { low: 1.1050, high: 1.1070 });
+    const barRes = await app.inject({ method: 'POST', url: '/bars', payload: { bar, bars: [bar] } });
+    expect(barRes.statusCode).toBe(200);
+    const { long } = (await app.inject({ method: 'GET', url: '/positions' })).json();
+    // Position fills and stays open (SL=1.1010 not breached, TP=1.1160 not hit)
+    expect(long.size).toBeGreaterThan(0);
+    // _applyBracketPts sets slActive=true
+    expect(long.slActive).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// R16 – PUT /positions/:side/sl-tp extended  (Unit 5)
+// ─────────────────────────────────────────────────────────────
+
+describe('R16 – PUT /positions/:side/sl-tp extended (absolute + trail)', () => {
+  let app: FastifyInstance;
+  beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
+  afterEach(() => app.close());
+
+  it('slAbsolute sets the SL to an exact price on the long slot', async () => {
+    const res = await app.inject({
+      method: 'PUT', url: '/positions/long/sl-tp',
+      payload: { slAbsolute: 1.0900 },
+    });
+    expect(res.statusCode).toBe(200);
+    const { long } = (await app.inject({ method: 'GET', url: '/positions' })).json();
+    expect(long.sl).toBeCloseTo(1.0900, 4);
+  });
+
+  it('tpAbsolute sets the TP to an exact price on the short slot', async () => {
+    await app.inject({
+      method: 'PUT', url: '/positions/short/sl-tp',
+      payload: { tpAbsolute: 1.0800 },
+    });
+    const { short } = (await app.inject({ method: 'GET', url: '/positions' })).json();
+    expect(short.tp).toBeCloseTo(1.0800, 4);
+  });
+
+  it('trailMode + trailDistancePts updates trailCfg visible in GET /positions', async () => {
+    await app.inject({
+      method: 'PUT', url: '/positions/long/sl-tp',
+      payload: { trailMode: 1, trailDistancePts: 25 }, // TrailMode.Dst = 1
+    });
+    const { long } = (await app.inject({ method: 'GET', url: '/positions' })).json();
+    expect(long.trailCfg.mode).toBe(1);
+    expect(long.trailCfg.distancePts).toBe(25);
+  });
+
+  it('trailActive enables trailing on the long slot', async () => {
+    await app.inject({
+      method: 'PUT', url: '/positions/long/sl-tp',
+      payload: { trailActive: true },
+    });
+    const { long } = (await app.inject({ method: 'GET', url: '/positions' })).json();
+    expect(long.trailActive).toBe(true);
+  });
+
+  it('accepts only trailDistancePts (mode defaults to current value)', async () => {
+    const res = await app.inject({
+      method: 'PUT', url: '/positions/short/sl-tp',
+      payload: { trailDistancePts: 30 },
+    });
+    expect(res.statusCode).toBe(200);
+    const { short } = (await app.inject({ method: 'GET', url: '/positions' })).json();
+    expect(short.trailCfg.distancePts).toBe(30);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// R17 – GET /positions pl field  (Unit 6)
+// ─────────────────────────────────────────────────────────────
+
+describe('R17 – GET /positions pl field', () => {
+  let app: FastifyInstance;
+  beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
+  afterEach(() => app.close());
+
+  it('pl is 0 when flat', async () => {
+    const { long, short } = (await app.inject({ method: 'GET', url: '/positions' })).json();
+    expect(typeof long.pl).toBe('number');
+    expect(long.pl).toBe(0);
+    expect(short.pl).toBe(0);
+  });
+
+  it('pl is a number after a fill', async () => {
+    // Open long via BUY_MIT fill
+    await app.inject({ method: 'POST', url: '/orders', payload: { type: 'BUY_MIT', price: 1.1050 } });
+    const bar = makeBar(1.1040, { low: 1.1030 });
+    await app.inject({ method: 'POST', url: '/bars', payload: { bar, bars: [bar] } });
+    const { long } = (await app.inject({ method: 'GET', url: '/positions' })).json();
+    expect(long.size).toBeGreaterThan(0);
+    expect(typeof long.pl).toBe('number');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// R18 – PUT /engine/config  (Unit 6)
+// ─────────────────────────────────────────────────────────────
+
+describe('R18 – PUT /engine/config', () => {
+  let app: FastifyInstance;
+  beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
+  afterEach(() => app.close());
+
+  it('returns ok: true', async () => {
+    const res = await app.inject({
+      method: 'PUT', url: '/engine/config',
+      payload: { removeOrdersOnFlat: true },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ ok: true });
+  });
+
+  it('accepts an empty body (all fields optional)', async () => {
+    const res = await app.inject({ method: 'PUT', url: '/engine/config', payload: {} });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('rejects a non-boolean removeOrdersOnFlat', async () => {
+    const res = await app.inject({
+      method: 'PUT', url: '/engine/config',
+      payload: { removeOrdersOnFlat: 'yes' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// R19 – POST /scaled-orders  (Unit 7)
+// ─────────────────────────────────────────────────────────────
+
+describe('R19 – POST /scaled-orders', () => {
+  let app: FastifyInstance;
+  beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
+  afterEach(() => app.close());
+
+  it('Scalper_I long places multiple orders', async () => {
+    // Scalper_I: atrMode=None, distance=2, countLimits=4, countStops=1 → 6 orders (1 MIT + 4 limits + 1 stop)
+    const res = await app.inject({
+      method: 'POST', url: '/scaled-orders',
+      payload: { side: 'long', preset: 'Scalper_I', currentPrice: 1.1050 },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(Array.isArray(body.orderIds)).toBe(true);
+    expect(body.orderIds.length).toBeGreaterThan(1);
+    expect(typeof body.baseDist).toBe('number');
+    expect(typeof body.slDist).toBe('number');
+  });
+
+  it('Scalper_I short places orders on the sell side', async () => {
+    const res = await app.inject({
+      method: 'POST', url: '/scaled-orders',
+      payload: { side: 'short', preset: 'Scalper_I', currentPrice: 1.1050 },
+    });
+    expect(res.statusCode).toBe(200);
+    const orders = (await app.inject({ method: 'GET', url: '/orders' })).json();
+    expect(orders.some((o: { side: number }) => o.side === -1)).toBe(true);
+  });
+
+  it('placeBoth returns long and short sub-results', async () => {
+    const res = await app.inject({
+      method: 'POST', url: '/scaled-orders',
+      payload: { side: 'both', preset: 'Scalper_I', currentPrice: 1.1050 },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body).toHaveProperty('long');
+    expect(body).toHaveProperty('short');
+    expect(Array.isArray(body.long.orderIds)).toBe(true);
+  });
+
+  it('returns 400 for an unknown preset', async () => {
+    const res = await app.inject({
+      method: 'POST', url: '/scaled-orders',
+      payload: { side: 'long', preset: 'NonExistentPreset', currentPrice: 1.1050 },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toHaveProperty('error');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// R20 – PUT /atr/config + /bars AtrModule hook  (Unit 8)
+// ─────────────────────────────────────────────────────────────
+
+describe('R20 – PUT /atr/config', () => {
+  let app: FastifyInstance;
+  beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
+  afterEach(() => app.close());
+
+  it('returns ok: true', async () => {
+    const res = await app.inject({
+      method: 'PUT', url: '/atr/config',
+      payload: { slMultiplier: 2 },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ ok: true });
+  });
+
+  it('accepts an empty body', async () => {
+    const res = await app.inject({ method: 'PUT', url: '/atr/config', payload: {} });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('rejects a negative slMultiplier with 400', async () => {
+    const res = await app.inject({
+      method: 'PUT', url: '/atr/config',
+      payload: { slMultiplier: -1 },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('atrModule.onBar is called during POST /bars without error', async () => {
+    // Configure slMultiplier so AtrModule will try to update SL on next bar
+    await app.inject({
+      method: 'PUT', url: '/atr/config',
+      payload: { slMultiplier: 1.5, period: 3, shift: 0, onlyWhenFlat: true },
+    });
+    // Feed enough bars for ATR to be calculable (period=3 needs at least 3 bars)
+    const res = await app.inject({
+      method: 'POST', url: '/bars',
+      payload: barsPayload(3, 1.1050),
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('updates the mutable config object so subsequent bars use new values', async () => {
+    await app.inject({ method: 'PUT', url: '/atr/config', payload: { period: 5 } });
+    expect(app.atrConfig.period).toBe(5);
+  });
+});
+

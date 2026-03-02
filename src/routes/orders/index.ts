@@ -1,11 +1,14 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { Type } from '@sinclair/typebox';
+import { TrailMode } from '../../../trading-engine.js';
 import {
   PendingOrderSchema,
   PostOrderBodySchema,
   type PostOrderBody,
   PatchOrderBodySchema,
   type PatchOrderBody,
+  PostBracketBodySchema,
+  type PostBracketBody,
   ErrorResponseSchema,
   OkResponseSchema,
 } from '../../schemas/index.js';
@@ -30,7 +33,7 @@ const ordersRoute: FastifyPluginAsync = async (fastify) => {
     return reply.send(orders);
   });
 
-  // POST /orders — rate-limited: max 10 per second
+  // POST /orders — rate-limited: max 10 per second; supports trailing entry types (Unit 3)
   fastify.post<{ Body: PostOrderBody }>('/orders', {
     config: { rateLimit: { max: 10, timeWindow: '1 second' } },
     schema: {
@@ -42,7 +45,7 @@ const ordersRoute: FastifyPluginAsync = async (fastify) => {
     },
   }, async (req, reply) => {
     const { engine } = fastify;
-    const { type, price, size, attributes } = req.body;
+    const { type, price, size, attributes, trailEntry } = req.body;
 
     // Apply optional attributes before placing the order
     if (attributes) {
@@ -55,20 +58,63 @@ const ordersRoute: FastifyPluginAsync = async (fastify) => {
       if (attributes.pullbackPts !== undefined) engine.orderLimitPullback(attributes.pullbackPts);
       if (attributes.limitConfirm !== undefined) engine.orderLimitConfirm(attributes.limitConfirm as 0 | 1 | 2 | 3);
     }
-    if (size !== undefined) engine.orderSize(size);
-
     let id: string | undefined;
     switch (type) {
-      case 'BUY_LIMIT':  id = engine.addBuyLimit(price);  break;
-      case 'BUY_STOP':   id = engine.addBuyStop(price);   break;
-      case 'SELL_LIMIT': id = engine.addSellLimit(price); break;
-      case 'SELL_STOP':  id = engine.addSellStop(price);  break;
-      case 'BUY_MIT':    id = engine.addBuyMIT(price);    break;
-      case 'SELL_MIT':   id = engine.addSellMIT(price);   break;
+      // Pass size directly — avoids mutating shared _nextOrderSize engine state
+      case 'BUY_LIMIT':  id = engine.addBuyLimit(price, size ?? 1);  break;
+      case 'BUY_STOP':   id = engine.addBuyStop(price, size ?? 1);   break;
+      case 'SELL_LIMIT': id = engine.addSellLimit(price, size ?? 1); break;
+      case 'SELL_STOP':  id = engine.addSellStop(price, size ?? 1);  break;
+      case 'BUY_MIT':    id = engine.addBuyMIT(price, size ?? 1);    break;
+      case 'SELL_MIT':   id = engine.addSellMIT(price, size ?? 1);   break;
+      // Unit 3 — trailing entry types (no size param; set+reset to avoid state leak)
+      case 'BUY_LIMIT_TRAIL': {
+        if (!trailEntry) return reply.status(400).send({ error: 'trailEntry required for BUY_LIMIT_TRAIL' });
+        if (size !== undefined) engine.orderSize(size);
+        id = engine.addBuyLimitTrail(trailEntry.mode as TrailMode, trailEntry.distancePts, trailEntry.periods);
+        if (size !== undefined) engine.orderSize(1);
+        break;
+      }
+      case 'BUY_STOP_TRAIL': {
+        if (!trailEntry) return reply.status(400).send({ error: 'trailEntry required for BUY_STOP_TRAIL' });
+        if (size !== undefined) engine.orderSize(size);
+        id = engine.addBuyStopTrail(trailEntry.mode as TrailMode, trailEntry.distancePts, trailEntry.periods);
+        if (size !== undefined) engine.orderSize(1);
+        break;
+      }
+      case 'SELL_LIMIT_TRAIL': {
+        if (!trailEntry) return reply.status(400).send({ error: 'trailEntry required for SELL_LIMIT_TRAIL' });
+        if (size !== undefined) engine.orderSize(size);
+        id = engine.addSellLimitTrail(trailEntry.mode as TrailMode, trailEntry.distancePts, trailEntry.periods);
+        if (size !== undefined) engine.orderSize(1);
+        break;
+      }
+      case 'SELL_STOP_TRAIL': {
+        if (!trailEntry) return reply.status(400).send({ error: 'trailEntry required for SELL_STOP_TRAIL' });
+        if (size !== undefined) engine.orderSize(size);
+        id = engine.addSellStopTrail(trailEntry.mode as TrailMode, trailEntry.distancePts, trailEntry.periods);
+        if (size !== undefined) engine.orderSize(1);
+        break;
+      }
       default:
         return reply.status(400).send({ error: `Unknown order type: ${type}` });
     }
 
+    return reply.send({ id });
+  });
+
+  // POST /orders/bracket — place a bracket order (Unit 4)
+  fastify.post<{ Body: PostBracketBody }>('/orders/bracket', {
+    schema: {
+      body: PostBracketBodySchema,
+      response: {
+        200: Type.Object({ id: Type.String() }),
+        400: ErrorResponseSchema,
+      },
+    },
+  }, async (req, reply) => {
+    const { entryType, entryPrice, slPts, tpPts, size } = req.body;
+    const id = fastify.engine.addBracket({ entryType, entryPrice, slPts, tpPts, size });
     return reply.send({ id });
   });
 
@@ -82,6 +128,26 @@ const ordersRoute: FastifyPluginAsync = async (fastify) => {
   }, async (req, reply) => {
     const moved = fastify.engine.moveOrder(req.params.id, req.body.price);
     if (!moved) return reply.status(404).send({ error: `Order ${req.params.id} not found` });
+    return reply.send({ ok: true });
+  });
+
+  // DELETE /orders — bulk delete by side (Unit 2): ?side=buy|sell|all
+  fastify.delete('/orders', {
+    schema: {
+      querystring: Type.Object({
+        side: Type.Union([Type.Literal('buy'), Type.Literal('sell'), Type.Literal('all')]),
+      }),
+      response: { 200: OkResponseSchema, 400: ErrorResponseSchema },
+    },
+  }, async (req, reply) => {
+    const { side } = req.query as { side: string };
+    switch (side) {
+      case 'buy':  await fastify.engine.deleteBuyOrders();  break;
+      case 'sell': await fastify.engine.deleteSellOrders(); break;
+      case 'all':  await fastify.engine.deleteAllOrders();  break;
+      default:
+        return reply.status(400).send({ error: `Unknown side: ${side}` });
+    }
     return reply.send({ ok: true });
   });
 
