@@ -2,6 +2,7 @@
   "name": "trading-engine",
   "version": "1.0.0",
   "description": "Live trading engine ported from MQL/StereoTrader",
+  "type": "module",
   "main": "dist/trading-engine.js",
   "types": "dist/trading-engine.d.ts",
   "scripts": {
@@ -10,11 +11,22 @@
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist",
     "test": "vitest run",
-    "lint": "biome lint ."
+    "lint": "biome lint .",
+    "start": "node dist/src/server.js",
+    "dev": "node --watch dist/src/server.js"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.4",
+    "@types/node": "^25.3.3",
+    "@types/ws": "^8.18.1",
     "typescript": "^5.8.3",
     "vitest": "^4.0.18"
+  },
+  "dependencies": {
+    "@fastify/rate-limit": "^10.3.0",
+    "@fastify/websocket": "^11.2.0",
+    "@sinclair/typebox": "^0.34.48",
+    "fastify": "^5.7.4",
+    "fastify-plugin": "^5.1.0"
   }
 }
