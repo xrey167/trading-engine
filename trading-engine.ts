@@ -17,25 +17,26 @@
 // Enums
 // ─────────────────────────────────────────────────────────────
 
-export const enum Side {
+export enum Side {
   None  =  0,
   Long  =  1,
   Short = -1,
 }
 
-export const enum TrailMode {
+export enum TrailMode {
   None     = 0,
   Dst      = 1,  // fixed distance from latest high/low
   Eop      = 2,  // lowest-low / highest-high over N periods
   Ma       = 3,  // moving average ± distance
+  // 4 intentionally unused (reserved in original MQL enum)
   PlhPeak  = 5,  // peak/low tracker — updates only on new extreme
   PlhClose = 6,  // same, triggered by new close extreme
   Prx      = 7,  // close-based, distance can be relative to bar range
 }
 
-export const enum AtrMethod { Sma = 0, Ema = 1 }
+export enum AtrMethod { Sma = 0, Ema = 1 }
 
-export const enum LimitConfirm {
+export enum LimitConfirm {
   None       = 0,
   Wick       = 1,       // price must wick back from limit level
   WickBreak  = 2,       // wick + body must break back
@@ -485,13 +486,11 @@ export class TradingEngine {
   private _nextOrderSize      = 1;
   private _nextBracketSL?: number;
   private _nextBracketTP?: number;
-  private _nextTrailEntry?: PendingOrderAttributes['trailEntry'];
   private _nextPullback?: number;
   private _nextOCO     = false;
   private _nextCO      = false;
   private _nextCS      = false;
   private _nextREV     = false;
-  private _nextMIT     = false;
   private _nextLimitConfirm: LimitConfirm = LimitConfirm.None;
   private _removeOrdersOnFlat = false;
 
@@ -535,7 +534,7 @@ export class TradingEngine {
     if (!this.hedging && this.shortPos.size > 0) await this._closeSlot(this.shortPos, info);
     const r = await this.broker.marketOrder(Side.Long, s, info);
     this._applyFill(this.longPos, r.price, s, r.time);
-    await this._applyBracket(this.longPos);
+    this._applyBracket(this.longPos);
     await this._pushSLTP(this.longPos);
     return true;
   }
@@ -545,7 +544,7 @@ export class TradingEngine {
     if (!this.hedging && this.longPos.size > 0) await this._closeSlot(this.longPos, info);
     const r = await this.broker.marketOrder(Side.Short, s, info);
     this._applyFill(this.shortPos, r.price, s, r.time);
-    await this._applyBracket(this.shortPos);
+    this._applyBracket(this.shortPos);
     await this._pushSLTP(this.shortPos);
     return true;
   }
@@ -643,7 +642,7 @@ export class TradingEngine {
 
   /** Trailing buy-stop — stop price trails above the market. */
   addBuyStopTrail(mode: TrailMode, distancePts: number, periods = 0): string {
-    const id = this._addOrder('BUY_STOP', Side.Long, 999_999_999, undefined);
+    const id = this._addOrder('BUY_STOP', Side.Long, Infinity, undefined);
     const o = this._findOrder(id)!;
     o.attributes.trailEntry = { mode, distPts: distancePts, periods };
     o._trailRef = Infinity;
@@ -698,7 +697,8 @@ export class TradingEngine {
   orderAttrCO(flag = true):   void { this._nextCO  = flag; }
   orderAttrCS(flag = true):   void { this._nextCS  = flag; }
   orderAttrREV(flag = true):  void { this._nextREV = flag; }
-  orderAttrMIT(flag = true):  void { this._nextMIT = flag; }
+  /** No-op: MIT is an order type (addBuyMIT/addSellMIT), not an attribute. */
+  orderAttrMIT(_flag = true): void {}
   orderLimitConfirm(v: LimitConfirm): void { this._nextLimitConfirm = v; }
   orderLimitPullback(pts: number): void { this._nextPullback = pts; }
   bracketSL(pts: number): void { this._nextBracketSL = pts; }
@@ -856,7 +856,7 @@ export class TradingEngine {
     });
     // Reset one-shot attributes
     this._nextOCO = false; this._nextCO = false; this._nextCS = false;
-    this._nextREV = false; this._nextMIT = false;
+    this._nextREV = false;
     this._nextBracketSL = undefined; this._nextBracketTP = undefined;
     this._nextPullback  = undefined;
     this._nextLimitConfirm = LimitConfirm.None;
@@ -997,18 +997,7 @@ export class TradingEngine {
     }
 
     // Apply bracket SL/TP
-    if (attrs.bracketSL != null) {
-      slot.sl = slot.side === Side.Long
-        ? slot.openPrice - this.symbol.pointsToPrice(attrs.bracketSL)
-        : slot.openPrice + this.symbol.pointsToPrice(attrs.bracketSL);
-      slot.slActive = true;
-    }
-    if (attrs.bracketTP != null) {
-      slot.tp = slot.side === Side.Long
-        ? slot.openPrice + this.symbol.pointsToPrice(attrs.bracketTP)
-        : slot.openPrice - this.symbol.pointsToPrice(attrs.bracketTP);
-      slot.tpActive = true;
-    }
+    this._applyBracketPts(slot, attrs.bracketSL, attrs.bracketTP);
 
     await this._pushSLTP(slot);
   }
@@ -1139,19 +1128,23 @@ export class TradingEngine {
     slot.size += size;
   }
 
-  private async _applyBracket(slot: PositionSlot): Promise<void> {
-    if (this._nextBracketSL != null) {
+  private _applyBracketPts(slot: PositionSlot, slPts?: number, tpPts?: number): void {
+    if (slPts != null) {
       slot.sl = slot.side === Side.Long
-        ? slot.openPrice - this.symbol.pointsToPrice(this._nextBracketSL)
-        : slot.openPrice + this.symbol.pointsToPrice(this._nextBracketSL);
+        ? slot.openPrice - this.symbol.pointsToPrice(slPts)
+        : slot.openPrice + this.symbol.pointsToPrice(slPts);
       slot.slActive = true;
     }
-    if (this._nextBracketTP != null) {
+    if (tpPts != null) {
       slot.tp = slot.side === Side.Long
-        ? slot.openPrice + this.symbol.pointsToPrice(this._nextBracketTP)
-        : slot.openPrice - this.symbol.pointsToPrice(this._nextBracketTP);
+        ? slot.openPrice + this.symbol.pointsToPrice(tpPts)
+        : slot.openPrice - this.symbol.pointsToPrice(tpPts);
       slot.tpActive = true;
     }
+  }
+
+  private _applyBracket(slot: PositionSlot): void {
+    this._applyBracketPts(slot, this._nextBracketSL, this._nextBracketTP);
     this._nextBracketSL = undefined;
     this._nextBracketTP = undefined;
   }
