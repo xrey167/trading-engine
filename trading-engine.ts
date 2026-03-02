@@ -978,6 +978,8 @@ export class TradingEngine {
     }
 
     for (const o of toFill) {
+      // Skip if a prior fill on this bar cancelled this order (OCO / CS).
+      if (!this.orders.some(x => x.id === o.id)) continue;
       await this._fillOrder(o, bar, bars);
     }
   }

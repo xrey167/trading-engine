@@ -16,11 +16,11 @@ import {
   TradingEngine, Bars, SymbolInfo, Candle,
   AtrMethod, TrailMode, Side, LimitConfirm,
   checkSLTP, calcTrailingSL,
-  ScaledOrderEngine,
+  ScaledOrderEngine, AtrModule,
   evaluateCandleATR03,
 } from './trading-engine';
 import type {
-  IBrokerAdapter, OHLC, TrailState, ScaledOrderPreset,
+  IBrokerAdapter, OHLC, TrailState, ScaledOrderPreset, AtrModuleConfig,
 } from './trading-engine';
 
 // ─────────────────────────────────────────────────────────────
@@ -863,5 +863,268 @@ describe('P13 – ScaledOrderEngine: order count and named preset', () => {
   it('unknown preset name throws an Error', () => {
     const eng = new TradingEngine(EURUSD5, mockBroker());
     expect(() => new ScaledOrderEngine(eng, EURUSD5, 'no-such-preset')).toThrow('Unknown preset');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// P14 – Bars utility methods: sma, highestHigh, lowestLow
+// ─────────────────────────────────────────────────────────────
+
+describe('P14 – Bars utilities', () => {
+  // data[0] = newest; data[3] = oldest
+  const bars = makeBars(
+    [1.1004, 1.1003, 1.1002, 1.1001],          // closes (newest first)
+    [1.1010, 1.1009, 1.1008, 1.1007],          // highs
+    [1.0994, 1.0993, 1.0992, 1.0991],          // lows
+  );
+
+  it('sma(3) = average of 3 most-recent closes', () => {
+    // (1.1004 + 1.1003 + 1.1002) / 3 = 3.3009 / 3 = 1.1003
+    expect(bars.sma(3)).toBeCloseTo(1.1003, 5);
+  });
+
+  it('highestHigh(3) = max high across 3 most-recent bars', () => {
+    // max(1.1010, 1.1009, 1.1008) = 1.1010
+    expect(bars.highestHigh(3)).toBeCloseTo(1.1010, 5);
+  });
+
+  it('lowestLow(3) = min low across 3 most-recent bars', () => {
+    // min(1.0994, 1.0993, 1.0992) = 1.0992
+    expect(bars.lowestLow(3)).toBeCloseTo(1.0992, 5);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// P15 – calcTrailingSL: TrailMode.Eop (Long)
+// ─────────────────────────────────────────────────────────────
+
+describe('P15 – calcTrailingSL TrailMode.Eop anchors SL below lowest-low', () => {
+  it('Long Eop: SL = lowestLow(3) − distance', () => {
+    // lows (newest first): 1.0960, 1.0950, 1.0940, 1.0930 → lowestLow(3) = 1.0940
+    const bars = makeBars(
+      [1.1000, 1.1000, 1.1000, 1.1000],
+      [1.1010, 1.1010, 1.1010, 1.1010],
+      [1.0960, 1.0950, 1.0940, 1.0930],
+    );
+    const bar = new Candle(1.1000, 1.1010, 1.0960, 1.1005, new Date());
+    const state: TrailState = { active: false, plhRef: 0 };
+
+    const sl = calcTrailingSL({
+      side:          Side.Long,
+      bar,
+      bars,
+      posPrice:      1.0900,   // opened lower, so bar.high > posPrice immediately
+      currentSL:     -1,
+      spreadAbs:     0,
+      trailBeginPts: 0,
+      trail:         { mode: TrailMode.Eop, distancePts: 5, periods: 3 },
+      state,
+      symbol:        EURUSD5,
+    });
+
+    // lowestLow(3) = 1.0940, dist = 5 × 0.00001 = 0.00005
+    // expected SL = 1.0940 − 0.00005 = 1.09395
+    expect(sl).toBeCloseTo(1.09395, 5);
+    expect(state.active).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// P16 – calcTrailingSL: TrailMode.Ma (Long)
+// ─────────────────────────────────────────────────────────────
+
+describe('P16 – calcTrailingSL TrailMode.Ma anchors SL below SMA', () => {
+  it('Long Ma: SL = sma(5) − distance', () => {
+    // All closes = 1.1000 → sma(5) = 1.1000
+    const bars = makeBars(Array(6).fill(1.1000));
+    const bar = new Candle(1.1000, 1.1010, 1.0990, 1.1005, new Date());
+    const state: TrailState = { active: false, plhRef: 0 };
+
+    const sl = calcTrailingSL({
+      side:          Side.Long,
+      bar,
+      bars,
+      posPrice:      1.0900,
+      currentSL:     -1,
+      spreadAbs:     0,
+      trailBeginPts: 0,
+      trail:         { mode: TrailMode.Ma, distancePts: 100, periods: 5 },
+      state,
+      symbol:        EURUSD5,
+    });
+
+    // sma(5) = 1.1000, dist = 100 × 0.00001 = 0.00100
+    // expected SL = 1.1000 − 0.00100 = 1.09900
+    expect(sl).toBeCloseTo(1.09900, 5);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// P17 – AtrModule.onBar: applies ATR-scaled SL offset
+// ─────────────────────────────────────────────────────────────
+
+describe('P17 – AtrModule.onBar applies ATR-scaled SL offset to engine', () => {
+  it('slMultiplier=2 with ATR≈100pts → engine.sl(200) → SL ≈ fill − 0.00200', async () => {
+    const fillPrice = 1.10000;
+    const broker = mockBroker(fillPrice);
+    const eng = new TradingEngine(EURUSD5, broker);
+
+    // 16 bars all uniform: range = 0.0010, close = 1.1000
+    // atr(14, shift=1) = avg of TRs at positions 1..14 = 14 × 0.001 / 14 = 0.001
+    // ATR in points = 0.001 / 0.00001 = 100 pts
+    const bars = makeBars(
+      Array(16).fill(1.10000),
+      Array(16).fill(1.10050),
+      Array(16).fill(1.09950),
+    );
+
+    const cfg: AtrModuleConfig = {
+      period: 14, method: AtrMethod.Sma, shift: 1,
+      slMultiplier: 2, tpMultiplier: 0,
+      trailBeginMultiplier: 0, trailDistMultiplier: 0,
+      onlyWhenFlat: false,
+    };
+    const mod = new AtrModule(cfg, eng, EURUSD5);
+    mod.onBar(bars);           // sets sl(200) on the engine
+    await eng.buy();           // fills at 1.1000 → SL = 1.1000 − 0.00200 = 1.09800
+
+    expect(eng.getSLBuy()).toBeCloseTo(1.09800, 5);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// P18 – AtrModule.onBar: onlyWhenFlat=true skips update
+// ─────────────────────────────────────────────────────────────
+
+describe('P18 – AtrModule.onBar onlyWhenFlat=true skips SL update when position open', () => {
+  it('SL is not overwritten when position is open and onlyWhenFlat=true', async () => {
+    const fillPrice = 1.10000;
+    const broker = mockBroker(fillPrice);
+    const eng = new TradingEngine(EURUSD5, broker);
+
+    // Set initial SL offset of 100 pts, then open position
+    eng.sl(100);                   // SL offset = 100 pts
+    await eng.buy();               // fills at 1.1000 → SL = 1.1000 − 0.001 = 1.09900
+
+    // 16 uniform bars producing ATR = 100 pts again
+    const bars = makeBars(
+      Array(16).fill(1.10000),
+      Array(16).fill(1.10050),
+      Array(16).fill(1.09950),
+    );
+
+    // AtrModule with slMultiplier=3 (would set sl(300) = SL 1.0970), onlyWhenFlat=true
+    const cfg: AtrModuleConfig = {
+      period: 14, method: AtrMethod.Sma, shift: 1,
+      slMultiplier: 3, tpMultiplier: 0,
+      trailBeginMultiplier: 0, trailDistMultiplier: 0,
+      onlyWhenFlat: true,
+    };
+    const mod = new AtrModule(cfg, eng, EURUSD5);
+    mod.onBar(bars);  // position is open → update skipped
+
+    // SL should remain at the original 1.09900, not 1.0970
+    expect(eng.getSLBuy()).toBeCloseTo(1.09900, 5);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// P19 – MIT order: onBar fills via broker.marketOrder
+// ─────────────────────────────────────────────────────────────
+
+describe('P19 – BUY_MIT fill calls broker.marketOrder', () => {
+  it('BUY_MIT fills when bar.low touches level, opening a long via market order', async () => {
+    const broker = mockBroker(1.09800);
+    const eng = new TradingEngine(EURUSD5, broker);
+
+    eng.addBuyMIT(1.09800);   // triggers when bar.low <= 1.09800
+
+    // bar.low = 1.09780 ≤ 1.09800 → triggered
+    const bar = new Candle(1.10000, 1.10050, 1.09780, 1.09850, new Date());
+    await eng.onBar(bar, makeBars(Array(3).fill(1.10000)));
+
+    expect(eng.isLong()).toBe(true);
+    expect(broker.marketOrder).toHaveBeenCalledOnce();
+    expect(eng.getCntOrders()).toBe(0);  // consumed
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// P20 – LimitConfirm.WickBreak fill and no-fill
+// ─────────────────────────────────────────────────────────────
+
+describe('P20 – LimitConfirm.WickBreak', () => {
+  it('fills when wick crosses limit and entire body is above limit', async () => {
+    const broker = mockBroker(1.09900);
+    const eng = new TradingEngine(EURUSD5, broker);
+    eng.orderLimitConfirm(LimitConfirm.WickBreak);
+    eng.addBuyLimit(1.09900);
+
+    // open=1.09950, close=1.10050 → min(open,close)=1.09950 > 1.09900 ✓
+    // low=1.09870 ≤ 1.09900 ✓  → fills
+    const bar = new Candle(1.09950, 1.10100, 1.09870, 1.10050, new Date());
+    await eng.onBar(bar, makeBars(Array(3).fill(1.10000)));
+
+    expect(eng.isLong()).toBe(true);
+  });
+
+  it('does not fill when body dips below limit (open < limit)', async () => {
+    const broker = mockBroker(1.09900);
+    const eng = new TradingEngine(EURUSD5, broker);
+    eng.orderLimitConfirm(LimitConfirm.WickBreak);
+    eng.addBuyLimit(1.09900);
+
+    // open=1.09880, close=1.10050 → min(open,close)=1.09880 < 1.09900 ✗ → no fill
+    const bar = new Candle(1.09880, 1.10100, 1.09870, 1.10050, new Date());
+    await eng.onBar(bar, makeBars(Array(3).fill(1.10000)));
+
+    expect(eng.isLong()).toBe(false);
+    expect(eng.getCntOrders()).toBe(1);  // order remains
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// P21 – LimitConfirm.WickColor fill
+// ─────────────────────────────────────────────────────────────
+
+describe('P21 – LimitConfirm.WickColor', () => {
+  it('fills only on a bullish bar that wicked through and closed above limit', async () => {
+    const broker = mockBroker(1.09900);
+    const eng = new TradingEngine(EURUSD5, broker);
+    eng.orderLimitConfirm(LimitConfirm.WickColor);
+    eng.addBuyLimit(1.09900);
+
+    // Bullish: open=1.09920 < close=1.10050 → isBullish ✓
+    // low=1.09870 ≤ 1.09900 ✓, close=1.10050 > 1.09900 ✓ → fills
+    const bar = new Candle(1.09920, 1.10100, 1.09870, 1.10050, new Date());
+    await eng.onBar(bar, makeBars(Array(3).fill(1.10000)));
+
+    expect(eng.isLong()).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// P22 – OCO same-bar regression (_checkOrderFills fix)
+// ─────────────────────────────────────────────────────────────
+
+describe('P22 – OCO same-bar regression: second order must not fill after OCO cancels it', () => {
+  it('first order fills with OCO and cancels the second; second is not filled', async () => {
+    const broker = mockBroker(1.09900);
+    const eng = new TradingEngine(EURUSD5, broker);
+
+    // Two orders both triggered by the same bar
+    eng.orderAttrOCO(true);
+    eng.addBuyLimit(1.09900);    // Long: triggers when bar.low ≤ 1.09900
+    eng.orderAttrOCO(false);
+    eng.addSellLimit(1.10100);   // Short: triggers when bar.high ≥ 1.10100
+
+    // Bar touches both levels: low=1.09850, high=1.10150
+    const bar = new Candle(1.10000, 1.10150, 1.09850, 1.10050, new Date());
+    await eng.onBar(bar, makeBars(Array(3).fill(1.10000)));
+
+    // Only the first (BUY_LIMIT) should have filled; SELL_LIMIT cancelled by OCO
+    expect(eng.isLong()).toBe(true);
+    expect(eng.isShort()).toBe(false);
+    expect(eng.getCntOrders()).toBe(0);  // no leftover orders
   });
 });
