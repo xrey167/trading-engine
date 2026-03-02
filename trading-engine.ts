@@ -17,31 +17,31 @@
 // Enums
 // ─────────────────────────────────────────────────────────────
 
-export enum Side {
-  None  =  0,
-  Long  =  1,
-  Short = -1,
-}
+export const Side = { None: 0, Long: 1, Short: -1 } as const;
+export type Side = (typeof Side)[keyof typeof Side];
 
-export enum TrailMode {
-  None     = 0,
-  Dst      = 1,  // fixed distance from latest high/low
-  Eop      = 2,  // lowest-low / highest-high over N periods
-  Ma       = 3,  // moving average ± distance
+export const TrailMode = {
+  None:     0,
+  Dst:      1,  // fixed distance from latest high/low
+  Eop:      2,  // lowest-low / highest-high over N periods
+  Ma:       3,  // moving average ± distance
   // 4 intentionally unused (reserved in original MQL enum)
-  PlhPeak  = 5,  // peak/low tracker — updates only on new extreme
-  PlhClose = 6,  // same, triggered by new close extreme
-  Prx      = 7,  // close-based, distance can be relative to bar range
-}
+  PlhPeak:  5,  // peak/low tracker — updates only on new extreme
+  PlhClose: 6,  // same, triggered by new close extreme
+  Prx:      7,  // close-based, distance can be relative to bar range
+} as const;
+export type TrailMode = (typeof TrailMode)[keyof typeof TrailMode];
 
-export enum AtrMethod { Sma = 0, Ema = 1 }
+export const AtrMethod = { Sma: 0, Ema: 1 } as const;
+export type AtrMethod = (typeof AtrMethod)[keyof typeof AtrMethod];
 
-export enum LimitConfirm {
-  None       = 0,
-  Wick       = 1,       // price must wick back from limit level
-  WickBreak  = 2,       // wick + body must break back
-  WickColor  = 3,       // wick + confirming candle color
-}
+export const LimitConfirm = {
+  None:      0,
+  Wick:      1,  // price must wick back from limit level
+  WickBreak: 2,  // wick + body must break back
+  WickColor: 3,  // wick + confirming candle color
+} as const;
+export type LimitConfirm = (typeof LimitConfirm)[keyof typeof LimitConfirm];
 
 // ─────────────────────────────────────────────────────────────
 // OHLC / Candle
@@ -179,7 +179,7 @@ export class Bars {
     let avgGain = 0, avgLoss = 0;
     for (let i = base; i < base + periods; i++) {
       const diff = this.data[i].close - this.data[i + 1].close;
-      diff > 0 ? (avgGain += diff) : (avgLoss -= diff);
+      if (diff > 0) { avgGain += diff; } else { avgLoss -= diff; }
     }
     avgGain /= periods;
     avgLoss /= periods;
@@ -282,6 +282,7 @@ export function calcTrailingSL(p: {
           cand = distFrac > 0 ? bar.low - bar.range() * distFrac : bar.low - distPrice;
         }
         break;
+      default: break;
     }
     if (cand > -Infinity) currentSL = Math.max(currentSL === -1 ? -Infinity : currentSL, cand);
 
@@ -301,6 +302,7 @@ export function calcTrailingSL(p: {
           cand = distFrac > 0 ? bar.high + bar.range() * distFrac : bar.high + distPrice;
         }
         break;
+      default: break;
     }
     cand += spreadAbs;
     if (cand < Infinity)
@@ -726,6 +728,12 @@ export class TradingEngine {
     return true;
   }
 
+  deleteOrder(id: string): boolean {
+    const before = this.orders.length;
+    this.orders = this.orders.filter(o => o.id !== id);
+    return this.orders.length < before;
+  }
+
   // ──────────────────────────────────────────────────────────
   // Next-order attribute setters
   // (set before calling buy/sell/addXxx to apply to that order)
@@ -840,6 +848,7 @@ export class TradingEngine {
   getCntOrdersBuy():  number  { return this.orders.filter(o => o.side === Side.Long).length;  }
   getCntOrdersSell(): number  { return this.orders.filter(o => o.side === Side.Short).length; }
   getCntOrders():     number  { return this.orders.length; }
+  getOrders(): readonly PendingOrder[] { return this.orders; }
   isLong():           boolean { return this.longPos.size  > 0; }
   isShort():          boolean { return this.shortPos.size > 0; }
   isFlat(inclOrders = false): boolean {
@@ -856,9 +865,33 @@ export class TradingEngine {
   getBEBuy():  number { return this.longPos.openPrice;  }
   getBESell(): number { return this.shortPos.openPrice; }
 
+  getOpenTimeBuy():  Date { return this.longPos.openTime;  }
+  getOpenTimeSell(): Date { return this.shortPos.openTime; }
+
   getSizeBuy():  number { return this.longPos.size;  }
   getSizeSell(): number { return this.shortPos.size; }
   getSize():     number { return this.longPos.size + this.shortPos.size; }
+
+  getSlOffsetPtsBuy():    number      { return this.longPos.slOffsetPts;   }
+  getSlOffsetPtsSell():   number      { return this.shortPos.slOffsetPts;  }
+  getTpOffsetPtsBuy():    number      { return this.longPos.tpOffsetPts;   }
+  getTpOffsetPtsSell():   number      { return this.shortPos.tpOffsetPts;  }
+  getSlActiveBuy():       boolean     { return this.longPos.slActive;       }
+  getSlActiveSell():      boolean     { return this.shortPos.slActive;      }
+  getTpActiveBuy():       boolean     { return this.longPos.tpActive;       }
+  getTpActiveSell():      boolean     { return this.shortPos.tpActive;      }
+  getTrailCfgBuy():       TrailConfig { return this.longPos.trailCfg;       }
+  getTrailCfgSell():      TrailConfig { return this.shortPos.trailCfg;      }
+  getTrailStateBuy():     TrailState  { return this.longPos.trailState;     }
+  getTrailStateSell():    TrailState  { return this.shortPos.trailState;    }
+  getTrailActiveBuy():    boolean     { return this.longPos.trailActive;    }
+  getTrailActiveSell():   boolean     { return this.shortPos.trailActive;   }
+  getTrailBeginPtsBuy():  number      { return this.longPos.trailBeginPts;  }
+  getTrailBeginPtsSell(): number      { return this.shortPos.trailBeginPts; }
+  getBeActiveBuy():       boolean     { return this.longPos.beActive;       }
+  getBeActiveSell():      boolean     { return this.shortPos.beActive;      }
+  getBeAddPtsBuy():       number      { return this.longPos.beAddPts;       }
+  getBeAddPtsSell():      number      { return this.shortPos.beAddPts;      }
 
   getPLBuy(price: number):  number { return this._slotPL(this.longPos,  price); }
   getPLSell(price: number): number { return this._slotPL(this.shortPos, price); }
