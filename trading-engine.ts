@@ -166,23 +166,36 @@ export class Bars {
     if (trs.length === 0) return 0;
     if (method === AtrMethod.Sma) return trs.reduce((a, b) => a + b, 0) / trs.length;
     const k = 2 / (trs.length + 1);
-    return trs.reduce((ema, v, i) => i === 0 ? v : v * k + ema * (1 - k), 0);
+    return [...trs].reverse().reduce((ema, v, i) => i === 0 ? v : v * k + ema * (1 - k), 0);
   }
 
   rsi(periods = 14, shift = 0): number {
-    if (this.data.length < shift + periods + 1) return 50;
-    let gains = 0, losses = 0;
-    for (let i = shift; i < shift + periods; i++) {
+    // Wilder's RSI needs shift + 2*periods + 1 bars:
+    // one set of `periods` changes to seed the SMA, one set to smooth toward shift.
+    if (this.data.length < shift + periods * 2 + 1) return 50;
+    // Bootstrap: SMA of the oldest `periods` changes
+    const base = shift + periods;
+    let avgGain = 0, avgLoss = 0;
+    for (let i = base; i < base + periods; i++) {
       const diff = this.data[i].close - this.data[i + 1].close;
-      diff > 0 ? (gains += diff) : (losses -= diff);
+      diff > 0 ? (avgGain += diff) : (avgLoss -= diff);
     }
-    const ag = gains / periods, al = losses / periods;
-    return al === 0 ? 100 : 100 - 100 / (1 + ag / al);
+    avgGain /= periods;
+    avgLoss /= periods;
+    // Wilder's smoothing from base-1 toward most-recent bar at `shift`
+    for (let i = base - 1; i >= shift; i--) {
+      const diff = this.data[i].close - this.data[i + 1].close;
+      const g = diff > 0 ? diff : 0;
+      const l = diff < 0 ? -diff : 0;
+      avgGain = (avgGain * (periods - 1) + g) / periods;
+      avgLoss = (avgLoss * (periods - 1) + l) / periods;
+    }
+    return avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
   }
 
   isLocalHigh(lookback: number, shift = 0, tol = 0): boolean {
     const peak = this.data[shift].high;
-    for (let i = shift + 1; i < shift + lookback && i < this.data.length; i++) {
+    for (let i = shift + 1; i <= shift + lookback && i < this.data.length; i++) {
       if (this.data[i].high + tol > peak) return false;
     }
     return true;
@@ -190,7 +203,7 @@ export class Bars {
 
   isLocalLow(lookback: number, shift = 0, tol = 0): boolean {
     const trough = this.data[shift].low;
-    for (let i = shift + 1; i < shift + lookback && i < this.data.length; i++) {
+    for (let i = shift + 1; i <= shift + lookback && i < this.data.length; i++) {
       if (this.data[i].low - tol < trough) return false;
     }
     return true;
@@ -404,14 +417,16 @@ export interface PendingOrder {
 // ─────────────────────────────────────────────────────────────
 
 export interface PositionSlot {
-  side:       Side;
-  size:       number;
-  openPrice:  number;
-  openTime:   Date;
-  sl:         number;   // -1 = not set
-  tp:         number;   // -1 = not set
-  slActive:   boolean;
-  tpActive:   boolean;
+  side:        Side;
+  size:        number;
+  openPrice:   number;
+  openTime:    Date;
+  sl:          number;   // -1 = not set
+  tp:          number;   // -1 = not set
+  slOffsetPts: number;   // 0 = not set; panel setting — preserved across closes
+  tpOffsetPts: number;   // 0 = not set; panel setting — preserved across closes
+  slActive:    boolean;
+  tpActive:    boolean;
   trailCfg:   TrailConfig;
   trailState: TrailState;
   trailActive: boolean;
@@ -423,9 +438,9 @@ export interface PositionSlot {
 function emptySlot(side: Side): PositionSlot {
   return {
     side, size: 0, openPrice: -1, openTime: new Date(0),
-    sl: -1, tp: -1, slActive: false, tpActive: false,
+    sl: -1, tp: -1, slOffsetPts: 0, tpOffsetPts: 0, slActive: false, tpActive: false,
     trailCfg:   { mode: TrailMode.None, distancePts: 0, periods: 0 },
-    trailState: { active: false, plhRef: side === Side.Long ? 0 : 999_999_999 },
+    trailState: { active: false, plhRef: side === Side.Long ? 0 : Infinity },
     trailActive: false, trailBeginPts: 0,
     beActive: false, beAddPts: 0,
   };
@@ -535,21 +550,21 @@ export class TradingEngine {
     return true;
   }
 
-  async closeBuy(minProfit = -Infinity):  Promise<boolean> {
-    if (this.longPos.size  === 0) return false;
-    if (this._slotPL(this.longPos, -1) < minProfit) return false;
+  async closeBuy(minProfit = -Infinity, currentPrice?: number): Promise<boolean> {
+    if (this.longPos.size === 0) return false;
+    if (minProfit > -Infinity && currentPrice !== undefined && this._slotPL(this.longPos, currentPrice) < minProfit) return false;
     return this._closeSlot(this.longPos);
   }
 
-  async closeSell(minProfit = -Infinity): Promise<boolean> {
+  async closeSell(minProfit = -Infinity, currentPrice?: number): Promise<boolean> {
     if (this.shortPos.size === 0) return false;
-    if (this._slotPL(this.shortPos, -1) < minProfit) return false;
+    if (minProfit > -Infinity && currentPrice !== undefined && this._slotPL(this.shortPos, currentPrice) < minProfit) return false;
     return this._closeSlot(this.shortPos);
   }
 
-  async closeAll(minProfit = -Infinity): Promise<boolean> {
-    const a = await this.closeBuy(minProfit);
-    const b = await this.closeSell(minProfit);
+  async closeAll(minProfit = -Infinity, currentPrice?: number): Promise<boolean> {
+    const a = await this.closeBuy(minProfit, currentPrice);
+    const b = await this.closeSell(minProfit, currentPrice);
     return a || b;
   }
 
@@ -695,17 +710,17 @@ export class TradingEngine {
   // ──────────────────────────────────────────────────────────
 
   sl(points: number): void {
-    this.longPos.sl  = this.symbol.pointsToPrice(points);
-    this.shortPos.sl = this.symbol.pointsToPrice(points);
+    this._setSlOffset(this.longPos,  points);
+    this._setSlOffset(this.shortPos, points);
   }
   tp(points: number): void {
-    this.longPos.tp  = this.symbol.pointsToPrice(points);
-    this.shortPos.tp = this.symbol.pointsToPrice(points);
+    this._setTpOffset(this.longPos,  points);
+    this._setTpOffset(this.shortPos, points);
   }
-  slBuy(points: number):  void { this.longPos.sl  = this.symbol.pointsToPrice(points); }
-  slSell(points: number): void { this.shortPos.sl = this.symbol.pointsToPrice(points); }
-  tpBuy(points: number):  void { this.longPos.tp  = this.symbol.pointsToPrice(points); }
-  tpSell(points: number): void { this.shortPos.tp = this.symbol.pointsToPrice(points); }
+  slBuy(points: number):  void { this._setSlOffset(this.longPos,  points); }
+  slSell(points: number): void { this._setSlOffset(this.shortPos, points); }
+  tpBuy(points: number):  void { this._setTpOffset(this.longPos,  points); }
+  tpSell(points: number): void { this._setTpOffset(this.shortPos, points); }
 
   slBuyAbsolute(price: number):  void { this.longPos.sl  = price; }
   slSellAbsolute(price: number): void { this.shortPos.sl = price; }
@@ -1084,11 +1099,39 @@ export class TradingEngine {
     return true;
   }
 
+  private _setSlOffset(slot: PositionSlot, pts: number): void {
+    slot.slOffsetPts = pts;
+    if (slot.size > 0) {
+      slot.sl = slot.side === Side.Long
+        ? slot.openPrice - this.symbol.pointsToPrice(pts)
+        : slot.openPrice + this.symbol.pointsToPrice(pts);
+    }
+  }
+
+  private _setTpOffset(slot: PositionSlot, pts: number): void {
+    slot.tpOffsetPts = pts;
+    if (slot.size > 0) {
+      slot.tp = slot.side === Side.Long
+        ? slot.openPrice + this.symbol.pointsToPrice(pts)
+        : slot.openPrice - this.symbol.pointsToPrice(pts);
+    }
+  }
+
   private _applyFill(slot: PositionSlot, price: number, size: number, time: Date): void {
     if (slot.size === 0) {
-      slot.openPrice = price;
-      slot.openTime  = time;
-      slot.trailState = { active: false, plhRef: slot.side === Side.Long ? 0 : 999_999_999 };
+      slot.openPrice  = price;
+      slot.openTime   = time;
+      slot.trailState = { active: false, plhRef: slot.side === Side.Long ? 0 : Infinity };
+      if (slot.slOffsetPts > 0) {
+        slot.sl = slot.side === Side.Long
+          ? price - this.symbol.pointsToPrice(slot.slOffsetPts)
+          : price + this.symbol.pointsToPrice(slot.slOffsetPts);
+      }
+      if (slot.tpOffsetPts > 0) {
+        slot.tp = slot.side === Side.Long
+          ? price + this.symbol.pointsToPrice(slot.tpOffsetPts)
+          : price - this.symbol.pointsToPrice(slot.tpOffsetPts);
+      }
     } else {
       // Average into existing position
       slot.openPrice = (slot.openPrice * slot.size + price * size) / (slot.size + size);
@@ -1109,11 +1152,16 @@ export class TradingEngine {
         : slot.openPrice - this.symbol.pointsToPrice(this._nextBracketTP);
       slot.tpActive = true;
     }
+    this._nextBracketSL = undefined;
+    this._nextBracketTP = undefined;
   }
 
   private _resetSlot(slot: PositionSlot): void {
     const side = slot.side;
+    const { slOffsetPts, tpOffsetPts } = slot;
     Object.assign(slot, emptySlot(side));
+    slot.slOffsetPts = slOffsetPts;
+    slot.tpOffsetPts = tpOffsetPts;
   }
 
   private async _pushSLTP(slot: PositionSlot): Promise<void> {
@@ -1391,10 +1439,8 @@ export class ScaledOrderEngine {
 
   /** Place grids for both long and short simultaneously */
   async placeBoth(currentBars: Bars, currentPrice: number): Promise<{ long: ScaledOrderResult; short: ScaledOrderResult }> {
-    const [long, short] = await Promise.all([
-      this._place(Side.Long,  currentBars, currentPrice),
-      this._place(Side.Short, currentBars, currentPrice),
-    ]);
+    const long  = await this._place(Side.Long,  currentBars, currentPrice);
+    const short = await this._place(Side.Short, currentBars, currentPrice);
     return { long, short };
   }
 
