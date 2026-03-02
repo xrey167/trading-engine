@@ -17,6 +17,11 @@ export class PaperBroker implements IBrokerAdapter {
     this.priceRef = price;
   }
 
+  /** Returns the current price reference (last bar close set via setPrice). */
+  getPrice(): number {
+    return this.priceRef;
+  }
+
   async marketOrder(side: Side, size: number, info?: string): Promise<ExecutionReport> {
     const report: ExecutionReport = {
       price: this.priceRef,
