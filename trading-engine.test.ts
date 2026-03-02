@@ -14,9 +14,10 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   TradingEngine, Bars, SymbolInfo, Candle,
-  AtrMethod, TrailMode, Side,
+  AtrMethod, TrailMode, Side, LimitConfirm,
   checkSLTP, calcTrailingSL,
   ScaledOrderEngine,
+  evaluateCandleATR03,
 } from './trading-engine';
 import type {
   IBrokerAdapter, OHLC, TrailState, ScaledOrderPreset,
@@ -414,5 +415,453 @@ describe('T8 – placeBoth executes Long then Short sequentially', () => {
     expect(eng.getCntOrders()).toBe(2);
     expect(eng.getCntOrdersBuy()).toBe(1);
     expect(eng.getCntOrdersSell()).toBe(1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// Phase 2 — Integration: onBar fills, exits, trailing SL,
+//            break-even, net mode, evaluateCandleATR03
+// ─────────────────────────────────────────────────────────────
+
+function makeSingleCandle(open: number, high: number, low: number, close: number): Candle {
+  return new Candle(open, high, low, close, new Date('2024-01-02'));
+}
+
+// ─────────────────────────────────────────────────────────────
+// P1 – onBar pending-order fills
+// ─────────────────────────────────────────────────────────────
+
+describe('P1 – onBar: pending order fills', () => {
+  it('BUY_LIMIT fills when bar.low touches the limit price', async () => {
+    const eng = new TradingEngine(EURUSD5, mockBroker());
+    eng.addBuyLimit(1.0990);
+    const bar = makeSingleCandle(1.1000, 1.1005, 1.0990, 1.1000);
+    await eng.onBar(bar, makeBars(Array(3).fill(1.1000)));
+    expect(eng.isLong()).toBe(true);
+  });
+
+  it('BUY_LIMIT does NOT fill when bar.low stays above the limit price', async () => {
+    const eng = new TradingEngine(EURUSD5, mockBroker());
+    eng.addBuyLimit(1.0990);
+    const bar = makeSingleCandle(1.1000, 1.1010, 1.0995, 1.1000);
+    await eng.onBar(bar, makeBars(Array(3).fill(1.1000)));
+    expect(eng.isLong()).toBe(false);
+    expect(eng.getCntOrders()).toBe(1);
+  });
+
+  it('SELL_LIMIT fills when bar.high reaches the limit price', async () => {
+    const eng = new TradingEngine(EURUSD5, mockBroker());
+    eng.addSellLimit(1.1010);
+    const bar = makeSingleCandle(1.1000, 1.1010, 1.0995, 1.1000);
+    await eng.onBar(bar, makeBars(Array(3).fill(1.1000)));
+    expect(eng.isShort()).toBe(true);
+  });
+
+  it('OCO: filling BUY_LIMIT cancels all remaining pending orders', async () => {
+    const eng = new TradingEngine(EURUSD5, mockBroker());
+    eng.orderAttrOCO(true);
+    eng.addBuyLimit(1.0990);   // with OCO flag
+    eng.addBuyLimit(1.0985);   // lower — bar won't reach it
+    eng.addSellLimit(1.1010);  // upper — bar won't reach it
+    // bar.low = 1.0990: only the first BUY_LIMIT triggers
+    const bar = makeSingleCandle(1.1000, 1.1005, 1.0990, 1.0995);
+    await eng.onBar(bar, makeBars(Array(3).fill(1.1000)));
+    expect(eng.isLong()).toBe(true);
+    expect(eng.getCntOrders()).toBe(0);  // OCO cleared the other two
+  });
+
+  it('CS: filling BUY_LIMIT cancels same-side orders and preserves opposite side', async () => {
+    const eng = new TradingEngine(EURUSD5, mockBroker());
+    eng.orderAttrCS(true);
+    eng.addBuyLimit(1.0990);   // with CS flag
+    eng.addBuyLimit(1.0985);   // same side — will be cancelled by CS
+    eng.addSellLimit(1.1010);  // opposite side — must survive
+    const bar = makeSingleCandle(1.1000, 1.1005, 1.0990, 1.0995);
+    await eng.onBar(bar, makeBars(Array(3).fill(1.1000)));
+    expect(eng.getCntOrdersBuy()).toBe(0);
+    expect(eng.getCntOrdersSell()).toBe(1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// P2 – onBar SL/TP exit checking
+// ─────────────────────────────────────────────────────────────
+
+describe('P2 – onBar: SL/TP exit checking', () => {
+  it('long SL fires when bar.low drops at or below SL price', async () => {
+    const broker = mockBroker(1.10000);
+    const eng = new TradingEngine(EURUSD5, broker);
+    await eng.buy();
+    eng.slBuyAbsolute(1.0900);
+    eng.slActivateBuy(true);
+    const bar = makeSingleCandle(1.0950, 1.0960, 1.0890, 1.0900);  // L < SL
+    await eng.onBar(bar, makeBars(Array(3).fill(1.095)));
+    expect(broker.closePosition).toHaveBeenCalledWith(Side.Long, 1, 'SL');
+    expect(eng.isLong()).toBe(false);
+  });
+
+  it('long TP fires when bar.high reaches or exceeds TP price', async () => {
+    const broker = mockBroker(1.10000);
+    const eng = new TradingEngine(EURUSD5, broker);
+    await eng.buy();
+    eng.tpBuyAbsolute(1.1100);
+    eng.tpActivateBuy(true);
+    const bar = makeSingleCandle(1.1050, 1.1110, 1.1040, 1.1100);  // H > TP
+    await eng.onBar(bar, makeBars(Array(3).fill(1.105)));
+    expect(broker.closePosition).toHaveBeenCalledWith(Side.Long, 1, 'TP');
+    expect(eng.isLong()).toBe(false);
+  });
+
+  it('SL is NOT triggered when bar.low stays above the SL price', async () => {
+    const broker = mockBroker(1.10000);
+    const eng = new TradingEngine(EURUSD5, broker);
+    await eng.buy();
+    eng.slBuyAbsolute(1.0900);
+    eng.slActivateBuy(true);
+    const bar = makeSingleCandle(1.0960, 1.0970, 1.0910, 1.0960);  // L > SL
+    await eng.onBar(bar, makeBars(Array(3).fill(1.096)));
+    expect(broker.closePosition).not.toHaveBeenCalled();
+    expect(eng.isLong()).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// P3 – onBar break-even
+// ─────────────────────────────────────────────────────────────
+
+describe('P3 – onBar: break-even raises SL to open price + offset', () => {
+  it('long BE: SL moves to openPrice + beAddPts when bar.high exceeds the trigger', async () => {
+    const broker = mockBroker(1.10000);
+    const eng = new TradingEngine(EURUSD5, broker);
+    await eng.buy();  // fill at 1.10000
+    eng.beActivateBuy(true);
+    eng.trailBeginBuy(100);  // trigger at openPrice + 100pts = 1.10100
+    eng.beBuy(50);           // SL target = openPrice + 50pts = 1.10050
+    // bar.high = 1.10100 (at trigger), bar.low = 1.10060 (above new SL — no exit)
+    const bar = makeSingleCandle(1.10080, 1.10100, 1.10060, 1.10080);
+    await eng.onBar(bar, makeBars(Array(3).fill(1.1008)));
+    expect(eng.getSLBuy()).toBeCloseTo(1.10000 + 50 * 0.00001, 5);
+    expect(eng.isLong()).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// P4 – onBar trailing stop (TrailMode.Dst)
+// ─────────────────────────────────────────────────────────────
+
+describe('P4 – onBar: trailing stop (TrailMode.Dst)', () => {
+  it('trailing SL ratchets upward as bar.high advances', async () => {
+    const broker = mockBroker(1.10000);
+    const eng = new TradingEngine(EURUSD5, broker);
+    await eng.buy();  // fill at 1.10000
+    eng.trailModeBuy(TrailMode.Dst, 500);  // 500pt = 0.00500 distance
+    eng.trailActivateBuy(true);
+    // bar.high = 1.10300; bar.low = 1.10100 (above new SL of 1.09800 — no exit)
+    const bar = makeSingleCandle(1.10100, 1.10300, 1.10100, 1.10200);
+    await eng.onBar(bar, makeBars(Array(3).fill(1.102)));
+    // newSL = 1.10300 − 500 × 0.00001 = 1.09800
+    expect(eng.getSLBuy()).toBeCloseTo(1.10300 - 500 * 0.00001, 5);
+    expect(eng.isLong()).toBe(true);
+  });
+
+  it('trailing SL fires when price subsequently drops below the trailed level', async () => {
+    const broker = mockBroker(1.10000);
+    const eng = new TradingEngine(EURUSD5, broker);
+    await eng.buy();
+    eng.trailModeBuy(TrailMode.Dst, 500);
+    eng.trailActivateBuy(true);
+    // Bar 1: sets trailing SL to 1.09800
+    await eng.onBar(
+      makeSingleCandle(1.10100, 1.10300, 1.10100, 1.10200),
+      makeBars(Array(3).fill(1.102)),
+    );
+    expect(eng.isLong()).toBe(true);
+    // Bar 2: bar.high < posPrice → trail frozen; bar.low=1.09700 < SL=1.09800 → fires
+    await eng.onBar(
+      makeSingleCandle(1.09900, 1.09900, 1.09700, 1.09750),
+      makeBars(Array(3).fill(1.099)),
+    );
+    expect(broker.closePosition).toHaveBeenCalledWith(Side.Long, 1, 'SL');
+    expect(eng.isLong()).toBe(false);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// P5 – hedging=false (net mode)
+// ─────────────────────────────────────────────────────────────
+
+describe('P5 – hedging=false: buy/sell net out opposite positions', () => {
+  it('sell() closes the existing long before opening short', async () => {
+    const broker = mockBroker(1.10000);
+    const eng = new TradingEngine(EURUSD5, broker, false);
+    await eng.buy();
+    expect(eng.isLong()).toBe(true);
+    await eng.sell();
+    expect(broker.closePosition).toHaveBeenCalledOnce();
+    expect(eng.isLong()).toBe(false);
+    expect(eng.isShort()).toBe(true);
+  });
+
+  it('buy() closes the existing short before opening long', async () => {
+    const broker = mockBroker(1.10000);
+    const eng = new TradingEngine(EURUSD5, broker, false);
+    await eng.sell();
+    expect(eng.isShort()).toBe(true);
+    await eng.buy();
+    expect(broker.closePosition).toHaveBeenCalledOnce();
+    expect(eng.isShort()).toBe(false);
+    expect(eng.isLong()).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// P6 – evaluateCandleATR03
+// ─────────────────────────────────────────────────────────────
+
+describe('P6 – evaluateCandleATR03', () => {
+  /**
+   * Builds a 17-bar Bars object for the ATR03 evaluator.
+   * bars[0] = current bar (not evaluated), bars[1] = signal bar,
+   * bars[2..16] = small-range history bars used for the ATR baseline.
+   *
+   * History bars: H=1.1020, L=1.1010, range=0.001
+   * ATR(14,1) with signal-bar TR ≈ 0.021:
+   *   ATR ≈ (0.021 + 13×0.001) / 14 ≈ 0.00243  →  2×ATR ≈ 0.00486
+   * Signal bar range = 0.021 >> 0.00486 ✓
+   */
+  function buildATR03Bars(signalBar: OHLC): Bars {
+    const history = makeOHLC(1.1015, { high: 1.1020, low: 1.1010 });
+    const current = makeOHLC(1.1015, { high: 1.1025, low: 1.1005 });
+    const data: OHLC[] = [current, signalBar, ...Array(15).fill(history)];
+    return new Bars(data);
+  }
+
+  it('bearish large-range bar → engine opens short with SL above signal bar high', async () => {
+    const broker = mockBroker(1.1000);
+    const eng = new TradingEngine(EURUSD5, broker);
+    // bearish: close(1.100) < open(1.120); tailPart=0 < 0.5; local low of last 5 bars ✓
+    const signalBar = makeOHLC(1.100, { open: 1.120, high: 1.121, low: 1.100 });
+    await evaluateCandleATR03(buildATR03Bars(signalBar), eng, EURUSD5);
+    expect(eng.isShort()).toBe(true);
+    // SL = signalBar.high + 5 points
+    expect(eng.getSLSell()).toBeCloseTo(1.121 + 5 * 0.00001, 5);
+  });
+
+  it('bullish large-range bar → engine opens long with SL below signal bar low', async () => {
+    const broker = mockBroker(1.1210);
+    const eng = new TradingEngine(EURUSD5, broker);
+    // bullish: close(1.121) > open(1.100); wickPart=0 < 0.5; local high of last 5 bars ✓
+    const signalBar = makeOHLC(1.121, { open: 1.100, high: 1.121, low: 1.099 });
+    await evaluateCandleATR03(buildATR03Bars(signalBar), eng, EURUSD5);
+    expect(eng.isLong()).toBe(true);
+    // SL = signalBar.low − 5 points
+    expect(eng.getSLBuy()).toBeCloseTo(1.099 - 5 * 0.00001, 5);
+  });
+
+  it('small-range bar (range < 2×ATR) → no position opened', async () => {
+    const broker = mockBroker(1.1000);
+    const eng = new TradingEngine(EURUSD5, broker);
+    // range = 0.001; same as history → ATR ≈ 0.001 → 2×ATR ≈ 0.002 > range → exits early
+    const signalBar = makeOHLC(1.1005, { open: 1.1015, high: 1.1020, low: 1.1010 });
+    await evaluateCandleATR03(buildATR03Bars(signalBar), eng, EURUSD5);
+    expect(eng.isLong()).toBe(false);
+    expect(eng.isShort()).toBe(false);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// Phase 3 — Edge cases, order attributes, ScaledOrderEngine
+// ─────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────
+// P7 – checkSLTP both-hit resolution
+// ─────────────────────────────────────────────────────────────
+
+describe('P7 – checkSLTP: both SL and TP hit on the same bar', () => {
+  it('bullish bar hitting both SL and TP → TP_BOTH (TP assumed first)', () => {
+    // open=1.099, close=1.110 → bullish; high=1.111 >= tp=1.110; low=1.089 <= sl=1.090
+    const bar = new Candle(1.099, 1.111, 1.089, 1.110, new Date());
+    const result = checkSLTP({
+      side: Side.Long, bar,
+      sl: 1.090, tp: 1.110,
+      slActive: true, tpActive: true, trailActive: false, spreadAbs: 0,
+    });
+    expect(result?.reason).toBe('TP_BOTH');
+  });
+
+  it('bearish bar hitting both SL and TP → SL_BOTH (SL assumed first)', () => {
+    // open=1.102, close=1.095 → bearish; high=1.111 >= tp=1.110; low=1.089 <= sl=1.090
+    const bar = new Candle(1.102, 1.111, 1.089, 1.095, new Date());
+    const result = checkSLTP({
+      side: Side.Long, bar,
+      sl: 1.090, tp: 1.110,
+      slActive: true, tpActive: true, trailActive: false, spreadAbs: 0,
+    });
+    expect(result?.reason).toBe('SL_BOTH');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// P8 – CO attribute: close opposite on fill
+// ─────────────────────────────────────────────────────────────
+
+describe('P8 – CO attribute: filling a sell order closes the open long', () => {
+  it('SELL_LIMIT with CO fills → long position is closed, short is opened', async () => {
+    const broker = mockBroker(1.10000);
+    const eng = new TradingEngine(EURUSD5, broker);
+    await eng.buy();                   // long open, size=1
+    eng.orderAttrCO(true);
+    eng.addSellLimit(1.1020);          // with CO
+    const bar = makeSingleCandle(1.1010, 1.1020, 1.1005, 1.1015);  // H touches limit
+    await eng.onBar(bar, makeBars(Array(3).fill(1.1015)));
+    // CO should have closed the long, then filled the short
+    expect(eng.isLong()).toBe(false);
+    expect(eng.isShort()).toBe(true);
+    expect(broker.closePosition).toHaveBeenCalledOnce();  // the CO close
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// P9 – REV attribute: reverse and re-enter with combined size
+// ─────────────────────────────────────────────────────────────
+
+describe('P9 – REV attribute: re-enters same side with original + new size', () => {
+  it('BUY_LIMIT with REV fills while long → closes existing long, opens long with double size', async () => {
+    const broker = mockBroker(1.10000);
+    const eng = new TradingEngine(EURUSD5, broker);
+    await eng.buy(1);                  // long open, size=1
+    eng.orderAttrREV(true);
+    eng.addBuyLimit(1.0980, 1);        // REV, size=1
+    const bar = makeSingleCandle(1.1000, 1.1005, 1.0980, 1.0990);
+    await eng.onBar(bar, makeBars(Array(3).fill(1.099)));
+    // REV: close existing long(1), re-open long(1+1=2)
+    expect(broker.closePosition).toHaveBeenCalledOnce();
+    expect(eng.isLong()).toBe(true);
+    expect(eng.getSizeBuy()).toBe(2);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// P10 – addBracket: pending order fill applies SL/TP from fill price
+// ─────────────────────────────────────────────────────────────
+
+describe('P10 – addBracket: SL and TP computed from pending order fill price', () => {
+  it('BUY_LIMIT bracket fills → SL below and TP above fill price', async () => {
+    const eng = new TradingEngine(EURUSD5, mockBroker());
+    // tpPts=500 → TP=1.0980+0.005=1.1030; bar.high=1.1005 < TP so it stays open
+    eng.addBracket({ entryType: 'BUY_LIMIT', entryPrice: 1.0980, slPts: 100, tpPts: 500 });
+    const bar = makeSingleCandle(1.1000, 1.1005, 1.0980, 1.0990);
+    await eng.onBar(bar, makeBars(Array(3).fill(1.099)));
+    expect(eng.isLong()).toBe(true);
+    // SL = 1.0980 − 100 pts = 1.0970
+    expect(eng.getSLBuy()).toBeCloseTo(1.0980 - 100 * 0.00001, 5);
+    // TP = 1.0980 + 500 pts = 1.1030
+    expect(eng.getTPBuy()).toBeCloseTo(1.0980 + 500 * 0.00001, 5);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// P11 – LimitConfirm.Wick: require close to confirm wick entry
+// ─────────────────────────────────────────────────────────────
+
+describe('P11 – LimitConfirm.Wick: entry requires bar to wick through and close above', () => {
+  it('bar wicks through limit and closes above → fills', async () => {
+    const eng = new TradingEngine(EURUSD5, mockBroker());
+    eng.orderLimitConfirm(LimitConfirm.Wick);
+    eng.addBuyLimit(1.0990);
+    // bar.low=1.0989 (<= limit=1.0990 ✓), bar.close=1.1000 (> 1.0990 ✓)
+    const bar = makeSingleCandle(1.1000, 1.1010, 1.0989, 1.1000);
+    await eng.onBar(bar, makeBars(Array(3).fill(1.1000)));
+    expect(eng.isLong()).toBe(true);
+  });
+
+  it('bar wicks through limit but closes below → does NOT fill', async () => {
+    const eng = new TradingEngine(EURUSD5, mockBroker());
+    eng.orderLimitConfirm(LimitConfirm.Wick);
+    eng.addBuyLimit(1.0990);
+    // bar.low=1.0989 (<= 1.0990 ✓), bar.close=1.0985 (NOT > 1.0990 ✗)
+    const bar = makeSingleCandle(1.1000, 1.1005, 1.0989, 1.0985);
+    await eng.onBar(bar, makeBars(Array(3).fill(1.099)));
+    expect(eng.isLong()).toBe(false);
+    expect(eng.getCntOrders()).toBe(1);  // order still in book
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// P12 – ScaledOrderEngine: ATR-mode base distance
+// ─────────────────────────────────────────────────────────────
+
+describe('P12 – ScaledOrderEngine: ATR-mode computes baseDist from ATR', () => {
+  it('atrMode="ATR 14" with distance=2 → baseDist ≈ 2 × ATR(14)', async () => {
+    const broker = mockBroker(1.10000);
+    const eng = new TradingEngine(EURUSD5, broker);
+
+    // Build 17 bars where ATR(14, shift=1) ≈ 0.001 (each bar range=0.001)
+    const bars = makeBars(
+      Array(17).fill(1.1000),
+      Array(17).fill(1.1005),  // high
+      Array(17).fill(1.0995),  // low → range=0.001, TR≈0.001
+    );
+
+    const atrPreset: ScaledOrderPreset = {
+      name: 'ATR-test',
+      atrMode: 'ATR 14',
+      distance: 2,
+      progressLimits: 1, progressStops: 1,
+      countLimits: 0, countStops: 0,
+      slRel: 0, trailBegin: 0, trailDistance: 0,
+      factorLong: 1, factorShort: 1,
+      attrOCO: false, attrCO: false, attrREV: false, attrNET: false,
+      instantOrderType: 'Market',
+      instantOrderDistance: 0,
+      chainLimits: false,
+      eachTick: false,
+    };
+
+    const scaled = new ScaledOrderEngine(eng, EURUSD5, atrPreset);
+    const result = await scaled.placeLong(bars, 1.10000);
+
+    // ATR(14, shift=1) ≈ 0.001 → baseDist ≈ 2 × 0.001 = 0.002
+    expect(result.baseDist).toBeCloseTo(0.001 * 2, 4);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// P13 – ScaledOrderEngine: order count and named preset lookup
+// ─────────────────────────────────────────────────────────────
+
+describe('P13 – ScaledOrderEngine: order count and named preset', () => {
+  const flatBars = makeBars(Array(30).fill(1.10000));
+
+  it('MTO preset with countLimits=3 countStops=1 places 5 orders in the book', async () => {
+    const broker = mockBroker(1.10000);
+    const eng = new TradingEngine(EURUSD5, broker);
+    const preset: ScaledOrderPreset = {
+      name: 'count-test',
+      atrMode: 'None', distance: 20,
+      progressLimits: 1, progressStops: 1,
+      countLimits: 3, countStops: 1,
+      slRel: 0, trailBegin: 0, trailDistance: 0,
+      factorLong: 1, factorShort: 1,
+      attrOCO: false, attrCO: false, attrREV: false, attrNET: false,
+      instantOrderType: 'MTO',
+      instantOrderDistance: 1,
+      chainLimits: false,
+      eachTick: false,
+    };
+    const scaled = new ScaledOrderEngine(eng, EURUSD5, preset);
+    await scaled.placeLong(flatBars, 1.10000);
+    // 1 MIT (instant) + 3 limits + 1 stop = 5 pending orders
+    expect(eng.getCntOrders()).toBe(5);
+  });
+
+  it('named preset "5xATR" resolves without throwing', () => {
+    const eng = new TradingEngine(EURUSD5, mockBroker());
+    expect(() => new ScaledOrderEngine(eng, EURUSD5, '5xATR')).not.toThrow();
+  });
+
+  it('unknown preset name throws an Error', () => {
+    const eng = new TradingEngine(EURUSD5, mockBroker());
+    expect(() => new ScaledOrderEngine(eng, EURUSD5, 'no-such-preset')).toThrow('Unknown preset');
   });
 });

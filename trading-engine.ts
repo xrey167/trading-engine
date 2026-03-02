@@ -474,6 +474,27 @@ export interface IBrokerAdapter {
 // TradingEngine — main state machine
 // ─────────────────────────────────────────────────────────────
 
+/**
+ * Core hedging engine — maintains one long slot and one short slot simultaneously.
+ *
+ * ## Setter-then-act pattern
+ * ```ts
+ * engine.sl(200);         // 200-point SL offset applied on next fill
+ * engine.tp(400);         // 400-point TP offset
+ * await engine.buy();     // SL and TP computed from the fill price
+ * ```
+ *
+ * ## Pending orders with bracket
+ * ```ts
+ * engine.bracketSL(100);
+ * engine.addBuyLimit(1.0950);    // bracket SL applied automatically when limit fills
+ * await engine.onBar(bar, bars); // drives fills, trail updates, and SL/TP exits
+ * ```
+ *
+ * @param symbol  Instrument metadata (name + decimal digits).
+ * @param broker  Live or simulated broker adapter.
+ * @param hedging When `false`, entering a new direction closes the opposite position first (net mode).
+ */
 export class TradingEngine {
   // Hedging: separate slots for long and short
   private longPos:  PositionSlot = emptySlot(Side.Long);
@@ -529,6 +550,11 @@ export class TradingEngine {
   // Market order execution
   // ──────────────────────────────────────────────────────────
 
+  /**
+   * Open (or add to) a long position at market.
+   * In net mode (`hedging=false`) closes any open short first.
+   * Applies pending bracket SL/TP from {@link bracketSL} / {@link bracketTP}.
+   */
   async buy(size?: number, info?: string): Promise<boolean> {
     const s = size ?? this._nextOrderSize;
     if (!this.hedging && this.shortPos.size > 0) await this._closeSlot(this.shortPos, info);
@@ -539,6 +565,11 @@ export class TradingEngine {
     return true;
   }
 
+  /**
+   * Open (or add to) a short position at market.
+   * In net mode (`hedging=false`) closes any open long first.
+   * Applies pending bracket SL/TP from {@link bracketSL} / {@link bracketTP}.
+   */
   async sell(size?: number, info?: string): Promise<boolean> {
     const s = size ?? this._nextOrderSize;
     if (!this.hedging && this.longPos.size > 0) await this._closeSlot(this.longPos, info);
@@ -549,18 +580,26 @@ export class TradingEngine {
     return true;
   }
 
+  /**
+   * Close the long position.
+   * @param minProfit   PL threshold (price-units × size). Close is skipped when PL < minProfit.
+   * @param currentPrice  Required to evaluate `minProfit`. When omitted the close always proceeds.
+   * @returns `true` if a close was issued, `false` if flat or blocked by the PL guard.
+   */
   async closeBuy(minProfit = -Infinity, currentPrice?: number): Promise<boolean> {
     if (this.longPos.size === 0) return false;
     if (minProfit > -Infinity && currentPrice !== undefined && this._slotPL(this.longPos, currentPrice) < minProfit) return false;
     return this._closeSlot(this.longPos);
   }
 
+  /** Close the short position. See {@link closeBuy} for parameter semantics. */
   async closeSell(minProfit = -Infinity, currentPrice?: number): Promise<boolean> {
     if (this.shortPos.size === 0) return false;
     if (minProfit > -Infinity && currentPrice !== undefined && this._slotPL(this.shortPos, currentPrice) < minProfit) return false;
     return this._closeSlot(this.shortPos);
   }
 
+  /** Close both positions. Returns `true` if at least one side was closed. */
   async closeAll(minProfit = -Infinity, currentPrice?: number): Promise<boolean> {
     const a = await this.closeBuy(minProfit, currentPrice);
     const b = await this.closeSell(minProfit, currentPrice);
@@ -1325,7 +1364,11 @@ export interface ScaledOrderPreset {
   attrCO:               boolean;
   /** REV (reverse) attribute */
   attrREV:              boolean;
-  /** NET mode (reduce position, don't add) */
+  /**
+   * NET mode flag (reduce position, don't add).
+   * Declared for compatibility with StereoTrader presets.
+   * NOT YET IMPLEMENTED in ScaledOrderEngine._place — setting this to true has no effect.
+   */
   attrNET:              boolean;
   /** How the first (instant) order executes: 'MTO' | 'Market' */
   instantOrderType:     'MTO' | 'Market';
@@ -1477,6 +1520,7 @@ export class ScaledOrderEngine {
     if (p.attrOCO) this.engine.orderAttrOCO(true);
     if (p.attrCO)  this.engine.orderAttrCO(true);
     if (p.attrREV) this.engine.orderAttrREV(true);
+    // p.attrNET: not implemented — TradingEngine net-mode is set via hedging=false constructor arg
     this.engine.orderSize(sizeFactor);
 
     // 5. Instant (first) order
