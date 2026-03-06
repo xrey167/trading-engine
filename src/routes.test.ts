@@ -1244,3 +1244,197 @@ describe('R24 – POST /v1/money-management', () => {
   });
 });
 
+// ─────────────────────────────────────────────────────────────
+// R25 – OpenBB Workspace integration endpoints
+// ─────────────────────────────────────────────────────────────
+
+describe('R25 – GET /widgets.json', () => {
+  let app: FastifyInstance;
+  beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
+  afterEach(() => app.close());
+
+  it('returns all 7 widget keys', async () => {
+    const res = await app.inject({ method: 'GET', url: '/widgets.json' });
+    expect(res.statusCode).toBe(200);
+    expect(Object.keys(res.json()).sort()).toEqual([
+      'account_balance', 'account_equity', 'deal_history',
+      'engine_config', 'engine_positions', 'pending_orders', 'symbol_info',
+    ]);
+  });
+
+  it('each widget has endpoint and type fields', async () => {
+    const res = await app.inject({ method: 'GET', url: '/widgets.json' });
+    for (const widget of Object.values(res.json()) as Record<string, unknown>[]) {
+      expect(widget).toHaveProperty('endpoint');
+      expect(widget).toHaveProperty('type');
+    }
+  });
+});
+
+describe('R25 – GET /apps.json', () => {
+  let app: FastifyInstance;
+  beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
+  afterEach(() => app.close());
+
+  it('returns trading_dashboard with Overview and History tabs', async () => {
+    const res = await app.inject({ method: 'GET', url: '/apps.json' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body).toHaveProperty('trading_dashboard');
+    expect(Object.keys(body.trading_dashboard.tabs).sort()).toEqual(['History', 'Overview']);
+  });
+});
+
+describe('R25 – GET /openbb/positions', () => {
+  let app: FastifyInstance;
+  beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
+  afterEach(() => app.close());
+
+  it('returns LONG and SHORT rows when flat', async () => {
+    const res = await app.inject({ method: 'GET', url: '/openbb/positions' });
+    expect(res.statusCode).toBe(200);
+    const [long, short] = res.json();
+    expect(long.side).toBe('LONG');
+    expect(long.status).toBe('FLAT');
+    expect(short.side).toBe('SHORT');
+    expect(short.status).toBe('FLAT');
+  });
+
+  it('returns null for openPrice/sl/tp when flat', async () => {
+    const res = await app.inject({ method: 'GET', url: '/openbb/positions' });
+    const [long] = res.json();
+    expect(long.openPrice).toBeNull();
+    expect(long.sl).toBeNull();
+    expect(long.tp).toBeNull();
+  });
+
+  it('returns numeric openPrice when open', async () => {
+    await app.inject({ method: 'POST', url: '/bars', payload: barsPayload(1, 1.1050) });
+    await app.inject({ method: 'POST', url: '/positions/long', payload: { size: 0.1 } });
+    const res = await app.inject({ method: 'GET', url: '/openbb/positions' });
+    const [long] = res.json();
+    expect(long.status).toBe('OPEN');
+    expect(long.openPrice).toBeTypeOf('number');
+  });
+});
+
+describe('R25 – GET /openbb/orders', () => {
+  let app: FastifyInstance;
+  beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
+  afterEach(() => app.close());
+
+  it('returns empty array with no pending orders', async () => {
+    const res = await app.inject({ method: 'GET', url: '/openbb/orders' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual([]);
+  });
+});
+
+describe('R25 – GET /openbb/account/equity', () => {
+  let app: FastifyInstance;
+  beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
+  afterEach(() => app.close());
+
+  it('returns value, label, delta', async () => {
+    const res = await app.inject({ method: 'GET', url: '/openbb/account/equity' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ label: 'Equity', value: expect.any(Number), delta: expect.any(Number) });
+  });
+});
+
+describe('R25 – GET /openbb/account/balance', () => {
+  let app: FastifyInstance;
+  beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
+  afterEach(() => app.close());
+
+  it('returns value, label, delta=0', async () => {
+    const res = await app.inject({ method: 'GET', url: '/openbb/account/balance' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ label: 'Balance', value: expect.any(Number), delta: 0 });
+  });
+});
+
+describe('R25 – GET /openbb/deals', () => {
+  let app: FastifyInstance;
+  beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
+  afterEach(() => app.close());
+
+  it('returns empty array on fresh paper broker', async () => {
+    const res = await app.inject({ method: 'GET', url: '/openbb/deals' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual([]);
+  });
+
+  it('accepts optional from/to query params', async () => {
+    const res = await app.inject({ method: 'GET', url: '/openbb/deals?from=2024-01-01&to=2024-12-31' });
+    expect(res.statusCode).toBe(200);
+  });
+});
+
+describe('R25 – GET /openbb/symbol', () => {
+  let app: FastifyInstance;
+  beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
+  afterEach(() => app.close());
+
+  it('returns 400 when symbol param is missing', async () => {
+    const res = await app.inject({ method: 'GET', url: '/openbb/symbol' });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('returns 404 for unknown symbol', async () => {
+    const res = await app.inject({ method: 'GET', url: '/openbb/symbol?symbol=UNKNOWN' });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+describe('R25 – GET /openbb/engine-config', () => {
+  let app: FastifyInstance;
+  beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
+  afterEach(() => app.close());
+
+  it('returns omni content array with ATR config markdown', async () => {
+    const res = await app.inject({ method: 'GET', url: '/openbb/engine-config' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(Array.isArray(body)).toBe(true);
+    expect(body[0]).toMatchObject({ type: 'text' });
+    expect(body[0].content).toContain('## ATR Config');
+    expect(body[0].content).toContain('period');
+  });
+});
+
+describe('R25 – OPENBB_API_KEY auth guard', () => {
+  const ORIGINAL_KEY = process.env.OPENBB_API_KEY;
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    process.env.OPENBB_API_KEY = 'test-secret';
+    app = await buildApp({ logger: false });
+    await app.ready();
+  });
+  afterEach(async () => {
+    process.env.OPENBB_API_KEY = ORIGINAL_KEY;
+    await app.close();
+  });
+
+  it('returns 401 with no apiKey', async () => {
+    const res = await app.inject({ method: 'GET', url: '/openbb/positions' });
+    expect(res.statusCode).toBe(401);
+    expect(res.json()).toEqual({ error: 'Unauthorized' });
+  });
+
+  it('returns 401 with wrong apiKey', async () => {
+    const res = await app.inject({ method: 'GET', url: '/openbb/positions?apiKey=wrong' });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('returns 200 with correct apiKey', async () => {
+    const res = await app.inject({ method: 'GET', url: '/openbb/positions?apiKey=test-secret' });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('does NOT affect existing /positions route', async () => {
+    const res = await app.inject({ method: 'GET', url: '/positions' });
+    expect(res.statusCode).toBe(200);
+  });
+});

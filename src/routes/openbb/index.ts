@@ -1,4 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
+import { Type } from '@sinclair/typebox';
 import { Side } from '../../../trading-engine.js';
 
 // ─── Discovery configs ───────────────────────────────────────────────────────
@@ -95,6 +96,18 @@ const APPS_CONFIG = {
   },
 };
 
+// Querystring schemas (TypeBox) — validates and strips unknown params
+const DealsQuerySchema = Type.Object({
+  from:   Type.Optional(Type.String()),
+  to:     Type.Optional(Type.String()),
+  apiKey: Type.Optional(Type.String()),
+});
+
+const SymbolQuerySchema = Type.Object({
+  symbol: Type.Optional(Type.String()),
+  apiKey: Type.Optional(Type.String()),
+});
+
 // ─── Plugin ──────────────────────────────────────────────────────────────────
 
 // NOT fp()-wrapped — hooks and routes are scoped to this child only.
@@ -125,15 +138,18 @@ const openbbRoute: FastifyPluginAsync = async (fastify) => {
     const { engine, broker } = fastify;
     const price = broker.getPrice();
     const rows = [Side.Long, Side.Short].map(side => {
-      const size = side === Side.Long ? engine.getSizeBuy() : engine.getSizeSell();
+      const isLong = side === Side.Long;
+      const size = isLong ? engine.getSizeBuy() : engine.getSizeSell();
+      const open = size > 0;
       return {
-        side:      side === Side.Long ? 'LONG' : 'SHORT',
+        side:      isLong ? 'LONG' : 'SHORT',
         size,
-        openPrice: side === Side.Long ? engine.getBEBuy()      : engine.getBESell(),
-        sl:        side === Side.Long ? engine.getSLBuy()      : engine.getSLSell(),
-        tp:        side === Side.Long ? engine.getTPBuy()      : engine.getTPSell(),
-        pl:        side === Side.Long ? engine.getPLBuy(price) : engine.getPLSell(price),
-        status:    size > 0 ? 'OPEN' : 'FLAT',
+        // null when flat — engine uses -1 as a sentinel for "not set"
+        openPrice: open ? (isLong ? engine.getBEBuy()      : engine.getBESell())  : null,
+        sl:        open ? (isLong ? engine.getSLBuy()      : engine.getSLSell())  : null,
+        tp:        open ? (isLong ? engine.getTPBuy()      : engine.getTPSell())  : null,
+        pl:        isLong ? engine.getPLBuy(price) : engine.getPLSell(price),
+        status:    open ? 'OPEN' : 'FLAT',
       };
     });
     return reply.send(rows);
@@ -159,7 +175,9 @@ const openbbRoute: FastifyPluginAsync = async (fastify) => {
 
   // ── History ────────────────────────────────────────────────────────────────
 
-  fastify.get('/openbb/deals', async (req, reply) => {
+  fastify.get('/openbb/deals', {
+    schema: { querystring: DealsQuerySchema },
+  }, async (req, reply) => {
     const { from, to } = req.query as { from?: string; to?: string };
     const fromDate = from ? new Date(from) : new Date(0);
     const toDate   = to   ? new Date(to)   : new Date();
@@ -180,7 +198,9 @@ const openbbRoute: FastifyPluginAsync = async (fastify) => {
 
   // ── Market data ────────────────────────────────────────────────────────────
 
-  fastify.get('/openbb/symbol', async (req, reply) => {
+  fastify.get('/openbb/symbol', {
+    schema: { querystring: SymbolQuerySchema },
+  }, async (req, reply) => {
     const { symbol } = req.query as { symbol?: string };
     if (!symbol) return reply.status(400).send({ error: 'symbol query param required' });
     const result = await fastify.broker.getSymbolInfo(symbol);
@@ -195,8 +215,8 @@ const openbbRoute: FastifyPluginAsync = async (fastify) => {
     const md = [
       '## ATR Config',
       '',
-      `| Key | Value |`,
-      `|-----|-------|`,
+      '| Key | Value |',
+      '|-----|-------|',
       `| period               | ${cfg.period}               |`,
       `| method               | ${cfg.method}               |`,
       `| shift                | ${cfg.shift}                |`,
