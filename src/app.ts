@@ -25,6 +25,11 @@ export interface BuildAppConfig {
   hedging?: boolean;
 }
 
+// TODO(architecture): Use-cases are instantiated inline in route handlers (e.g.
+// `new GetPositionsUseCase(broker, log)`). At the current project size this is fine, but
+// if the number of use-cases or their dependency graphs grow, consider a factory or
+// composition root here in buildApp() that pre-wires use-cases and decorates them on the
+// Fastify instance, keeping route handlers thin.
 export async function buildApp(
   opts: FastifyServerOptions = {},
   cfg: BuildAppConfig = {},

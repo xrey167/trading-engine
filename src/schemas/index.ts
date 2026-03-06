@@ -1,5 +1,11 @@
 import { Type, type Static } from '@sinclair/typebox';
 
+// Schema co-location pattern:
+// - Engine-level schemas (Side, TrailMode, OHLC, etc.) are defined here.
+// - Domain schemas (PositionInfoVO, AccountInfoVO, etc.) are defined at source
+//   in their domain modules (domain/position.ts, domain/account.ts) and
+//   re-exported at the bottom of this file for route consumption.
+
 // ─────────────────────────────────────────────────────────────
 // Enum literal unions  (as const maps → TypeBox literals)
 // ─────────────────────────────────────────────────────────────
