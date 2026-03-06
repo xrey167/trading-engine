@@ -1,0 +1,1214 @@
+openapi: 3.1.0
+
+info:
+  title: Trading Engine API
+  version: 1.0.0
+  description: |
+    REST + WebSocket API for a live trading engine ported from MQL/StereoTrader.
+
+    ## Architecture
+    The engine is stateful — all positions and orders live in a single in-memory
+    instance per server process. Calls are not isolated by user in the default
+    paper-broker mode.
+
+    ## Coordinate system
+    - **Side** integers: `0` = None/flat, `1` = Long, `-1` = Short
+    - **Points** (pts): smallest price unit (e.g. 0.00001 for EURUSD)
+    - **Lots**: standard FX lots (1.0 = 100 000 units)
+
+    ## Authentication
+    Optional API-key guard on OpenBB routes only.
+    Set `OPENBB_API_KEY` env var and pass `?apiKey=<value>` on OpenBB endpoints.
+
+servers:
+  - url: http://localhost:3000
+    description: Local development (paper broker)
+
+tags:
+  - name: Engine
+    description: Bar feed, account, engine config, WebSocket stream
+  - name: Positions
+    description: Engine-level LONG/SHORT position slots (direct engine API)
+  - name: Orders
+    description: Pending limit/stop/MIT orders and bracket orders
+  - name: Scaled Orders
+    description: Multi-order grid placement via named presets
+  - name: ATR
+    description: ATR module runtime configuration
+  - name: Signal
+    description: Stateless signal evaluation and backtesting
+  - name: Gateway Positions
+    description: Broker-gateway position management (ticket-based, paper broker)
+  - name: OpenBB
+    description: OpenBB Workspace discovery and data endpoints
+
+paths:
+
+  # ─────────────────────────────────────────────────────────────
+  # Engine
+  # ─────────────────────────────────────────────────────────────
+
+  /bars:
+    post:
+      tags: [Engine]
+      summary: Push a new bar to the engine
+      description: |
+        Drives `engine.onBar()` and the ATR module. Must be called before any
+        position route that requires a price reference. Rate-limited to 120 req/s.
+      operationId: postBars
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostBarsBody'
+            example:
+              bar:  { open: 1.0850, high: 1.0872, low: 1.0841, close: 1.0865, time: "2024-01-15T10:00:00Z", volume: 1234 }
+              bars: [{ open: 1.0840, high: 1.0860, low: 1.0830, close: 1.0850, time: "2024-01-15T09:00:00Z" }]
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+
+  /account:
+    get:
+      tags: [Engine]
+      summary: Get account equity and balance
+      description: Returns the paper-broker's simulated equity and balance (always 10 000).
+      operationId: getAccount
+      responses:
+        '200':
+          description: Account snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+              example: { equity: 10000, balance: 10000 }
+
+  /engine/config:
+    put:
+      tags: [Engine]
+      summary: Update engine-level flags
+      operationId: putEngineConfig
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PutEngineConfigBody'
+            example: { removeOrdersOnFlat: true }
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+
+  /stream:
+    get:
+      tags: [Engine]
+      summary: WebSocket event stream
+      description: |
+        Upgrades to WebSocket. Emits JSON messages for engine events:
+        - `{ type: "fill",  side, size, price, time, id }` — order filled
+        - `{ type: "close", side, size, price, time }` — position closed
+        - `{ type: "bar",   bar: OHLC }` — bar processed
+      operationId: getStream
+
+  # ─────────────────────────────────────────────────────────────
+  # Positions (engine-level slots)
+  # ─────────────────────────────────────────────────────────────
+
+  /positions:
+    get:
+      tags: [Positions]
+      summary: Get LONG and SHORT position slots
+      description: Returns the full state of both engine position slots including P&L at current price.
+      operationId: getPositions
+      responses:
+        '200':
+          description: Both position slots
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  long:
+                    allOf:
+                      - $ref: '#/components/schemas/PositionSlot'
+                      - type: object
+                        properties:
+                          pl: { type: number, description: "Unrealised P&L" }
+                  short:
+                    allOf:
+                      - $ref: '#/components/schemas/PositionSlot'
+                      - type: object
+                        properties:
+                          pl: { type: number }
+
+  /positions/long:
+    post:
+      tags: [Positions]
+      summary: Market buy (open or add to LONG)
+      operationId: postPositionsLong
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostMarketOrderBody'
+            example: { size: 1.0 }
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /positions/short:
+    post:
+      tags: [Positions]
+      summary: Market sell (open or add to SHORT)
+      operationId: postPositionsShort
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostMarketOrderBody'
+            example: { size: 1.0 }
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /positions/hedge:
+    post:
+      tags: [Positions]
+      summary: Hedge all open positions
+      operationId: postPositionsHedge
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+
+  /positions/long/flat:
+    post:
+      tags: [Positions]
+      summary: Close LONG and cancel buy orders
+      operationId: postPositionsLongFlat
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+
+  /positions/short/flat:
+    post:
+      tags: [Positions]
+      summary: Close SHORT and cancel sell orders
+      operationId: postPositionsShortFlat
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+
+  /positions/flat:
+    post:
+      tags: [Positions]
+      summary: Close all positions and cancel all orders
+      operationId: postPositionsFlat
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+
+  /positions/{side}:
+    delete:
+      tags: [Positions]
+      summary: Close a position by side
+      operationId: deletePosition
+      parameters:
+        - name: side
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [long, short, all]
+          description: Which side(s) to close
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /positions/{side}/sl-tp:
+    put:
+      tags: [Positions]
+      summary: Update SL/TP, trailing stop, or break-even on a live position
+      operationId: putPositionSlTp
+      parameters:
+        - name: side
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [long, short]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PutPositionSlTpBody'
+            example:
+              sl: 50
+              tp: 100
+              slActive: true
+              tpActive: true
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  # ─────────────────────────────────────────────────────────────
+  # Orders
+  # ─────────────────────────────────────────────────────────────
+
+  /orders:
+    get:
+      tags: [Orders]
+      summary: List all pending orders
+      operationId: getOrders
+      responses:
+        '200':
+          description: Array of pending orders
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PendingOrder'
+
+    post:
+      tags: [Orders]
+      summary: Place a pending order
+      description: |
+        Supports all limit, stop, MIT, and trailing-entry order types.
+        Rate-limited to 10 req/s. `trailEntry` is required for `*_TRAIL` types.
+      operationId: postOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostOrderBody'
+            examples:
+              buyLimit:
+                summary: Simple buy limit
+                value: { type: "BUY_LIMIT", price: 1.0800, size: 1.0 }
+              buyLimitTrail:
+                summary: Trailing buy limit (ATR mode)
+                value:
+                  type: BUY_LIMIT_TRAIL
+                  price: 1.0800
+                  size: 1.0
+                  trailEntry: { mode: 2, distancePts: 200, periods: 14 }
+              bracket:
+                summary: Order with bracket SL/TP
+                value:
+                  type: SELL_STOP
+                  price: 1.0750
+                  size: 1.0
+                  attributes: { bracketSL: 30, bracketTP: 60 }
+      responses:
+        '200':
+          description: Order placed, returns its ID
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, example: "ord_abc123" }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+    delete:
+      tags: [Orders]
+      summary: Bulk cancel orders by side
+      operationId: deleteOrders
+      parameters:
+        - name: side
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [buy, sell, all]
+          description: Which side(s) to cancel
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /orders/bracket:
+    post:
+      tags: [Orders]
+      summary: Place a bracket order (entry + SL/TP in points)
+      operationId: postBracketOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostBracketBody'
+            example:
+              entryType: BUY_LIMIT
+              entryPrice: 1.0800
+              slPts: 30
+              tpPts: 60
+              size: 1.0
+      responses:
+        '200':
+          description: Bracket order placed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /orders/{id}:
+    patch:
+      tags: [Orders]
+      summary: Move a pending order to a new price
+      operationId: patchOrder
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchOrderBody'
+            example: { price: 1.0810 }
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags: [Orders]
+      summary: Cancel a single pending order
+      operationId: deleteOrder
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ─────────────────────────────────────────────────────────────
+  # Scaled Orders
+  # ─────────────────────────────────────────────────────────────
+
+  /scaled-orders:
+    post:
+      tags: [Scaled Orders]
+      summary: Place a multi-order grid using a named preset
+      description: |
+        Runs the `ScaledOrderEngine` for the given preset. ATR-based presets
+        require `dailyBars` to compute distances.
+      operationId: postScaledOrders
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostScaledOrdersBody'
+            example:
+              side: long
+              preset: "Default"
+              currentPrice: 1.0865
+      responses:
+        '200':
+          description: Order IDs and computed distances
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ScaledOrderResult'
+                  - type: object
+                    properties:
+                      long:  { $ref: '#/components/schemas/ScaledOrderResult' }
+                      short: { $ref: '#/components/schemas/ScaledOrderResult' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  # ─────────────────────────────────────────────────────────────
+  # ATR
+  # ─────────────────────────────────────────────────────────────
+
+  /atr/config:
+    put:
+      tags: [ATR]
+      summary: Update ATR module multipliers and flags at runtime
+      description: |
+        All fields are optional — only supplied fields are updated.
+        The ATR module automatically applies SL/TP/trail offsets after each bar.
+      operationId: putAtrConfig
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PutAtrConfigBody'
+            example:
+              period: 14
+              method: 0
+              shift: 1
+              slMultiplier: 1.5
+              tpMultiplier: 2.5
+              trailBeginMultiplier: 1.0
+              trailDistMultiplier: 0.8
+              onlyWhenFlat: false
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+
+  # ─────────────────────────────────────────────────────────────
+  # Signal / Quant
+  # ─────────────────────────────────────────────────────────────
+
+  /v1/signal:
+    post:
+      tags: [Signal]
+      summary: Evaluate a trading signal on a bar series
+      description: |
+        Stateless — runs the strategy against supplied bars and returns BUY/SELL/HOLD.
+        Does not affect engine state.
+      operationId: postSignal
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignalBody'
+            example:
+              strategy: VolumeBreakout
+              symbol: EURUSD
+              timeframe: H1
+              bars:
+                - { open: 1.0850, high: 1.0872, low: 1.0841, close: 1.0865, time: "2024-01-15T10:00:00Z", volume: 2500 }
+      responses:
+        '200':
+          description: Signal result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    enum: [BUY, SELL, HOLD]
+              example: { result: "BUY" }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /v1/backtest:
+    post:
+      tags: [Signal]
+      summary: Backtest a strategy over a bar series
+      operationId: postBacktest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BacktestBody'
+            example:
+              strategy: VolumeBreakout
+              symbol: EURUSD
+              timeframe: H1
+              bars:
+                - { open: 1.0850, high: 1.0872, low: 1.0841, close: 1.0865, time: "2024-01-15T10:00:00Z", volume: 2500 }
+                - { open: 1.0840, high: 1.0860, low: 1.0830, close: 1.0850, time: "2024-01-15T09:00:00Z", volume: 1800 }
+      responses:
+        '200':
+          description: Backtest summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BacktestSummary'
+              example: { signalCount: 100, buyCount: 22, sellCount: 18, holdCount: 60 }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /v1/money-management:
+    post:
+      tags: [Signal]
+      summary: Validate a money-management configuration
+      description: 'Returns {valid:true} if the config is structurally valid; 400 on errors.'
+      operationId: postMoneyManagement
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MoneyManagementConfig'
+      responses:
+        '200':
+          description: Config is valid
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid: { type: boolean, example: true }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  # ─────────────────────────────────────────────────────────────
+  # Gateway Positions (ticket-based, paper broker)
+  # ─────────────────────────────────────────────────────────────
+
+  /v1/positions:
+    get:
+      tags: [Gateway Positions]
+      summary: List open broker positions
+      description: |
+        Returns positions from the broker gateway (ticket-based, not engine slots).
+        User is hardcoded to `default` — replace with auth before production.
+      operationId: getV1Positions
+      responses:
+        '200':
+          description: List of open positions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PositionInfoVO'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /v1/positions/{ticket}:
+    delete:
+      tags: [Gateway Positions]
+      summary: Close a position by ticket number
+      operationId: deleteV1Position
+      parameters:
+        - name: ticket
+          in: path
+          required: true
+          schema: { type: integer }
+          example: 123456
+        - name: deviation
+          in: query
+          schema: { type: integer, minimum: 0 }
+          description: Maximum allowed slippage in points
+      responses:
+        '204':
+          description: Position closed
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      tags: [Gateway Positions]
+      summary: Modify SL/TP on an open position
+      operationId: patchV1Position
+      parameters:
+        - name: ticket
+          in: path
+          required: true
+          schema: { type: integer }
+          example: 123456
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [stopLoss, takeProfit]
+              properties:
+                stopLoss:   { type: number, minimum: 0, example: 1.0820 }
+                takeProfit: { type: number, minimum: 0, example: 1.0920 }
+      responses:
+        '204':
+          description: Position modified
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ─────────────────────────────────────────────────────────────
+  # OpenBB Workspace
+  # ─────────────────────────────────────────────────────────────
+
+  /widgets.json:
+    get:
+      tags: [OpenBB]
+      summary: OpenBB widget discovery manifest
+      description: |
+        Required by the OpenBB Workspace discovery protocol.
+        Point your backend URL at `http://localhost:3000` in Workspace settings.
+      operationId: getWidgets
+      security: []
+      responses:
+        '200':
+          description: Widget definitions object
+
+  /apps.json:
+    get:
+      tags: [OpenBB]
+      summary: OpenBB app/dashboard manifest
+      operationId: getApps
+      security: []
+      responses:
+        '200':
+          description: App definitions object
+
+  /openbb/positions:
+    get:
+      tags: [OpenBB]
+      summary: Live positions grid (polled every 3s by Workspace)
+      operationId: getOpenBBPositions
+      parameters:
+        - $ref: '#/components/parameters/ApiKey'
+      responses:
+        '200':
+          description: Array of LONG and SHORT position rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    side:      { type: string, enum: [LONG, SHORT] }
+                    size:      { type: number }
+                    openPrice: { type: ['number', 'null'] }
+                    sl:        { type: ['number', 'null'] }
+                    tp:        { type: ['number', 'null'] }
+                    pl:        { type: number }
+                    status:    { type: string, enum: [OPEN, FLAT] }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /openbb/orders:
+    get:
+      tags: [OpenBB]
+      summary: Pending orders grid
+      operationId: getOpenBBOrders
+      parameters:
+        - $ref: '#/components/parameters/ApiKey'
+      responses:
+        '200':
+          description: Array of pending orders
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PendingOrder'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /openbb/account/equity:
+    get:
+      tags: [OpenBB]
+      summary: Account equity metric
+      operationId: getOpenBBEquity
+      parameters:
+        - $ref: '#/components/parameters/ApiKey'
+      responses:
+        '200':
+          description: Equity metric value
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  value: { type: number, example: 10250 }
+                  label: { type: string, example: "Equity" }
+                  delta: { type: number, example: 250 }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /openbb/account/balance:
+    get:
+      tags: [OpenBB]
+      summary: Account balance metric
+      operationId: getOpenBBBalance
+      parameters:
+        - $ref: '#/components/parameters/ApiKey'
+      responses:
+        '200':
+          description: Balance metric value
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  value: { type: number, example: 10000 }
+                  label: { type: string, example: "Balance" }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /openbb/deals:
+    get:
+      tags: [OpenBB]
+      summary: Deal history table
+      operationId: getOpenBBDeals
+      parameters:
+        - $ref: '#/components/parameters/ApiKey'
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+          example: "2024-01-01"
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+          example: "2024-01-31"
+      responses:
+        '200':
+          description: Deal history rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DealRow'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /openbb/symbol:
+    get:
+      tags: [OpenBB]
+      summary: Symbol info table
+      operationId: getOpenBBSymbol
+      parameters:
+        - $ref: '#/components/parameters/ApiKey'
+        - name: symbol
+          in: query
+          required: true
+          schema: { type: string }
+          example: "EURUSD"
+      responses:
+        '200':
+          description: Symbol info as single-row table
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SymbolInfoVO'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /openbb/engine-config:
+    get:
+      tags: [OpenBB]
+      summary: Engine and ATR config (omni widget)
+      operationId: getOpenBBEngineConfig
+      parameters:
+        - $ref: '#/components/parameters/ApiKey'
+      responses:
+        '200':
+          description: Markdown config block
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    content: { type: string }
+                    type:    { type: string, enum: [text] }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+# ─────────────────────────────────────────────────────────────
+# Components
+# ─────────────────────────────────────────────────────────────
+
+components:
+
+  parameters:
+    ApiKey:
+      name: apiKey
+      in: query
+      required: false
+      schema: { type: string }
+      description: Required only when `OPENBB_API_KEY` env var is set on the server.
+
+  responses:
+    Ok:
+      description: Success
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/OkResponse' }
+    BadRequest:
+      description: Invalid input
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example: { error: "Unknown side: foo" }
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example: { error: "Order abc not found" }
+    Unauthorized:
+      description: Missing or invalid API key
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example: { error: "Unauthorized" }
+    InternalError:
+      description: Unexpected server error
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  schemas:
+
+    # ── Primitives / enums ──────────────────────────────────────
+
+    Side:
+      type: integer
+      enum: [0, 1, -1]
+      description: "`0` = None/flat, `1` = Long, `-1` = Short"
+
+    TrailMode:
+      type: integer
+      enum: [0, 1, 2, 3, 5, 6, 7]
+      description: |
+        `0`=None, `1`=Points, `2`=ATR, `3`=BarHigh/Low,
+        `5`=HL2, `6`=Close, `7`=ATRd. Value 4 is reserved.
+
+    AtrMethod:
+      type: integer
+      enum: [0, 1]
+      description: "`0`=RMA (Wilder), `1`=SMA"
+
+    LimitConfirm:
+      type: integer
+      enum: [0, 1, 2, 3]
+
+    OrderEntryType:
+      type: string
+      enum:
+        - BUY_LIMIT
+        - BUY_STOP
+        - SELL_LIMIT
+        - SELL_STOP
+        - BUY_MIT
+        - SELL_MIT
+        - BUY_LIMIT_TRAIL
+        - BUY_STOP_TRAIL
+        - SELL_LIMIT_TRAIL
+        - SELL_STOP_TRAIL
+
+    OkResponse:
+      type: object
+      required: [ok]
+      properties:
+        ok: { type: boolean, example: true }
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+
+    Account:
+      type: object
+      required: [equity, balance]
+      properties:
+        equity:  { type: number, example: 10000 }
+        balance: { type: number, example: 10000 }
+
+    # ── OHLC ───────────────────────────────────────────────────
+
+    OHLC:
+      type: object
+      required: [open, high, low, close, time]
+      properties:
+        open:   { type: number, example: 1.0850 }
+        high:   { type: number, example: 1.0872 }
+        low:    { type: number, example: 1.0841 }
+        close:  { type: number, example: 1.0865 }
+        time:   { type: string, format: date-time }
+        volume: { type: number, example: 1234 }
+
+    # ── Trail / position slot ───────────────────────────────────
+
+    TrailConfig:
+      type: object
+      required: [mode, distancePts, periods]
+      properties:
+        mode:        { $ref: '#/components/schemas/TrailMode' }
+        distancePts: { type: number, example: 200 }
+        periods:     { type: number, example: 14 }
+
+    TrailState:
+      type: object
+      required: [active, plhRef]
+      properties:
+        active: { type: boolean }
+        plhRef: { type: number }
+
+    PositionSlot:
+      type: object
+      required: [side, size, openPrice, openTime, sl, tp, slOffsetPts, tpOffsetPts,
+                 slActive, tpActive, trailCfg, trailState, trailActive,
+                 trailBeginPts, beActive, beAddPts]
+      properties:
+        side:          { $ref: '#/components/schemas/Side' }
+        size:          { type: number, example: 1.0 }
+        openPrice:     { type: number, example: 1.0850 }
+        openTime:
+          oneOf:
+            - { type: string, format: date-time }
+            - { type: 'null' }
+          description: "`null` when position is flat"
+        sl:            { type: number, example: 0 }
+        tp:            { type: number, example: 0 }
+        slOffsetPts:   { type: number }
+        tpOffsetPts:   { type: number }
+        slActive:      { type: boolean }
+        tpActive:      { type: boolean }
+        trailCfg:      { $ref: '#/components/schemas/TrailConfig' }
+        trailState:    { $ref: '#/components/schemas/TrailState' }
+        trailActive:   { type: boolean }
+        trailBeginPts: { type: number }
+        beActive:      { type: boolean }
+        beAddPts:      { type: number }
+
+    PendingOrder:
+      type: object
+      required: [id, type, side, price, size, time]
+      properties:
+        id:    { type: string, example: "ord_abc123" }
+        type:  { $ref: '#/components/schemas/OrderEntryType' }
+        side:  { $ref: '#/components/schemas/Side' }
+        price: { type: number, example: 1.0800 }
+        size:  { type: number, example: 1.0 }
+        time:  { type: string, format: date-time }
+
+    # ── Request bodies ──────────────────────────────────────────
+
+    PostBarsBody:
+      type: object
+      required: [bar, bars]
+      properties:
+        bar:
+          allOf:
+            - $ref: '#/components/schemas/OHLC'
+          description: The current (most-recent) bar
+        bars:
+          type: array
+          items: { $ref: '#/components/schemas/OHLC' }
+          description: Historical bars (newest first) for indicator calculations
+
+    PostMarketOrderBody:
+      type: object
+      properties:
+        size: { type: number, example: 1.0, description: "Defaults to 1.0 if omitted" }
+
+    PostOrderBody:
+      type: object
+      required: [type, price]
+      properties:
+        type:  { $ref: '#/components/schemas/OrderEntryType' }
+        price: { type: number, example: 1.0800 }
+        size:  { type: number, example: 1.0, description: "Defaults to 1.0" }
+        attributes:
+          type: object
+          properties:
+            oco:          { type: boolean }
+            co:           { type: boolean }
+            cs:           { type: boolean }
+            rev:          { type: boolean }
+            bracketSL:    { type: number, description: "Bracket stop-loss in points" }
+            bracketTP:    { type: number, description: "Bracket take-profit in points" }
+            pullbackPts:  { type: number }
+            limitConfirm: { $ref: '#/components/schemas/LimitConfirm' }
+        trailEntry:
+          type: object
+          required: [mode, distancePts]
+          description: Required for `*_TRAIL` order types
+          properties:
+            mode:        { $ref: '#/components/schemas/TrailMode' }
+            distancePts: { type: number, example: 200 }
+            periods:     { type: number, example: 14 }
+
+    PostBracketBody:
+      type: object
+      required: [entryType, entryPrice, slPts, tpPts]
+      properties:
+        entryType:
+          type: string
+          enum: [BUY_LIMIT, BUY_STOP, SELL_LIMIT, SELL_STOP]
+        entryPrice: { type: number, example: 1.0800 }
+        slPts:      { type: number, example: 30, description: "Stop-loss distance in points" }
+        tpPts:      { type: number, example: 60, description: "Take-profit distance in points" }
+        size:       { type: number, example: 1.0 }
+
+    PatchOrderBody:
+      type: object
+      required: [price]
+      properties:
+        price: { type: number, example: 1.0810 }
+
+    PutPositionSlTpBody:
+      type: object
+      properties:
+        sl:               { type: number, description: "SL offset in points" }
+        tp:               { type: number, description: "TP offset in points" }
+        slActive:         { type: boolean }
+        tpActive:         { type: boolean }
+        trailBeginPts:    { type: number }
+        beActive:         { type: boolean }
+        beAddPts:         { type: number }
+        slAbsolute:       { type: number, description: "Absolute SL price level" }
+        tpAbsolute:       { type: number, description: "Absolute TP price level" }
+        trailMode:        { $ref: '#/components/schemas/TrailMode' }
+        trailDistancePts: { type: number }
+        trailPeriods:     { type: number }
+        trailActive:      { type: boolean }
+
+    PutEngineConfigBody:
+      type: object
+      properties:
+        removeOrdersOnFlat: { type: boolean, description: "Cancel all pending orders when position goes flat" }
+
+    PutAtrConfigBody:
+      type: object
+      properties:
+        period:               { type: integer, minimum: 1, example: 14 }
+        method:               { $ref: '#/components/schemas/AtrMethod' }
+        shift:                { type: integer, minimum: 0, example: 1 }
+        slMultiplier:         { type: number, minimum: 0, example: 1.5 }
+        tpMultiplier:         { type: number, minimum: 0, example: 2.5 }
+        trailBeginMultiplier: { type: number, minimum: 0, example: 1.0 }
+        trailDistMultiplier:  { type: number, minimum: 0, example: 0.8 }
+        onlyWhenFlat:         { type: boolean }
+
+    PostScaledOrdersBody:
+      type: object
+      required: [side, preset, currentPrice]
+      properties:
+        side:
+          type: string
+          enum: [long, short, both]
+        preset:
+          type: string
+          description: Named preset key from SCALED_ORDER_PRESETS
+          example: "Default"
+        currentPrice:
+          type: number
+          example: 1.0865
+        dailyBars:
+          type: array
+          items: { $ref: '#/components/schemas/OHLC' }
+          description: Required for ATR-based presets
+
+    ScaledOrderResult:
+      type: object
+      required: [orderIds, baseDist, slDist]
+      properties:
+        orderIds: { type: array, items: { type: string } }
+        baseDist: { type: number }
+        slDist:   { type: number }
+
+    SignalBody:
+      type: object
+      required: [bars]
+      properties:
+        strategy:
+          type: string
+          enum: [CandleAtr, VolumeBreakout]
+          default: VolumeBreakout
+        symbol:
+          type: string
+          default: EURUSD
+        timeframe:
+          type: string
+          default: H1
+        bars:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/OHLC' }
+
+    BacktestBody:
+      allOf:
+        - $ref: '#/components/schemas/SignalBody'
+
+    BacktestSummary:
+      type: object
+      required: [signalCount, buyCount, sellCount, holdCount]
+      properties:
+        signalCount: { type: integer, example: 100 }
+        buyCount:    { type: integer, example: 22 }
+        sellCount:   { type: integer, example: 18 }
+        holdCount:   { type: integer, example: 60 }
+
+    MoneyManagementConfig:
+      type: object
+      description: |
+        Money-management factory config. See `MoneyManagementFactoryConfigSchema`
+        in `src/money-management/types.ts` for the full field set.
+      additionalProperties: true
+
+    # ── Gateway domain types ────────────────────────────────────
+
+    PositionInfoVO:
+      type: object
+      required: [ticket, symbol, type, volume, openPrice, openTime, stopLoss, takeProfit, profit, swap, commission, userId]
+      properties:
+        ticket:     { type: integer, example: 123456 }
+        symbol:     { type: string, example: "EURUSD" }
+        type:       { type: string, example: "BUY" }
+        volume:     { type: number, example: 1.0 }
+        openPrice:  { type: number, example: 1.0850 }
+        openTime:   { type: string, format: date-time }
+        stopLoss:   { type: number, example: 1.0820 }
+        takeProfit: { type: number, example: 1.0920 }
+        profit:     { type: number, example: 150 }
+        swap:       { type: number, example: -2.5 }
+        commission: { type: number, example: -7 }
+        userId:     { type: string, example: "default" }
+
+    SymbolInfoVO:
+      type: object
+      properties:
+        name:      { type: string, example: "EURUSD" }
+        digits:    { type: integer, example: 5 }
+        pointSize: { type: number, example: 0.00001 }
+        lotSize:   { type: number, example: 100000 }
+        minLot:    { type: number, example: 0.01 }
+        maxLot:    { type: number, example: 100 }
+        lotStep:   { type: number, example: 0.01 }
+
+    DealRow:
+      type: object
+      properties:
+        ticket:     { type: integer }
+        symbol:     { type: string }
+        type:       { type: string }
+        volume:     { type: number }
+        price:      { type: number }
+        profit:     { type: number }
+        swap:       { type: number }
+        commission: { type: number }
+        time:       { type: string, format: date-time }
