@@ -53,8 +53,9 @@ export class VolumeBreakoutStrategy implements ISignalStrategy {
       return SignalResult.HOLD;
     }
 
-    const bar = context.bars.candle(context.runMode === RunMode.Live ? 0 : 1);
-    if (!bar) return SignalResult.HOLD;
+    const shift = context.runMode === RunMode.Live ? 0 : 1;
+    if (context.bars.length <= shift) return SignalResult.HOLD;
+    const bar = context.bars.candle(shift);
 
     if (bodyRange(bar) < this.config.minBodyRange) {
       return SignalResult.HOLD;

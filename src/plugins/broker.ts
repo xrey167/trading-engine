@@ -5,6 +5,7 @@ import type { PositionInfoVO, DealInfoVO, HistoryOrderInfoVO } from '../domain/p
 import type { AccountInfoVO, SymbolInfoVO, Tick } from '../domain/account.js';
 import type {
   IOrderGateway,
+  IPositionGateway,
   IHistoryGateway,
   IMarketDataGateway,
   IAccountGateway,
@@ -20,13 +21,11 @@ import { notFound, gatewayError, type DomainError } from '../lib/errors.js';
  * Emits 'fill' and 'close' events on the shared emitter so the WebSocket
  * route can stream them to connected clients.
  *
- * Also implements gateway interfaces for the application layer.
- * Note: IBrokerAdapter.closePosition and IPositionGateway.closePosition
- * have incompatible signatures, so IPositionGateway methods are provided
- * as standalone methods (closePositionByTicket, etc.) rather than via
- * formal `implements`.
+ * Also implements all gateway interfaces for the application layer.
+ * IBrokerAdapter.closePosition(side, size, info) and IPositionGateway.closePositionByTicket
+ * are separate methods with different signatures; no collision exists.
  */
-export class PaperBroker implements IBrokerAdapter, IOrderGateway, IHistoryGateway, IMarketDataGateway, IAccountGateway, IIndicatorGateway {
+export class PaperBroker implements IBrokerAdapter, IOrderGateway, IPositionGateway, IHistoryGateway, IMarketDataGateway, IAccountGateway, IIndicatorGateway {
   private seq = 0;
   private priceRef = 0;
 
@@ -100,7 +99,7 @@ export class PaperBroker implements IBrokerAdapter, IOrderGateway, IHistoryGatew
     this.barsStore.set(`${symbol}:${timeframe}`, bars);
   }
 
-  // ───── IPositionGateway methods (not declared via `implements` due to closePosition conflict) ─────
+  // ───── IPositionGateway ─────
 
   async getPositions(userId: string): Promise<Result<PositionInfoVO[], DomainError>> {
     return ok(this.positions.filter(p => p.userId === userId));

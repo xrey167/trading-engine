@@ -1178,7 +1178,7 @@ describe('R23 – PATCH /v1/positions/:ticket', () => {
   it('returns 404 for a non-existent ticket', async () => {
     const res = await app.inject({
       method: 'PATCH', url: '/v1/positions/9999',
-      payload: { stopLoss: 1.0950 },
+      payload: { stopLoss: 1.0950, takeProfit: 1.1100 },
     });
     expect(res.statusCode).toBe(404);
   });

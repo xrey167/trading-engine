@@ -41,7 +41,9 @@ export interface IOrderGateway {
 export interface IPositionGateway {
   getPositions(userId: string): Promise<Result<PositionInfoVO[], DomainError>>;
   getPositionByTicket(ticket: number, userId: string): Promise<Result<PositionInfoVO, DomainError>>;
-  closePosition(ticket: number, deviation: number, userId: string): Promise<Result<void, DomainError>>;
+  // Named closePositionByTicket (not closePosition) to avoid collision with
+  // IBrokerAdapter.closePosition(side, size, info) which has an incompatible signature.
+  closePositionByTicket(ticket: number, deviation: number, userId: string): Promise<Result<void, DomainError>>;
   modifyPosition(ticket: number, sl: number, tp: number, userId: string): Promise<Result<void, DomainError>>;
 }
 

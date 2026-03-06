@@ -1,12 +1,11 @@
 import type { Logger } from '../lib/logger.js';
 import type { Result } from '../lib/result.js';
 import type { DomainError } from '../lib/errors.js';
-import type { PlaceOrderRequest, OrderResult } from '../gateways/types.js';
-import type { PaperBroker } from '../plugins/broker.js';
+import type { PlaceOrderRequest, OrderResult, IOrderGateway } from '../gateways/types.js';
 
 export class PlaceOrderUseCase {
   constructor(
-    private readonly broker: PaperBroker,
+    private readonly broker: IOrderGateway,
     private readonly logger: Logger,
   ) {}
 

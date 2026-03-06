@@ -9,8 +9,8 @@ import { ModifyPositionUseCase } from '../../use-cases/modify-position.js';
 const DEFAULT_USER_ID = 'default';
 
 const ModifyBodySchema = Type.Object({
-  stopLoss:   Type.Optional(Type.Number({ minimum: 0 })),
-  takeProfit: Type.Optional(Type.Number({ minimum: 0 })),
+  stopLoss:   Type.Number({ minimum: 0 }),
+  takeProfit: Type.Number({ minimum: 0 }),
 });
 
 const v1PositionsRoute: FastifyPluginAsync = async (fastify) => {
@@ -34,7 +34,7 @@ const v1PositionsRoute: FastifyPluginAsync = async (fastify) => {
   });
 
   // DELETE /v1/positions/:ticket — close a position
-  fastify.delete<{ Params: { ticket: string }; Querystring: { deviation?: string } }>(
+  fastify.delete<{ Params: { ticket: string }; Querystring: { deviation?: number } }>(
     '/v1/positions/:ticket',
     {
       schema: {
@@ -48,8 +48,11 @@ const v1PositionsRoute: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (req, reply) => {
-      const ticket   = Number(req.params.ticket);
-      const deviation = Number(req.query.deviation ?? 0);
+      const ticket = Number(req.params.ticket);
+      if (!Number.isFinite(ticket)) {
+        return reply.status(400).send({ error: 'ticket must be a number' });
+      }
+      const deviation = req.query.deviation ?? 0;
       const useCase  = new ClosePositionUseCase(broker, log);
       const result   = await useCase.execute(ticket, deviation, DEFAULT_USER_ID);
       if (!result.ok) {
@@ -76,14 +79,12 @@ const v1PositionsRoute: FastifyPluginAsync = async (fastify) => {
     },
     async (req, reply) => {
       const ticket = Number(req.params.ticket);
-      const body   = req.body as { stopLoss?: number; takeProfit?: number };
+      if (!Number.isFinite(ticket)) {
+        return reply.status(400).send({ error: 'ticket must be a number' });
+      }
+      const body    = req.body as { stopLoss: number; takeProfit: number };
       const useCase = new ModifyPositionUseCase(broker, log);
-      const result  = await useCase.execute(
-        ticket,
-        body.stopLoss   ?? 0,
-        body.takeProfit ?? 0,
-        DEFAULT_USER_ID,
-      );
+      const result  = await useCase.execute(ticket, body.stopLoss, body.takeProfit, DEFAULT_USER_ID);
       if (!result.ok) {
         const status = result.error.type === 'NOT_FOUND' ? 404 : 400;
         return reply.status(status).send({ error: result.error.message });
