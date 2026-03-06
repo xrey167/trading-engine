@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { EventEmitter } from 'node:events';
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
 import websocket from '@fastify/websocket';
@@ -21,6 +24,31 @@ import v1PositionsRoute from './routes/v1-positions/index.js';
 import moneyManagementRoute from './routes/money-management/index.js';
 import openbbRoute from './routes/openbb/index.js';
 import './types/index.js';
+
+const SWAGGER_UI_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Trading Engine API Docs</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+</head>
+<body>
+<div id="swagger-ui"></div>
+<script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+<script>
+SwaggerUIBundle({
+  url: '/openapi.yaml',
+  dom_id: '#swagger-ui',
+  presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
+  layout: 'BaseLayout',
+  deepLinking: true,
+  displayRequestDuration: true,
+  persistAuthorization: true,
+});
+</script>
+</body>
+</html>`;
 
 export interface BuildAppConfig {
   symbol?:  { pair: string; digits: number };
@@ -80,6 +108,22 @@ export async function buildApp(
 
   // 8. OpenBB Workspace integration (widgets.json, apps.json, /openbb/* data routes)
   await app.register(openbbRoute);
+
+  // 9. API docs — /openapi.yaml (raw spec) + /docs (Swagger UI via CDN)
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const specPath = join(__dirname, '../../openapi.yaml');
+  let specContent = '';
+  try { specContent = readFileSync(specPath, 'utf8'); } catch { /* spec not built */ }
+
+  app.get('/openapi.yaml', async (_req, reply) => {
+    reply.header('Content-Type', 'text/yaml; charset=utf-8');
+    return reply.send(specContent);
+  });
+
+  app.get('/docs', async (_req, reply) => {
+    reply.header('Content-Type', 'text/html; charset=utf-8');
+    return reply.send(SWAGGER_UI_HTML);
+  });
 
   return app;
 }
