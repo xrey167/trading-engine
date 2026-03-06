@@ -1,6 +1,7 @@
 import { BaseCalculator } from '../base-calculator.js';
 import type { CalculationContext } from '../calculation-context.js';
-import type { IStopLossCalculator, ILotsProvider, IAccountBalanceGateway, StopLossParams } from '../types.js';
+import type { IStopLossCalculator, ILotsProvider, StopLossParams } from '../types.js';
+import type { IAccountGateway } from '../../gateways/types.js';
 import type { Result } from '../../lib/result.js';
 import type { DomainError } from '../../lib/errors.js';
 import { StopLimitType } from '../../domain/enums.js';
@@ -17,7 +18,7 @@ export class RiskBalanceStopLossCalculator extends BaseCalculator implements ISt
     private readonly ctx: CalculationContext,
     stopLossPercent: number,
     private readonly lotsProvider: ILotsProvider,
-    private readonly accountGateway: IAccountBalanceGateway,
+    private readonly accountGateway: IAccountGateway,
     private readonly userId: string,
     direction: 'BUY' | 'SELL',
   ) {
