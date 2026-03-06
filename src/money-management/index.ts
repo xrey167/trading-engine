@@ -14,9 +14,9 @@ export type {
   IStopLossCalculator,
   ITakeProfitCalculator,
   IMoneyManagementStrategy,
-  IAccountBalanceGateway,
+  
   IIndicatorGateway,
-  ITradingCalculator,
+  IAccountGateway,  ITradingCalculator,
   MoneyManagementFactoryConfig,
 } from './types.js';
 export { MoneyManagementFactoryConfigSchema } from './types.js';
