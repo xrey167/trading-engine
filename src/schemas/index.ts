@@ -1,5 +1,11 @@
 import { Type, type Static } from '@sinclair/typebox';
 
+// Schema co-location pattern:
+// - Engine-level schemas (Side, TrailMode, OHLC, etc.) are defined here.
+// - Domain schemas (PositionInfoVO, AccountInfoVO, etc.) are defined at source
+//   in their domain modules (domain/position.ts, domain/account.ts) and
+//   re-exported at the bottom of this file for route consumption.
+
 // ─────────────────────────────────────────────────────────────
 // Enum literal unions  (as const maps → TypeBox literals)
 // ─────────────────────────────────────────────────────────────
@@ -280,3 +286,13 @@ export const PutAtrConfigBodySchema = Type.Object({
   onlyWhenFlat:         Type.Optional(Type.Boolean()),
 });
 export type PutAtrConfigBody = Static<typeof PutAtrConfigBodySchema>;
+
+// ─────────────────────────────────────────────────────────────
+// quant-lib integration schemas (Units 4, 5, 7)
+// ─────────────────────────────────────────────────────────────
+
+export { TradeSignalEntrySchema } from '../domain/trade-signal.js';
+export { TradeStatsSchema, TradeParamsSchema } from '../domain/trade-params.js';
+export { PositionInfoVOSchema, DealInfoVOSchema, HistoryOrderInfoVOSchema } from '../domain/position.js';
+export { AccountInfoVOSchema, SymbolInfoVOSchema, TickSchema } from '../domain/account.js';
+export { MoneyManagementFactoryConfigSchema } from '../money-management/types.js';

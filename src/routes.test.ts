@@ -1036,3 +1036,211 @@ describe('R20 – PUT /atr/config', () => {
   });
 });
 
+// ─────────────────────────────────────────────────────────────
+// R21 – POST /v1/backtest
+// ─────────────────────────────────────────────────────────────
+
+describe('R21 – POST /v1/backtest', () => {
+  let app: FastifyInstance;
+  beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
+  afterEach(() => app.close());
+
+  it('returns signalCount equal to bars length', async () => {
+    const bars = Array.from({ length: 30 }, (_, i) => makeBar(1.1000 + i * 0.0001));
+    const res = await app.inject({
+      method: 'POST', url: '/v1/backtest',
+      payload: { bars, strategy: 'CandleAtr' },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.signalCount).toBe(bars.length);
+    expect(body.buyCount + body.sellCount + body.holdCount).toBe(bars.length);
+  });
+
+  it('accepts VolumeBreakout strategy', async () => {
+    const bars = Array.from({ length: 20 }, (_, i) => makeBar(1.1000 + i * 0.0001));
+    const res = await app.inject({
+      method: 'POST', url: '/v1/backtest',
+      payload: { bars, strategy: 'VolumeBreakout' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toHaveProperty('signalCount');
+  });
+
+  it('returns 400 for empty bars array', async () => {
+    const res = await app.inject({
+      method: 'POST', url: '/v1/backtest',
+      payload: { bars: [] },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// R22 – POST /v1/signal
+// ─────────────────────────────────────────────────────────────
+
+describe('R22 – POST /v1/signal', () => {
+  let app: FastifyInstance;
+  beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
+  afterEach(() => app.close());
+
+  it('returns result BUY, SELL, or HOLD', async () => {
+    const bars = Array.from({ length: 20 }, (_, i) => makeBar(1.1000 + i * 0.0001));
+    const res = await app.inject({
+      method: 'POST', url: '/v1/signal',
+      payload: { bars, strategy: 'CandleAtr' },
+    });
+    expect(res.statusCode).toBe(200);
+    const { result } = res.json();
+    expect(['BUY', 'SELL', 'HOLD']).toContain(result);
+  });
+
+  it('returns 400 for empty bars array', async () => {
+    const res = await app.inject({
+      method: 'POST', url: '/v1/signal',
+      payload: { bars: [] },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// R23 – GET / DELETE / PATCH /v1/positions
+// ─────────────────────────────────────────────────────────────
+
+type SeedPosition = Parameters<FastifyInstance['broker']['seedPosition']>[0];
+
+function makeSeedPosition(ticket: number): SeedPosition {
+  return {
+    ticket, userId: 'default', symbol: 'EURUSD', type: 'BUY',
+    magic: 0, identifier: 0,
+    time: new Date().toISOString(),
+    priceOpen: 1.1000, priceCurrent: 1.1010,
+    stopLoss: 0, takeProfit: 0, priceStopLimit: 0,
+    volume: 0.1, commission: 0, swap: 0, profit: 0,
+    comment: '', externalId: '', reason: 0,
+  } as SeedPosition;
+}
+
+describe('R23 – GET /v1/positions', () => {
+  let app: FastifyInstance;
+  beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
+  afterEach(() => app.close());
+
+  it('returns empty array with no seeded positions', async () => {
+    const res = await app.inject({ method: 'GET', url: '/v1/positions' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual([]);
+  });
+
+  it('returns seeded positions', async () => {
+    app.broker.seedPosition(makeSeedPosition(1001));
+    const res = await app.inject({ method: 'GET', url: '/v1/positions' });
+    expect(res.statusCode).toBe(200);
+    const positions = res.json();
+    expect(positions).toHaveLength(1);
+    expect(positions[0].ticket).toBe(1001);
+  });
+});
+
+describe('R23 – DELETE /v1/positions/:ticket', () => {
+  let app: FastifyInstance;
+  beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
+  afterEach(() => app.close());
+
+  it('returns 204 for an existing position', async () => {
+    app.broker.seedPosition(makeSeedPosition(2001));
+    const res = await app.inject({ method: 'DELETE', url: '/v1/positions/2001' });
+    expect(res.statusCode).toBe(204);
+  });
+
+  it('returns 404 for a non-existent ticket', async () => {
+    const res = await app.inject({ method: 'DELETE', url: '/v1/positions/9999' });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+describe('R23 – PATCH /v1/positions/:ticket', () => {
+  let app: FastifyInstance;
+  beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
+  afterEach(() => app.close());
+
+  it('returns 204 when modifying an existing position', async () => {
+    app.broker.seedPosition(makeSeedPosition(3001));
+    const res = await app.inject({
+      method: 'PATCH', url: '/v1/positions/3001',
+      payload: { stopLoss: 1.0950, takeProfit: 1.1100 },
+    });
+    expect(res.statusCode).toBe(204);
+  });
+
+  it('returns 404 for a non-existent ticket', async () => {
+    const res = await app.inject({
+      method: 'PATCH', url: '/v1/positions/9999',
+      payload: { stopLoss: 1.0950, takeProfit: 1.1100 },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('returns 400 for a non-numeric ticket', async () => {
+    const res = await app.inject({
+      method: 'PATCH', url: '/v1/positions/abc',
+      payload: { stopLoss: 1.0950, takeProfit: 1.1100 },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('returns 400 for an empty body (missing SL/TP)', async () => {
+    app.broker.seedPosition(makeSeedPosition(3002));
+    const res = await app.inject({
+      method: 'PATCH', url: '/v1/positions/3002',
+      payload: {},
+    });
+    expect(res.statusCode).toBe(400);
+  });
+});
+
+describe('R23 – DELETE /v1/positions/:ticket — non-numeric', () => {
+  let app: FastifyInstance;
+  beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
+  afterEach(() => app.close());
+
+  it('returns 400 for a non-numeric ticket', async () => {
+    const res = await app.inject({ method: 'DELETE', url: '/v1/positions/abc' });
+    expect(res.statusCode).toBe(400);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// R24 – POST /v1/money-management
+// ─────────────────────────────────────────────────────────────
+
+describe('R24 – POST /v1/money-management', () => {
+  let app: FastifyInstance;
+  beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
+  afterEach(() => app.close());
+
+  it('returns { valid: true } for a valid config', async () => {
+    const res = await app.inject({
+      method: 'POST', url: '/v1/money-management',
+      payload: {
+        userId: 'user1', symbol: 'EURUSD', timeframe: 'H1', direction: 'BUY',
+        stopLossType: 'DO_NOT_USE', stopLossValue: 0,
+        takeProfitType: 'DO_NOT_USE', takeProfitValue: 0,
+        lotsType: 'FIXED', lotsValue: 0.1,
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ valid: true });
+  });
+
+  it('returns 400 for an invalid config (missing required fields)', async () => {
+    const res = await app.inject({
+      method: 'POST', url: '/v1/money-management',
+      payload: { symbol: 'EURUSD' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+});
+
