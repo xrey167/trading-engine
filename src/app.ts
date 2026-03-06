@@ -14,6 +14,10 @@ import accountRoute from './routes/account/index.js';
 import engineRoute from './routes/engine/index.js';
 import scaledOrdersRoute from './routes/scaled-orders/index.js';
 import atrRoute from './routes/atr/index.js';
+import backtestRoute from './routes/backtest/index.js';
+import signalRoute from './routes/signal/index.js';
+import v1PositionsRoute from './routes/v1-positions/index.js';
+import moneyManagementRoute from './routes/money-management/index.js';
 import './types/index.js';
 
 export interface BuildAppConfig {
@@ -57,6 +61,12 @@ export async function buildApp(
   await app.register(engineRoute);
   await app.register(scaledOrdersRoute);
   await app.register(atrRoute);
+
+  // 7. quant-lib integration routes
+  await app.register(backtestRoute);
+  await app.register(signalRoute);
+  await app.register(v1PositionsRoute);
+  await app.register(moneyManagementRoute);
 
   return app;
 }

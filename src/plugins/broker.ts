@@ -1,16 +1,46 @@
 import type { EventEmitter } from 'node:events';
 import type { IBrokerAdapter, ExecutionReport, Side } from '../../trading-engine.js';
+import { Bars, type OHLC } from '../../trading-engine.js';
+import type { PositionInfoVO, DealInfoVO, HistoryOrderInfoVO } from '../domain/position.js';
+import type { AccountInfoVO, SymbolInfoVO, Tick } from '../domain/account.js';
+import type {
+  IOrderGateway,
+  IHistoryGateway,
+  IMarketDataGateway,
+  IAccountGateway,
+  IIndicatorGateway,
+  OrderResult,
+  PlaceOrderRequest,
+} from '../gateways/types.js';
+import { ok, err, type Result } from '../lib/result.js';
+import { notFound, gatewayError, type DomainError } from '../lib/errors.js';
 
 /**
  * Paper broker — simulates fills in memory.
  * Emits 'fill' and 'close' events on the shared emitter so the WebSocket
  * route can stream them to connected clients.
+ *
+ * Also implements gateway interfaces for the application layer.
+ * Note: IBrokerAdapter.closePosition and IPositionGateway.closePosition
+ * have incompatible signatures, so IPositionGateway methods are provided
+ * as standalone methods (closePositionByTicket, etc.) rather than via
+ * formal `implements`.
  */
-export class PaperBroker implements IBrokerAdapter {
+export class PaperBroker implements IBrokerAdapter, IOrderGateway, IHistoryGateway, IMarketDataGateway, IAccountGateway, IIndicatorGateway {
   private seq = 0;
   private priceRef = 0;
 
+  // Gateway stores
+  private positions: PositionInfoVO[] = [];
+  private deals: DealInfoVO[] = [];
+  private historyOrders: HistoryOrderInfoVO[] = [];
+  private symbols: Map<string, SymbolInfoVO> = new Map();
+  private barsStore: Map<string, OHLC[]> = new Map();
+  private accountInfoStore: AccountInfoVO | null = null;
+
   constructor(private readonly emitter: EventEmitter) {}
+
+  // ───── IBrokerAdapter methods ─────
 
   /** Called by the bars route before onBar so price reflects the current bar. */
   setPrice(price: number): void {
@@ -51,4 +81,151 @@ export class PaperBroker implements IBrokerAdapter {
   async getAccount(): Promise<{ equity: number; balance: number }> {
     return { equity: 10_000, balance: 10_000 };
   }
+
+  // ───── Seed methods (test helpers) ─────
+
+  seedPosition(p: PositionInfoVO): void {
+    this.positions.push(p);
+  }
+
+  seedAccount(a: AccountInfoVO): void {
+    this.accountInfoStore = a;
+  }
+
+  seedSymbol(s: SymbolInfoVO): void {
+    this.symbols.set(s.name, s);
+  }
+
+  seedBars(symbol: string, timeframe: string, bars: OHLC[]): void {
+    this.barsStore.set(`${symbol}:${timeframe}`, bars);
+  }
+
+  // ───── IPositionGateway methods (not declared via `implements` due to closePosition conflict) ─────
+
+  async getPositions(userId: string): Promise<Result<PositionInfoVO[], DomainError>> {
+    return ok(this.positions.filter(p => p.userId === userId));
+  }
+
+  async getPositionByTicket(ticket: number, userId: string): Promise<Result<PositionInfoVO, DomainError>> {
+    const p = this.positions.find(pos => pos.ticket === ticket && pos.userId === userId);
+    if (!p) return err(notFound(`Position ${ticket} not found`, String(ticket)));
+    return ok(p);
+  }
+
+  async closePositionByTicket(ticket: number, _deviation: number, userId: string): Promise<Result<void, DomainError>> {
+    const idx = this.positions.findIndex(p => p.ticket === ticket && p.userId === userId);
+    if (idx === -1) return err(notFound(`Position ${ticket} not found`, String(ticket)));
+    this.positions.splice(idx, 1);
+    return ok(undefined);
+  }
+
+  async modifyPosition(ticket: number, sl: number, tp: number, userId: string): Promise<Result<void, DomainError>> {
+    const p = this.positions.find(pos => pos.ticket === ticket && pos.userId === userId);
+    if (!p) return err(notFound(`Position ${ticket} not found`, String(ticket)));
+    (p as { stopLoss: number; takeProfit: number }).stopLoss = sl;
+    (p as { stopLoss: number; takeProfit: number }).takeProfit = tp;
+    return ok(undefined);
+  }
+
+  // ───── IHistoryGateway ─────
+
+  async getDeals(_userId: string, _from: Date, _to: Date): Promise<Result<DealInfoVO[], DomainError>> {
+    return ok(this.deals.filter(d => d.userId === _userId));
+  }
+
+  async getDealByTicket(ticket: number, userId: string): Promise<Result<DealInfoVO, DomainError>> {
+    const d = this.deals.find(deal => Number(deal.ticket) === ticket && deal.userId === userId);
+    if (!d) return err(notFound(`Deal ${ticket} not found`, String(ticket)));
+    return ok(d);
+  }
+
+  async getHistoryOrders(_userId: string, _from: Date, _to: Date): Promise<Result<HistoryOrderInfoVO[], DomainError>> {
+    return ok(this.historyOrders.filter(o => o.userId === _userId));
+  }
+
+  // ───── IMarketDataGateway ─────
+
+  async getSymbolInfo(symbol: string): Promise<Result<SymbolInfoVO, DomainError>> {
+    const s = this.symbols.get(symbol);
+    if (!s) return err(notFound(`Symbol ${symbol} not found`, symbol));
+    return ok(s);
+  }
+
+  async refreshRates(_symbol: string): Promise<Result<Tick, DomainError>> {
+    const price = this.priceRef;
+    const tick: Tick = {
+      time: new Date().toISOString(),
+      bid: price,
+      ask: price + 0.0001,
+    };
+    return ok(tick);
+  }
+
+  async getBars(symbol: string, timeframe: string): Promise<Result<Bars, DomainError>> {
+    const data = this.barsStore.get(`${symbol}:${timeframe}`);
+    if (!data) return err(notFound(`No bars for ${symbol}:${timeframe}`, `${symbol}:${timeframe}`));
+    return ok(new Bars(data));
+  }
+
+  // ───── IAccountGateway ─────
+
+  async getAccountInfo(_userId: string): Promise<Result<AccountInfoVO, DomainError>> {
+    if (!this.accountInfoStore) return err(notFound('No account seeded', _userId));
+    return ok(this.accountInfoStore);
+  }
+
+  async getBalance(_userId: string): Promise<Result<number, DomainError>> {
+    return ok(this.accountInfoStore?.balance ?? 10_000);
+  }
+
+  async isReal(_userId: string): Promise<Result<boolean, DomainError>> {
+    return ok(false);
+  }
+
+  async isHedging(_userId: string): Promise<Result<boolean, DomainError>> {
+    return ok(true);
+  }
+
+  // ───── IIndicatorGateway ─────
+
+  async getAtr(params: { symbol: string; timeframe: string; period: number; barIndex: number }, _userId: string): Promise<Result<number, DomainError>> {
+    const data = this.barsStore.get(`${params.symbol}:${params.timeframe}`);
+    if (!data) return err(notFound(`No bars for ${params.symbol}:${params.timeframe}`, `${params.symbol}:${params.timeframe}`));
+    const bars = new Bars(data);
+    const atr = bars.atr(params.period, params.barIndex);
+    return ok(atr);
+  }
+
+  // ───── IOrderGateway ─────
+
+  async placeOrder(req: PlaceOrderRequest): Promise<Result<OrderResult, DomainError>> {
+    try {
+      const report = await this.marketOrder(req.direction === 'BUY' ? 1 : -1, req.lots, req.comment);
+      return ok({
+        ticket: this.seq,
+        dealTicket: this.seq,
+        volume: req.lots,
+        price: report.price,
+        retcode: 10009,
+        retcodeDescription: 'Request completed',
+        comment: req.comment,
+      });
+    } catch (e) {
+      return err(gatewayError('marketOrder failed', e));
+    }
+  }
+
+  async modifyOrder(_ticket: number, _price: number, _sl: number, _tp: number, _userId: string): Promise<Result<void, DomainError>> {
+    return ok(undefined);
+  }
+
+  async deleteOrder(_ticket: number, _userId: string): Promise<Result<void, DomainError>> {
+    return ok(undefined);
+  }
+
+  // ───── IFullBrokerAdapter lifecycle ─────
+
+  async connect(): Promise<void> { /* no-op for paper */ }
+  async disconnect(): Promise<void> { /* no-op for paper */ }
+  isConnected(): boolean { return true; }
 }
