@@ -549,7 +549,7 @@ paths:
     post:
       tags: [Signal]
       summary: Validate a money-management configuration
-      description: Returns `{ valid: true }` if the config is structurally valid; 400 on errors.
+      description: 'Returns {valid:true} if the config is structurally valid; 400 on errors.'
       operationId: postMoneyManagement
       requestBody:
         required: true
