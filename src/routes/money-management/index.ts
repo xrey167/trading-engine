@@ -1,12 +1,12 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { Type } from '@sinclair/typebox';
-import { ErrorResponseSchema } from '../../schemas/index.js';
+import { ErrorResponseSchema, MoneyManagementFactoryConfigSchema } from '../../schemas/index.js';
 import { CreateMoneyManagementUseCase } from '../../use-cases/money-management.js';
 
 const moneyManagementRoute: FastifyPluginAsync = async (fastify) => {
   fastify.post('/v1/money-management', {
     schema: {
-      body: Type.Object({}, { additionalProperties: true }),
+      body: MoneyManagementFactoryConfigSchema,
       response: {
         200: Type.Object({ valid: Type.Boolean() }),
         400: ErrorResponseSchema,

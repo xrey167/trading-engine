@@ -5,7 +5,7 @@ import { GetPositionsUseCase } from '../../use-cases/get-positions.js';
 import { ClosePositionUseCase } from '../../use-cases/close-position.js';
 import { ModifyPositionUseCase } from '../../use-cases/modify-position.js';
 
-// Paper broker uses a fixed default userId (no auth layer)
+// TODO: dev-only stub — replace with real auth (JWT / session) before production
 const DEFAULT_USER_ID = 'default';
 
 const ModifyBodySchema = Type.Object({

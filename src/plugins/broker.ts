@@ -24,6 +24,17 @@ import { notFound, gatewayError, type DomainError } from '../lib/errors.js';
  * Also implements all gateway interfaces for the application layer.
  * IBrokerAdapter.closePosition(side, size, info) and IPositionGateway.closePositionByTicket
  * are separate methods with different signatures; no collision exists.
+ *
+ * TODO(architecture): This class implements 7 interfaces (~230 lines). For a paper broker
+ * the trivial in-memory implementations are acceptable, but when adding a real broker
+ * adapter (e.g. MT5, Interactive Brokers), extract gateway responsibilities into separate
+ * classes composed behind IFullBrokerAdapter or decorated individually on the Fastify instance:
+ *   - PaperPositionGateway   (IPositionGateway)
+ *   - PaperOrderGateway      (IOrderGateway)
+ *   - PaperHistoryGateway    (IHistoryGateway)
+ *   - PaperMarketDataGateway (IMarketDataGateway)
+ *   - PaperAccountGateway    (IAccountGateway)
+ *   - PaperIndicatorGateway  (IIndicatorGateway)
  */
 export class PaperBroker implements IBrokerAdapter, IOrderGateway, IPositionGateway, IHistoryGateway, IMarketDataGateway, IAccountGateway, IIndicatorGateway {
   private seq = 0;
@@ -105,12 +116,14 @@ export class PaperBroker implements IBrokerAdapter, IOrderGateway, IPositionGate
     return ok(this.positions.filter(p => p.userId === userId));
   }
 
+  // TODO: O(n) linear scan — replace with Map<ticket, PositionInfoVO> for production
   async getPositionByTicket(ticket: number, userId: string): Promise<Result<PositionInfoVO, DomainError>> {
     const p = this.positions.find(pos => pos.ticket === ticket && pos.userId === userId);
     if (!p) return err(notFound(`Position ${ticket} not found`, String(ticket)));
     return ok(p);
   }
 
+  // TODO: O(n) linear scan — replace with Map<ticket, PositionInfoVO> for production
   async closePositionByTicket(ticket: number, _deviation: number, userId: string): Promise<Result<void, DomainError>> {
     const idx = this.positions.findIndex(p => p.ticket === ticket && p.userId === userId);
     if (idx === -1) return err(notFound(`Position ${ticket} not found`, String(ticket)));
@@ -118,6 +131,8 @@ export class PaperBroker implements IBrokerAdapter, IOrderGateway, IPositionGate
     return ok(undefined);
   }
 
+  // TODO: Tech debt — mutates readonly PositionInfoVO via type assertion.
+  // Consider using a mutable internal type or a copy-on-write pattern.
   async modifyPosition(ticket: number, sl: number, tp: number, userId: string): Promise<Result<void, DomainError>> {
     const p = this.positions.find(pos => pos.ticket === ticket && pos.userId === userId);
     if (!p) return err(notFound(`Position ${ticket} not found`, String(ticket)));
@@ -133,7 +148,7 @@ export class PaperBroker implements IBrokerAdapter, IOrderGateway, IPositionGate
   }
 
   async getDealByTicket(ticket: number, userId: string): Promise<Result<DealInfoVO, DomainError>> {
-    const d = this.deals.find(deal => Number(deal.ticket) === ticket && deal.userId === userId);
+    const d = this.deals.find(deal => deal.ticket === ticket && deal.userId === userId);
     if (!d) return err(notFound(`Deal ${ticket} not found`, String(ticket)));
     return ok(d);
   }
@@ -210,7 +225,8 @@ export class PaperBroker implements IBrokerAdapter, IOrderGateway, IPositionGate
         comment: req.comment,
       });
     } catch (e) {
-      return err(gatewayError('marketOrder failed', e));
+      const detail = e instanceof Error ? e.message : String(e);
+      return err(gatewayError(`placeOrder failed: ${detail}`, e));
     }
   }
 

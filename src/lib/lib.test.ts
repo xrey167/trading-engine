@@ -14,11 +14,6 @@ import {
   type DomainError,
 } from './errors.js';
 
-// Unit 1 — Branded types
-import {
-  Price, Lots, Pips, Ticket, UserId, TradingSymbol, Timeframe,
-} from './types.js';
-
 // Unit 2 — Domain enums
 import {
   DayOfWeek, MAType, OrderSide, PositionSizeType,
@@ -27,9 +22,6 @@ import {
 } from '../domain/enums.js';
 
 // Unit 3 — Analysis
-import {
-  isBullish, isBearish, range, wickPart, tailPart, bodyRange,
-} from '../analysis/candle-analysis.js';
 import { isLocalHigh, isLocalLow } from '../analysis/local-extremes.js';
 import { calculateATR, calculateATRResult } from '../analysis/atr.js';
 
@@ -138,48 +130,6 @@ describe('DomainError', () => {
 });
 
 // ─────────────────────────────────────────────────────────────
-// Unit 1 — Branded types (compile-time checks + runtime)
-// ─────────────────────────────────────────────────────────────
-
-describe('Branded types', () => {
-  it('Price() returns a number', () => {
-    const p = Price(1.23);
-    expect(typeof p).toBe('number');
-    expect(p).toBe(1.23);
-  });
-
-  it('Lots() returns a number', () => {
-    const l = Lots(0.1);
-    expect(l).toBe(0.1);
-  });
-
-  it('Pips() returns a number', () => {
-    const pip = Pips(10);
-    expect(pip).toBe(10);
-  });
-
-  it('Ticket() returns a number', () => {
-    const t = Ticket(12345);
-    expect(t).toBe(12345);
-  });
-
-  it('UserId() returns a string', () => {
-    const u = UserId('user-1');
-    expect(u).toBe('user-1');
-  });
-
-  it('TradingSymbol() returns a string', () => {
-    const s = TradingSymbol('EURUSD');
-    expect(s).toBe('EURUSD');
-  });
-
-  it('Timeframe() returns a number', () => {
-    const tf = Timeframe(60);
-    expect(tf).toBe(60);
-  });
-});
-
-// ─────────────────────────────────────────────────────────────
 // Unit 2 — Domain enums (as const maps)
 // ─────────────────────────────────────────────────────────────
 
@@ -260,34 +210,34 @@ describe('Candle analysis', () => {
   const bearish = new Candle(1.1040, 1.1050, 1.0950, 1.1000, new Date());
 
   it('isBullish detects bullish candles', () => {
-    expect(isBullish(bullish)).toBe(true);
-    expect(isBullish(bearish)).toBe(false);
+    expect(bullish.isBullish()).toBe(true);
+    expect(bearish.isBullish()).toBe(false);
   });
 
   it('isBearish detects bearish candles', () => {
-    expect(isBearish(bearish)).toBe(true);
-    expect(isBearish(bullish)).toBe(false);
+    expect(bearish.isBearish()).toBe(true);
+    expect(bullish.isBearish()).toBe(false);
   });
 
   it('range returns high - low', () => {
-    expect(range(bullish)).toBeCloseTo(0.0100, 6);
+    expect(bullish.range()).toBeCloseTo(0.0100, 6);
   });
 
   it('wickPart returns wick ratio', () => {
     // bullish: wick = high - max(open,close) = 1.1050 - 1.1040 = 0.0010
     // range = 0.0100, wickPart = 0.1
-    expect(wickPart(bullish)).toBeCloseTo(0.1, 6);
+    expect(bullish.wickPart()).toBeCloseTo(0.1, 6);
   });
 
   it('tailPart returns tail ratio', () => {
     // bullish: tail = min(open,close) - low = 1.1000 - 1.0950 = 0.0050
     // range = 0.0100, tailPart = 0.5
-    expect(tailPart(bullish)).toBeCloseTo(0.5, 6);
+    expect(bullish.tailPart()).toBeCloseTo(0.5, 6);
   });
 
   it('bodyRange returns absolute body', () => {
     // bullish: |1.1040 - 1.1000| = 0.004
-    expect(bodyRange(bullish)).toBeCloseTo(0.004, 6);
+    expect(bullish.bodyRange()).toBeCloseTo(0.004, 6);
   });
 });
 

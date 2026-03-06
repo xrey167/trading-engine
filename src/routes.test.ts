@@ -1182,6 +1182,34 @@ describe('R23 – PATCH /v1/positions/:ticket', () => {
     });
     expect(res.statusCode).toBe(404);
   });
+
+  it('returns 400 for a non-numeric ticket', async () => {
+    const res = await app.inject({
+      method: 'PATCH', url: '/v1/positions/abc',
+      payload: { stopLoss: 1.0950, takeProfit: 1.1100 },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('returns 400 for an empty body (missing SL/TP)', async () => {
+    app.broker.seedPosition(makeSeedPosition(3002));
+    const res = await app.inject({
+      method: 'PATCH', url: '/v1/positions/3002',
+      payload: {},
+    });
+    expect(res.statusCode).toBe(400);
+  });
+});
+
+describe('R23 – DELETE /v1/positions/:ticket — non-numeric', () => {
+  let app: FastifyInstance;
+  beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
+  afterEach(() => app.close());
+
+  it('returns 400 for a non-numeric ticket', async () => {
+    const res = await app.inject({ method: 'DELETE', url: '/v1/positions/abc' });
+    expect(res.statusCode).toBe(400);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────

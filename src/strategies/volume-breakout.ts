@@ -1,6 +1,5 @@
 import type { Bars } from '../../trading-engine.js';
 import type { Logger } from '../lib/logger.js';
-import { isBullish, bodyRange } from '../analysis/candle-analysis.js';
 import { SignalResult, type ISignalStrategy, type ISignalContext, RunMode } from './types.js';
 
 export interface VolumeBreakoutConfig {
@@ -42,6 +41,10 @@ export class VolumeBreakoutStrategy implements ISignalStrategy {
   async evaluate(context: ISignalContext): Promise<SignalResult> {
     if (context.isNewBar) {
       const avg = tickVolumeAverage(context.bars, this.config.lookback);
+      // When lookback > bars.length, tickVolumeAverage returns null.
+      // Coercing null to 0 causes the cachedAverageVolume === 0 guard
+      // below to return HOLD, which is the desired behaviour — the
+      // strategy stays out of the market until enough history exists.
       this.cachedAverageVolume = avg ?? 0;
     }
 
@@ -57,13 +60,13 @@ export class VolumeBreakoutStrategy implements ISignalStrategy {
     if (context.bars.length <= shift) return SignalResult.HOLD;
     const bar = context.bars.candle(shift);
 
-    if (bodyRange(bar) < this.config.minBodyRange) {
+    if (bar.bodyRange() < this.config.minBodyRange) {
       return SignalResult.HOLD;
     }
 
     const threshold = this.cachedAverageVolume * this.config.multiplier;
     if ((bar.volume ?? 0) >= threshold) {
-      return isBullish(bar) ? SignalResult.BUY : SignalResult.SELL;
+      return bar.isBullish() ? SignalResult.BUY : SignalResult.SELL;
     }
 
     return SignalResult.HOLD;

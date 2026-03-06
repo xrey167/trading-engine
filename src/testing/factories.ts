@@ -23,8 +23,8 @@ export interface TestPosition {
   userId: string;
   symbol: string;
   type: 'BUY' | 'SELL';
-  magic: bigint;
-  identifier: bigint;
+  magic: number;
+  identifier: number;
   time: Date;
   priceOpen: number;
   priceCurrent: number;
@@ -53,10 +53,10 @@ export interface TestSymbol {
 }
 
 export interface TestDeal {
-  ticket: bigint;
+  ticket: number;
   userId: string;
-  order: bigint;
-  positionId: bigint;
+  order: number;
+  positionId: number;
   symbol: string;
   type: string;
   entry: string;
@@ -99,8 +99,8 @@ export function makePosition(overrides: Partial<TestPosition> = {}): TestPositio
     userId: 'user-1',
     symbol: 'EURUSD',
     type: 'BUY',
-    magic: 0n,
-    identifier: 1n,
+    magic: 0,
+    identifier: 1,
     time: new Date('2024-01-01T00:00:00Z'),
     priceOpen: 1.1000,
     priceCurrent: 1.1020,
@@ -135,10 +135,10 @@ export function makeSymbol(overrides: Partial<TestSymbol> = {}): TestSymbol {
 
 export function makeDeal(overrides: Partial<TestDeal> = {}): TestDeal {
   return {
-    ticket: 1n,
+    ticket: 1,
     userId: 'user-1',
-    order: 1n,
-    positionId: 1n,
+    order: 1,
+    positionId: 1,
     symbol: 'EURUSD',
     type: 'DEAL_TYPE_BUY',
     entry: 'DEAL_ENTRY_IN',
@@ -153,6 +153,11 @@ export function makeDeal(overrides: Partial<TestDeal> = {}): TestDeal {
   };
 }
 
+/**
+ * Build an OHLC bar for tests. When open/high/low are omitted they
+ * default to `close`, producing a zero-range (doji) candle. Tests that
+ * need specific body or shadow proportions must pass explicit values.
+ */
 export function makeOHLC(
   close: number,
   opts: { high?: number; low?: number; open?: number; volume?: number } = {},
@@ -171,6 +176,11 @@ export function makeBars(data: OHLC[]): Bars {
   return new Bars(data);
 }
 
+/**
+ * Build a Bars instance from parallel arrays. If `highs` or `lows` are
+ * shorter than `closes`, missing entries fall back to the corresponding
+ * close value (producing zero-range shadows for those bars).
+ */
 export function makeBarsFromArrays(
   closes: number[],
   highs?: number[],
