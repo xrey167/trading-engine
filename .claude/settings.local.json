@@ -9,16 +9,7 @@
       "Bash(npm run:*)",
       "Bash(npm test:*)",
       "Bash(gh auth:*)",
-      "Bash(gh repo:*)",
-      "Bash(git clone:*)",
-      "Bash(npx tsx:*)",
-      "Bash(node:*)",
-      "Bash(grep:*)",
-      "Bash(find:*)",
-      "WebFetch(domain:raw.githubusercontent.com)",
-      "WebFetch(domain:api.github.com)",
-      "Bash(cd:*)",
-      "WebFetch(domain:github.com)"
+      "Bash(gh repo:*)"
     ]
   }
 }

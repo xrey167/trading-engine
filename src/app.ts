@@ -5,6 +5,7 @@ import { SymbolInfo } from '../trading-engine.js';
 import { PaperBroker } from './plugins/broker.js';
 import enginePlugin from './plugins/engine.js';
 import rateLimitPlugin from './plugins/rate-limit.js';
+import corsPlugin from './plugins/cors.js';
 import atrPlugin from './plugins/atr.js';
 import positionsRoute from './routes/positions/index.js';
 import ordersRoute from './routes/orders/index.js';
@@ -18,6 +19,7 @@ import backtestRoute from './routes/backtest/index.js';
 import signalRoute from './routes/signal/index.js';
 import v1PositionsRoute from './routes/v1-positions/index.js';
 import moneyManagementRoute from './routes/money-management/index.js';
+import openbbRoute from './routes/openbb/index.js';
 import './types/index.js';
 
 export interface BuildAppConfig {
@@ -51,6 +53,9 @@ export async function buildApp(
   // 3. Rate-limit plugin (global: false — opt-in per route)
   await app.register(rateLimitPlugin);
 
+  // 3b. CORS (fp()-wrapped — hook applies globally across all scopes)
+  await app.register(corsPlugin);
+
   // 4. WebSocket support
   await app.register(websocket);
 
@@ -72,6 +77,9 @@ export async function buildApp(
   await app.register(signalRoute);
   await app.register(v1PositionsRoute);
   await app.register(moneyManagementRoute);
+
+  // 8. OpenBB Workspace integration (widgets.json, apps.json, /openbb/* data routes)
+  await app.register(openbbRoute);
 
   return app;
 }
