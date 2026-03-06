@@ -1,5 +1,4 @@
 import type { Logger } from '../lib/logger.js';
-import { isBullish, isBearish, range, tailPart, wickPart } from '../analysis/candle-analysis.js';
 import { calculateATR } from '../analysis/atr.js';
 import { isLocalHigh, isLocalLow } from '../analysis/local-extremes.js';
 import { SignalResult, type ISignalStrategy, type ISignalContext, type CandleAtrConfig } from './types.js';
@@ -40,14 +39,14 @@ export class CandleAtrStrategy implements ISignalStrategy {
       return SignalResult.HOLD;
     }
 
-    if (range(currentBar) < atr * this.config.atrMultiplier) {
+    if (currentBar.range() < atr * this.config.atrMultiplier) {
       return SignalResult.HOLD;
     }
 
     // SELL: bearish previous bar + no short positions + small tail + local low
-    if (isBearish(prevBar) && positionState.shortCount() === 0) {
+    if (prevBar.isBearish() && positionState.shortCount() === 0) {
       if (
-        tailPart(prevBar) < this.config.tailPartThreshold &&
+        prevBar.tailPart() < this.config.tailPartThreshold &&
         isLocalLow(bars, this.config.localWindow, 1)
       ) {
         this.logger.info('CandleATR: SELL signal');
@@ -56,9 +55,9 @@ export class CandleAtrStrategy implements ISignalStrategy {
     }
 
     // BUY: bullish previous bar + no long positions + small wick + local high
-    if (isBullish(prevBar) && positionState.longCount() === 0) {
+    if (prevBar.isBullish() && positionState.longCount() === 0) {
       if (
-        wickPart(prevBar) < this.config.wickPartThreshold &&
+        prevBar.wickPart() < this.config.wickPartThreshold &&
         isLocalHigh(bars, this.config.localWindow, 1)
       ) {
         this.logger.info('CandleATR: BUY signal');

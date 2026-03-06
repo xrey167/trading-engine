@@ -24,29 +24,3 @@ export const TradeSignalEntrySchema = Type.Object({
 });
 export type TradeSignalEntry = Static<typeof TradeSignalEntrySchema>;
 
-// Pure bitflag utility functions
-export function checkSignals(flags: number, mask: number): boolean {
-  return (flags & mask) === mask;
-}
-export function checkSignalsExact(flags: number, mask: number): boolean {
-  return flags === mask;
-}
-export function addSignals(flags: number, mask: number): number {
-  return flags | mask;
-}
-export function removeSignals(flags: number, mask: number): number {
-  return flags & ~mask;
-}
-export function setSignal(flags: number, mask: number, value: boolean): number {
-  return value ? addSignals(flags, mask) : removeSignals(flags, mask);
-}
-export function isOpenBuy(flags: number): boolean {
-  return checkSignals(flags, TradeSignalFlag.OpenBuy);
-}
-export function isOpenSell(flags: number): boolean {
-  return checkSignals(flags, TradeSignalFlag.OpenSell);
-}
-export function getSignalOp(flags: number, prevFlags: number): TradeSignalOp {
-  if (flags === prevFlags) return TradeSignalOp.Set;
-  return (flags & ~prevFlags) !== 0 ? TradeSignalOp.Add : TradeSignalOp.Remove;
-}

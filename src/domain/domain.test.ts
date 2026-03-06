@@ -9,14 +9,6 @@ if (!FormatRegistry.Has('date-time')) {
 
 import {
   TradeSignalFlag,
-  addSignals,
-  removeSignals,
-  checkSignals,
-  checkSignalsExact,
-  isOpenBuy,
-  isOpenSell,
-  setSignal,
-  getSignalOp,
   TradeSignalOp,
   TradeSignalEntrySchema,
 } from './trade-signal.js';
@@ -33,57 +25,22 @@ import { AccountInfoVOSchema, SymbolInfoVOSchema, TickSchema } from './account.j
 import { MoneyManagementFactoryConfigSchema } from '../money-management/types.js';
 
 // ─────────────────────────────────────────────────────────────
-// Unit 4 — TradeSignalFlag bitflag operations
+// Unit 4 — TradeSignalFlag constants
 // ─────────────────────────────────────────────────────────────
 
-describe('TradeSignalFlag bitflags', () => {
-  it('addSignals sets bits', () => {
-    const flags = addSignals(TradeSignalFlag.None, TradeSignalFlag.OpenBuy);
-    expect(flags).toBe(TradeSignalFlag.OpenBuy);
+describe('TradeSignalFlag constants', () => {
+  it('has expected bitflag values', () => {
+    expect(TradeSignalFlag.None).toBe(0);
+    expect(TradeSignalFlag.OpenBuy).toBe(1);
+    expect(TradeSignalFlag.OpenSell).toBe(2);
+    expect(TradeSignalFlag.CloseBuy).toBe(4);
+    expect(TradeSignalFlag.CloseSell).toBe(8);
   });
 
-  it('addSignals combines multiple bits', () => {
-    let flags = addSignals(TradeSignalFlag.None, TradeSignalFlag.OpenBuy);
-    flags = addSignals(flags, TradeSignalFlag.CloseSell);
-    expect(flags).toBe(TradeSignalFlag.OpenBuy | TradeSignalFlag.CloseSell);
-  });
-
-  it('removeSignals clears bits', () => {
-    const flags = addSignals(TradeSignalFlag.OpenBuy, TradeSignalFlag.OpenSell);
-    const result = removeSignals(flags, TradeSignalFlag.OpenBuy);
-    expect(result).toBe(TradeSignalFlag.OpenSell);
-  });
-
-  it('checkSignals verifies mask present', () => {
-    const flags = TradeSignalFlag.OpenBuy | TradeSignalFlag.CloseBuy;
-    expect(checkSignals(flags, TradeSignalFlag.OpenBuy)).toBe(true);
-    expect(checkSignals(flags, TradeSignalFlag.OpenSell)).toBe(false);
-  });
-
-  it('checkSignalsExact matches exact value', () => {
-    const flags = TradeSignalFlag.OpenBuy | TradeSignalFlag.CloseBuy;
-    expect(checkSignalsExact(flags, TradeSignalFlag.OpenBuy | TradeSignalFlag.CloseBuy)).toBe(true);
-    expect(checkSignalsExact(flags, TradeSignalFlag.OpenBuy)).toBe(false);
-  });
-
-  it('isOpenBuy / isOpenSell helpers', () => {
-    expect(isOpenBuy(TradeSignalFlag.OpenBuy)).toBe(true);
-    expect(isOpenBuy(TradeSignalFlag.OpenSell)).toBe(false);
-    expect(isOpenSell(TradeSignalFlag.OpenSell)).toBe(true);
-    expect(isOpenSell(TradeSignalFlag.OpenBuy)).toBe(false);
-  });
-
-  it('setSignal toggles bits', () => {
-    let flags = setSignal(TradeSignalFlag.None, TradeSignalFlag.OpenBuy, true);
-    expect(flags).toBe(TradeSignalFlag.OpenBuy);
-    flags = setSignal(flags, TradeSignalFlag.OpenBuy, false);
-    expect(flags).toBe(TradeSignalFlag.None);
-  });
-
-  it('getSignalOp detects Add, Remove, Set', () => {
-    expect(getSignalOp(TradeSignalFlag.OpenBuy, TradeSignalFlag.None)).toBe(TradeSignalOp.Add);
-    expect(getSignalOp(TradeSignalFlag.None, TradeSignalFlag.OpenBuy)).toBe(TradeSignalOp.Remove);
-    expect(getSignalOp(TradeSignalFlag.OpenBuy, TradeSignalFlag.OpenBuy)).toBe(TradeSignalOp.Set);
+  it('TradeSignalOp has expected values', () => {
+    expect(TradeSignalOp.Add).toBe('ADD');
+    expect(TradeSignalOp.Remove).toBe('REMOVE');
+    expect(TradeSignalOp.Set).toBe('SET');
   });
 });
 
@@ -268,9 +225,9 @@ describe('MoneyManagementFactoryConfigSchema', () => {
       symbol: 'EURUSD',
       timeframe: 'H1',
       direction: 'BUY' as const,
-      stopLossType: 'FIXED',
+      stopLossType: 'PIPS',
       stopLossValue: 50,
-      takeProfitType: 'FIXED',
+      takeProfitType: 'PIPS',
       takeProfitValue: 100,
       lotsType: 'FIXED',
       lotsValue: 0.1,
@@ -284,15 +241,15 @@ describe('MoneyManagementFactoryConfigSchema', () => {
       symbol: 'EURUSD',
       timeframe: 'H1',
       direction: 'SELL' as const,
-      stopLossType: 'ATR',
+      stopLossType: 'ATR_DISTANCE',
       stopLossValue: 1.5,
       stopLossAtrMultiplier: 2.0,
       stopLossPipBuffer: 5,
-      takeProfitType: 'RR',
+      takeProfitType: 'RISK_REWARD',
       takeProfitValue: 2,
       takeProfitAtrMultiplier: 1.5,
       riskRewardRatio: 2.0,
-      lotsType: 'RISK_PERCENT',
+      lotsType: 'RISK',
       lotsValue: 1.0,
     };
     expect(Value.Check(MoneyManagementFactoryConfigSchema, valid)).toBe(true);
@@ -304,9 +261,9 @@ describe('MoneyManagementFactoryConfigSchema', () => {
       symbol: 'EURUSD',
       timeframe: 'H1',
       direction: 'BUY',
-      stopLossType: 'FIXED',
+      stopLossType: 'PIPS',
       stopLossValue: 50,
-      takeProfitType: 'FIXED',
+      takeProfitType: 'PIPS',
       takeProfitValue: 100,
       lotsType: 'FIXED',
       lotsValue: 0.1,
@@ -320,12 +277,28 @@ describe('MoneyManagementFactoryConfigSchema', () => {
       symbol: 'EURUSD',
       timeframe: 'H1',
       direction: 'BUY',
-      stopLossType: 'FIXED',
+      stopLossType: 'PIPS',
       stopLossValue: 50,
-      takeProfitType: 'FIXED',
+      takeProfitType: 'PIPS',
       takeProfitValue: 100,
       lotsType: 'FIXED',
       lotsValue: -1,
+    };
+    expect(Value.Check(MoneyManagementFactoryConfigSchema, invalid)).toBe(false);
+  });
+
+  it('rejects invalid enum values', () => {
+    const invalid = {
+      userId: 'user-1',
+      symbol: 'EURUSD',
+      timeframe: 'H1',
+      direction: 'BUY',
+      stopLossType: 'INVALID_TYPE',
+      stopLossValue: 50,
+      takeProfitType: 'PIPS',
+      takeProfitValue: 100,
+      lotsType: 'FIXED',
+      lotsValue: 0.1,
     };
     expect(Value.Check(MoneyManagementFactoryConfigSchema, invalid)).toBe(false);
   });

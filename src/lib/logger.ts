@@ -34,8 +34,3 @@ export function createLogger(name: string): Logger {
     error: (...args: unknown[]) => console.error(prefix, ...args),
   };
 }
-
-/** Factory: create a silent logger. */
-export function createNullLogger(): Logger {
-  return nullLogger;
-}
