@@ -140,8 +140,12 @@ export class PaperBroker implements IBrokerAdapter, IOrderGateway, IPositionGate
 
   // ───── IHistoryGateway ─────
 
-  async getDeals(_userId: string, _from: Date, _to: Date): Promise<Result<DealInfoVO[], DomainError>> {
-    return ok(this.deals.filter(d => d.userId === _userId));
+  async getDeals(userId: string, from: Date, to: Date): Promise<Result<DealInfoVO[], DomainError>> {
+    return ok(this.deals.filter(d => {
+      if (d.userId !== userId) return false;
+      const t = new Date(d.time).getTime();
+      return t >= from.getTime() && t <= to.getTime();
+    }));
   }
 
   async getDealByTicket(ticket: number, userId: string): Promise<Result<DealInfoVO, DomainError>> {

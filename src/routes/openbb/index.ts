@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto';
 import type { FastifyPluginAsync } from 'fastify';
 import { Type } from '@sinclair/typebox';
 import { Side } from '../../../trading-engine.js';
@@ -115,10 +116,13 @@ const openbbRoute: FastifyPluginAsync = async (fastify) => {
   // Optional API-key guard — only activated when OPENBB_API_KEY env var is set.
   const API_KEY = process.env.OPENBB_API_KEY;
   if (API_KEY) {
+    const keyBuf = Buffer.from(API_KEY);
     fastify.addHook('preHandler', async (req, reply) => {
-      if ((req.query as { apiKey?: string }).apiKey !== API_KEY) {
-        return reply.status(401).send({ error: 'Unauthorized' });
-      }
+      const provided = (req.query as { apiKey?: string }).apiKey ?? '';
+      const providedBuf = Buffer.from(provided);
+      // timingSafeEqual requires equal-length buffers; check length first
+      const valid = keyBuf.length === providedBuf.length && timingSafeEqual(keyBuf, providedBuf);
+      if (!valid) return reply.status(401).send({ error: 'Unauthorized' });
     });
   }
 
@@ -181,6 +185,12 @@ const openbbRoute: FastifyPluginAsync = async (fastify) => {
     const { from, to } = req.query as { from?: string; to?: string };
     const fromDate = from ? new Date(from) : new Date(0);
     const toDate   = to   ? new Date(to)   : new Date();
+    if (from && Number.isNaN(fromDate.getTime()))
+      return reply.status(400).send({ error: 'Invalid "from" date' });
+    if (to && Number.isNaN(toDate.getTime()))
+      return reply.status(400).send({ error: 'Invalid "to" date' });
+    if (fromDate > toDate)
+      return reply.status(400).send({ error: '"from" must be before "to"' });
     const result = await fastify.broker.getDeals('default', fromDate, toDate);
     if (!result.ok) return reply.status(500).send({ error: result.error.message });
     return reply.send(result.value.map(d => ({

@@ -9,7 +9,7 @@ const corsPlugin: FastifyPluginAsync = async (fastify) => {
       'http://localhost:1420',
       'http://localhost:3000',
     ],
-    methods: ['GET', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     credentials: false,
   });
 };
