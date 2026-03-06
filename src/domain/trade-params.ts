@@ -27,10 +27,11 @@ export function makeTradeStats(): TradeStats {
   return { wins: 0, losses: 0, total: 0, profit: 0 };
 }
 export function addStat(stats: TradeStats, profit: number): TradeStats {
-  const win = profit > 0;
+  const isWin  = profit > 0;
+  const isLoss = profit < 0;
   return {
-    wins:   stats.wins   + (win ? 1 : 0),
-    losses: stats.losses + (win ? 0 : 1),
+    wins:   stats.wins   + (isWin  ? 1 : 0),
+    losses: stats.losses + (isLoss ? 1 : 0),
     total:  stats.total  + 1,
     profit: stats.profit + profit,
   };

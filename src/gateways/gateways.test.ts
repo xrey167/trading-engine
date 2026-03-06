@@ -154,13 +154,10 @@ describe('PaperBroker — Gateway methods', () => {
       }
     });
 
-    it('returns default 10000 when no account seeded', async () => {
+    it('returns NOT_FOUND when no account seeded', async () => {
       const broker = makeBroker();
       const result = await broker.getBalance('user1');
-      expect(isOk(result)).toBe(true);
-      if (isOk(result)) {
-        expect(result.value).toBe(10_000);
-      }
+      expect(isErr(result)).toBe(true);
     });
   });
 

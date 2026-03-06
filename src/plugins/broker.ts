@@ -131,13 +131,10 @@ export class PaperBroker implements IBrokerAdapter, IOrderGateway, IPositionGate
     return ok(undefined);
   }
 
-  // TODO: Tech debt — mutates readonly PositionInfoVO via type assertion.
-  // Consider using a mutable internal type or a copy-on-write pattern.
   async modifyPosition(ticket: number, sl: number, tp: number, userId: string): Promise<Result<void, DomainError>> {
-    const p = this.positions.find(pos => pos.ticket === ticket && pos.userId === userId);
-    if (!p) return err(notFound(`Position ${ticket} not found`, String(ticket)));
-    (p as { stopLoss: number; takeProfit: number }).stopLoss = sl;
-    (p as { stopLoss: number; takeProfit: number }).takeProfit = tp;
+    const idx = this.positions.findIndex(pos => pos.ticket === ticket && pos.userId === userId);
+    if (idx === -1) return err(notFound(`Position ${ticket} not found`, String(ticket)));
+    this.positions[idx] = { ...this.positions[idx], stopLoss: sl, takeProfit: tp };
     return ok(undefined);
   }
 
@@ -189,7 +186,8 @@ export class PaperBroker implements IBrokerAdapter, IOrderGateway, IPositionGate
   }
 
   async getBalance(_userId: string): Promise<Result<number, DomainError>> {
-    return ok(this.accountInfoStore?.balance ?? 10_000);
+    if (!this.accountInfoStore) return err(notFound('No account seeded', _userId));
+    return ok(this.accountInfoStore.balance);
   }
 
   async isReal(_userId: string): Promise<Result<boolean, DomainError>> {

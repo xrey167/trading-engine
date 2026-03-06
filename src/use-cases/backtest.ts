@@ -26,16 +26,17 @@ export class BacktestUseCase {
 
     const results: SignalResult[] = [];
 
-    // Walk forward in time: start from the oldest bar and grow the window by
-    // prepending one bar per step. A single array is reused (no per-step slice).
-    // ohlcs[0] is newest overall, so walking i from end to 0 adds newer bars.
-    const window: OHLC[] = [];
+    // Walk forward in time (oldest → newest). ohlcs[0] is newest, so we
+    // iterate in reverse. `oldestFirst` grows with O(1) push; we reverse a
+    // copy when constructing Bars (which expects newest-first). This avoids
+    // the O(n) per-step array shift that `unshift` would cause.
+    const oldestFirst: OHLC[] = [];
     for (let i = params.ohlcs.length - 1; i >= 0; i--) {
-      window.unshift(params.ohlcs[i]);
+      oldestFirst.push(params.ohlcs[i]);
       const result = await this.strategy.evaluate({
         isNewBar: true,
         runMode: RunMode.Backtest,
-        bars: new Bars(window),
+        bars: new Bars(oldestFirst.slice().reverse()),
         positionState: params.positionState,
         symbol: params.symbol,
         timeframe: params.timeframe,

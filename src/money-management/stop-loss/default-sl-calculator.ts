@@ -29,7 +29,7 @@ export class DefaultStopLossCalculator extends BaseCalculator implements IStopLo
       limitType: this.stopLossType,
       stopLossValue: this.stopLossValue,
       entryPrice: params.entryPrice,
-      ...(params.lots !== undefined ? { lots: params.lots } : {}),
+      lots: params.lots,
     });
   }
 }

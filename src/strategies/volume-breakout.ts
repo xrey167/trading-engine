@@ -6,14 +6,12 @@ export interface VolumeBreakoutConfig {
   lookback: number;
   multiplier: number;
   minBodyRange: number;
-  runMode: RunMode;
 }
 
 const DEFAULT_CONFIG: VolumeBreakoutConfig = {
   lookback: 20,
   multiplier: 1.5,
   minBodyRange: 0,
-  runMode: RunMode.Live,
 };
 
 function tickVolumeAverage(bars: Bars, lookback: number): number | null {
