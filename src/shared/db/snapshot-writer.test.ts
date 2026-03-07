@@ -142,6 +142,8 @@ describe('SnapshotWriter', () => {
     let emitter: TypedEventBus<AppEventMap>;
     const makeFilledEvent = (symbol = 'EURUSD', strategy?: string): OrderEvent => ({
       action: 'FILLED',
+      orderId: 0,
+      orderType: 'BUY_MARKET',
       brokerId: 'paper',
       symbol,
       direction: 'BUY',

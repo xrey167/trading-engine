@@ -10,7 +10,6 @@ import { InMemoryBarCache } from './market-data/bar-cache.js';
 import { RedisBarCache } from './market-data/redis-bar-cache.js';
 import { PostgresBarCache } from './market-data/pg-bar-cache.js';
 import type { IBarCache } from './market-data/data-provider-types.js';
-import { createDatabase } from './shared/db/client.js';
 import { DealWriter } from './shared/db/deal-writer.js';
 import { SnapshotWriter } from './shared/db/snapshot-writer.js';
 import { InternalProvider } from './market-data/internal-provider.js';

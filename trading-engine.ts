@@ -1788,7 +1788,9 @@ export class TradingEngine {
     return {
       id, type, side, price,
       size: size ?? this._nextOrderSize,
-      time: new Date(),
+      // Use last bar time so order creation timestamps are deterministic during historical replay.
+      // Falls back to epoch (new Date(0)) before the first onBar call, which is acceptable.
+      time: this._lastBarTime,
       oco:  this._nextOCO  ? true : undefined,
       co:   this._nextCO   ? true : undefined,
       cs:   this._nextCS   ? true : undefined,
