@@ -159,6 +159,18 @@ tags:
       The `MoneyManagementConfig` schema encodes the full factory configuration —
       `stopLossType`, `takeProfitType`, and `lotsType` each select a calculation
       strategy, while the corresponding value fields parameterise it.
+  - name: Services
+    description: |
+      Service lifecycle management — list, inspect, start, and stop registered
+      services (brokers, data providers, strategies, etc.).
+
+      Services are typed by `kind` (`BROKER`, `DATA_PROVIDER`, `STRATEGY`,
+      `SCREENER`, `ORDER_MANAGER`, `RISK_MANAGER`) and expose a health check
+      that includes `status`, `lastHeartbeat`, and arbitrary `metadata`.
+
+      All service routes are **read-only or admin** — no `x-api-key` guard is
+      applied (services are internal infrastructure endpoints).
+
   - name: Skills
     description: |
       Agent SDK skills integration — run 56+ AI-powered financial analysis and
@@ -1020,14 +1032,25 @@ paths:
             schema:
               $ref: '#/components/schemas/PostOrderBody'
             examples:
+              buyMarket:
+                summary: Buy at market (immediate)
+                value: { type: "BUY_MARKET", size: 1.0 }
               buyLimit:
-                summary: Simple buy limit
+                summary: Buy limit
                 value: { type: "BUY_LIMIT", price: 1.0800, size: 1.0 }
+              buyStopLimit:
+                summary: Buy stop-limit (stop at 1.0850, limit fill ≤ 1.0845)
+                value: { type: "BUY_STOP_LIMIT", price: 1.0850, limitPrice: 1.0845, size: 1.0 }
+              buyMTO:
+                summary: Buy MTO — Market Trail Order (trailing stop, fills at market)
+                value:
+                  type: BUY_MTO
+                  size: 1.0
+                  trailEntry: { mode: 0, distancePts: 150 }
               buyLimitTrail:
                 summary: Trailing buy limit (ATR mode)
                 value:
                   type: BUY_LIMIT_TRAIL
-                  price: 1.0800
                   size: 1.0
                   trailEntry: { mode: 2, distancePts: 200, periods: 14 }
               bracket:
@@ -2752,6 +2775,200 @@ paths:
                 error: "Rate limit exceeded, retry in 60 seconds"
 
 # ─────────────────────────────────────────────────────────────
+# Services
+# ─────────────────────────────────────────────────────────────
+
+  /services:
+    get:
+      tags: [Services]
+      summary: List all registered services
+      operationId: listServices
+      description: |
+        Returns a summary of every service registered in the service registry.
+        Each entry includes the service's `id`, `kind`, `name`, and current
+        lifecycle `status`.
+
+        ### Code Examples
+
+        **curl:**
+        ```bash
+        curl http://localhost:3000/services | jq
+        ```
+      security: []
+      responses:
+        '200':
+          description: Array of service summaries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ServiceSummary'
+              example:
+                - id: paper-broker
+                  kind: BROKER
+                  name: Paper Broker
+                  status: RUNNING
+                - id: mt5-data
+                  kind: DATA_PROVIDER
+                  name: MT5 Data Feed
+                  status: STOPPED
+
+  /services/health:
+    get:
+      tags: [Services]
+      summary: Aggregate health of all services
+      operationId: getServicesHealth
+      description: |
+        Returns a rolled-up health report across all registered services:
+        counters by status (`running`, `stopped`, `error`, `degraded`) plus a
+        per-service status list.
+
+        Use this as a single-call liveness check for the entire service layer.
+
+        ### Code Examples
+
+        **curl:**
+        ```bash
+        curl http://localhost:3000/services/health | jq
+        ```
+      security: []
+      responses:
+        '200':
+          description: Aggregate health report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AggregateHealth'
+              example:
+                total: 2
+                running: 1
+                stopped: 1
+                error: 0
+                degraded: 0
+                services:
+                  - id: paper-broker
+                    status: RUNNING
+                    error: null
+                  - id: mt5-data
+                    status: STOPPED
+                    error: null
+
+  /services/{id}:
+    get:
+      tags: [Services]
+      summary: Get service detail
+      operationId: getService
+      description: |
+        Returns full detail for a single service including the embedded
+        `health` object with `status`, `lastHeartbeat`, `error`, and
+        arbitrary `metadata` populated by the service implementation.
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Service identifier (as returned by `GET /services`)
+          schema:
+            type: string
+          example: paper-broker
+      responses:
+        '200':
+          description: Service detail with health
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceDetail'
+              example:
+                id: paper-broker
+                kind: BROKER
+                name: Paper Broker
+                health:
+                  status: RUNNING
+                  lastHeartbeat: "2026-03-07T12:00:00.000Z"
+                  error: null
+                  metadata:
+                    connectedSince: "2026-03-07T11:00:00.000Z"
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /services/{id}/start:
+    post:
+      tags: [Services]
+      summary: Start a service
+      operationId: startService
+      description: |
+        Calls `svc.start()` on the named service and returns the updated
+        `ServiceDetail`. If the service is already running the call is a
+        no-op (implementation-defined).
+
+        Returns `500` if `svc.start()` throws.
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Service identifier
+          schema:
+            type: string
+          example: mt5-data
+      responses:
+        '200':
+          description: Service started — returns updated detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          description: Service start failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "Connection refused: mt5://localhost:18812"
+
+  /services/{id}/stop:
+    post:
+      tags: [Services]
+      summary: Stop a service
+      operationId: stopService
+      description: |
+        Calls `svc.stop()` on the named service and returns the updated
+        `ServiceDetail`. If the service is already stopped the call is a
+        no-op (implementation-defined).
+
+        Returns `500` if `svc.stop()` throws.
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Service identifier
+          schema:
+            type: string
+          example: mt5-data
+      responses:
+        '200':
+          description: Service stopped — returns updated detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          description: Service stop failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "Timeout waiting for service to drain connections"
+
+# ─────────────────────────────────────────────────────────────
 # Components
 # ─────────────────────────────────────────────────────────────
 
@@ -2883,44 +3100,80 @@ components:
         SMA is smoother and less sensitive to spikes.
 
     LimitConfirm:
-      type: integer
-      enum: [0, 1, 2, 3]
+      type: string
+      enum: [LIMIT_CONFIRM_NONE, LIMIT_CONFIRM_WICK, LIMIT_CONFIRM_WICKBREAK, LIMIT_CONFIRM_WICKCOLOR]
       description: |
-        Candle confirmation mode for limit orders. Controls when a limit order
-        is allowed to fill:
+        Candle confirmation mode for limit orders. Controls whether a limit order
+        fills on the bar that triggers it. The order stays pending until the
+        selected condition is satisfied.
 
-        - `0` — **None**: fill immediately when price reaches the level
-        - `1` — **Close**: only fill if the candle closes beyond the level
-        - `2` — **Break**: fill on the next bar after a close beyond the level
-        - `3` — **Retest**: fill only after price retests the level from the other side
+        - `LIMIT_CONFIRM_NONE` — fill immediately when price reaches the level (default)
+        - `LIMIT_CONFIRM_WICK` — wick must cross level **and** candle must close back past it
+        - `LIMIT_CONFIRM_WICKBREAK` — wick crosses level **and** entire candle body (both open & close) must be past it
+        - `LIMIT_CONFIRM_WICKCOLOR` — same as `WICK` plus candle must be bullish (buy) / bearish (sell)
 
     OrderEntryType:
       type: string
       enum:
+        - BUY_MARKET
+        - SELL_MARKET
         - BUY_LIMIT
         - BUY_STOP
         - SELL_LIMIT
         - SELL_STOP
         - BUY_MIT
         - SELL_MIT
+        - BUY_STOP_LIMIT
+        - SELL_STOP_LIMIT
+        - BUY_MTO
+        - SELL_MTO
         - BUY_LIMIT_TRAIL
         - BUY_STOP_TRAIL
         - SELL_LIMIT_TRAIL
         - SELL_STOP_TRAIL
       description: |
-        Order entry type. Standard types:
+        Order entry type.
 
-        | Type           | Side | Trigger                            | Use Case            |
-        |----------------|------|------------------------------------|---------------------|
-        | `BUY_LIMIT`    | Buy  | Price drops to or below level      | Buy the dip         |
-        | `BUY_STOP`     | Buy  | Price rises to or above level      | Breakout long       |
-        | `SELL_LIMIT`   | Sell | Price rises to or above level      | Sell the rally      |
-        | `SELL_STOP`    | Sell | Price drops to or below level      | Breakout short      |
-        | `BUY_MIT`      | Buy  | Price drops to or below level      | Market If Touched   |
-        | `SELL_MIT`     | Sell | Price rises to or above level      | Market If Touched   |
+        **Market (immediate execution):**
 
-        Trailing types (`*_TRAIL`) adjust their entry price dynamically, following
-        the market and entering on a pullback from the extreme.
+        | Type           | Side | Behaviour                                              |
+        |----------------|------|--------------------------------------------------------|
+        | `BUY_MARKET`   | Buy  | Execute at market immediately; no pending order        |
+        | `SELL_MARKET`  | Sell | Execute at market immediately; no pending order        |
+
+        **Standard pending orders** (`price` required):
+
+        | Type              | Side | Trigger                              | Fill       |
+        |-------------------|------|--------------------------------------|------------|
+        | `BUY_LIMIT`       | Buy  | bar.low ≤ price                      | At price   |
+        | `BUY_STOP`        | Buy  | bar.high ≥ price                     | At price   |
+        | `SELL_LIMIT`      | Sell | bar.high ≥ price                     | At price   |
+        | `SELL_STOP`       | Sell | bar.low ≤ price                      | At price   |
+        | `BUY_MIT`         | Buy  | bar.low ≤ price                      | At market  |
+        | `SELL_MIT`        | Sell | bar.high ≥ price                     | At market  |
+
+        **Stop-limit orders** (`price` = stop trigger, `limitPrice` = fill ceiling/floor):
+
+        | Type              | Side | Trigger          | Fill                                         |
+        |-------------------|------|------------------|----------------------------------------------|
+        | `BUY_STOP_LIMIT`  | Buy  | bar.high ≥ price | At market if bar.low ≤ limitPrice, else defer|
+        | `SELL_STOP_LIMIT` | Sell | bar.low ≤ price  | At market if bar.high ≥ limitPrice, else defer|
+
+        **Market Trail Order** (`trailEntry` required — trailing stop, fills at market):
+
+        | Type       | Side | Trail behaviour                                            | Fill      |
+        |------------|------|------------------------------------------------------------|-----------|
+        | `BUY_MTO`  | Buy  | Stop trails below market; triggers when bar.high ≥ stop   | At market |
+        | `SELL_MTO` | Sell | Stop trails above market; triggers when bar.low ≤ stop    | At market |
+
+        **Trailing entry** (`trailEntry` required — limit/stop entry that follows the market):
+
+        | Type               | Side | Trail direction                                       | Fill     |
+        |--------------------|------|-------------------------------------------------------|----------|
+        | `BUY_LIMIT_TRAIL`  | Buy  | Limit anchors to highs; price = high − distance       | At price |
+        | `BUY_STOP_TRAIL`   | Buy  | Stop anchors to lows; price = low + distance          | At price |
+        | `SELL_LIMIT_TRAIL` | Sell | Limit anchors to lows; price = low + distance         | At price |
+        | `SELL_STOP_TRAIL`  | Sell | Stop anchors to highs; price = high − distance        | At price |
 
     OkResponse:
       type: object
@@ -3082,13 +3335,41 @@ components:
 
     PostOrderBody:
       type: object
-      required: [type, price]
+      required: [type]
       description: |
-        Request body for placing a pending order. The `type` and `price` are required;
-        `size` defaults to 1.0. Optional `attributes` and `trailEntry` modify order behaviour.
+        Request body for placing a pending order.
+
+        **Field requirements by type:**
+
+        | Type group           | `price` | `limitPrice` | `trailEntry` |
+        |----------------------|---------|--------------|--------------|
+        | `BUY_MARKET`, `SELL_MARKET` | — | — | — |
+        | Standard (`BUY_LIMIT` etc.) | ✓ | — | — |
+        | `BUY_STOP_LIMIT`, `SELL_STOP_LIMIT` | ✓ (stop) | ✓ (limit fill) | — |
+        | `BUY_MTO`, `SELL_MTO` | — | — | ✓ |
+        | `*_TRAIL` types | — | — | ✓ |
+
+        `size` defaults to 1.0 when omitted.
       properties:
         type:  { $ref: '#/components/schemas/OrderEntryType' }
-        price: { type: number, example: 1.0800, description: "Trigger price for the order" }
+        price:
+          type: number
+          example: 1.0800
+          description: |
+            Trigger price for the order.
+            - **Standard types**: the level at which the order triggers.
+            - **`BUY_STOP_LIMIT` / `SELL_STOP_LIMIT`**: the stop trigger price (not the fill price).
+            - **`BUY_MARKET` / `SELL_MARKET` / `*_TRAIL` / `BUY_MTO` / `SELL_MTO`**: omit (ignored).
+        limitPrice:
+          type: number
+          example: 1.0795
+          description: |
+            **`BUY_STOP_LIMIT` / `SELL_STOP_LIMIT` only.** The limit fill price applied
+            after the stop is triggered.
+            - `BUY_STOP_LIMIT`: must be ≤ `price` (fill ceiling below the stop)
+            - `SELL_STOP_LIMIT`: must be ≥ `price` (fill floor above the stop)
+            If the bar that triggers the stop does not reach `limitPrice`, the order
+            converts to a plain limit at `limitPrice` and waits for subsequent bars.
         size:  { type: number, example: 1.0, description: "Order size in lots (defaults to 1.0)" }
         attributes:
           type: object
@@ -3108,9 +3389,10 @@ components:
           type: object
           required: [mode, distancePts]
           description: |
-            **Required for `*_TRAIL` order types.** Configures how the entry price
-            trails behind the market. The order's trigger price adjusts on each bar,
-            following the price extreme and entering on a pullback.
+            **Required for `*_TRAIL` and `BUY_MTO` / `SELL_MTO` types.** Configures how
+            the entry price trails behind the market. The order's trigger price adjusts
+            on each bar, following the price extreme and entering on a pullback or
+            reversal.
           properties:
             mode:        { $ref: '#/components/schemas/TrailMode' }
             distancePts: { type: number, example: 200, description: "Trailing distance in points" }
@@ -3435,6 +3717,121 @@ components:
         minLot:    { type: number, example: 0.01, description: "Minimum trade size in lots" }
         maxLot:    { type: number, example: 100, description: "Maximum trade size in lots" }
         lotStep:   { type: number, example: 0.01, description: "Lot size increment step" }
+
+    # ── Services ───────────────────────────────────────────────
+
+    ServiceStatus:
+      type: string
+      enum: [STOPPED, STARTING, RUNNING, DEGRADED, STOPPING, ERROR]
+      description: Current lifecycle state of a service
+      example: RUNNING
+
+    ServiceKind:
+      type: string
+      enum: [BROKER, DATA_PROVIDER, STRATEGY, SCREENER, ORDER_MANAGER, RISK_MANAGER]
+      description: Functional category of the service
+      example: BROKER
+
+    ServiceSummary:
+      type: object
+      required: [id, kind, name, status]
+      description: Lightweight service listing entry
+      properties:
+        id:
+          type: string
+          description: Unique service identifier
+          example: paper-broker
+        kind:
+          $ref: '#/components/schemas/ServiceKind'
+        name:
+          type: string
+          description: Human-readable display name
+          example: Paper Broker
+        status:
+          $ref: '#/components/schemas/ServiceStatus'
+
+    ServiceHealth:
+      type: object
+      required: [status, lastHeartbeat, error, metadata]
+      description: Real-time health snapshot for a service instance
+      properties:
+        status:
+          $ref: '#/components/schemas/ServiceStatus'
+        lastHeartbeat:
+          type: string
+          format: date-time
+          nullable: true
+          description: ISO-8601 timestamp of the last successful heartbeat, or `null` if never started
+          example: "2026-03-07T12:00:00.000Z"
+        error:
+          type: string
+          nullable: true
+          description: Last error message if `status` is `ERROR`, otherwise `null`
+          example: null
+        metadata:
+          type: object
+          additionalProperties: true
+          description: Arbitrary key/value data provided by the service implementation (e.g. connection stats, queue depths)
+          example:
+            connectedSince: "2026-03-07T11:00:00.000Z"
+
+    ServiceDetail:
+      type: object
+      required: [id, kind, name, health]
+      description: Full service detail including embedded health snapshot
+      properties:
+        id:
+          type: string
+          example: paper-broker
+        kind:
+          $ref: '#/components/schemas/ServiceKind'
+        name:
+          type: string
+          example: Paper Broker
+        health:
+          $ref: '#/components/schemas/ServiceHealth'
+
+    AggregateHealth:
+      type: object
+      required: [total, running, stopped, error, degraded, services]
+      description: Rolled-up health counters across all registered services
+      properties:
+        total:
+          type: integer
+          description: Total number of registered services
+          example: 3
+        running:
+          type: integer
+          description: Count of services in RUNNING state
+          example: 2
+        stopped:
+          type: integer
+          description: Count of services in STOPPED state
+          example: 1
+        error:
+          type: integer
+          description: Count of services in ERROR state
+          example: 0
+        degraded:
+          type: integer
+          description: Count of services in DEGRADED state
+          example: 0
+        services:
+          type: array
+          description: Per-service status summary
+          items:
+            type: object
+            required: [id, status, error]
+            properties:
+              id:
+                type: string
+                example: paper-broker
+              status:
+                $ref: '#/components/schemas/ServiceStatus'
+              error:
+                type: string
+                nullable: true
+                example: null
 
     # ── Skills (Agent SDK) ─────────────────────────────────────
 
