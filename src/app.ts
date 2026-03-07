@@ -7,8 +7,12 @@ import websocket from '@fastify/websocket';
 import { SymbolInfoForex } from '../trading-engine.js';
 import { PaperBroker } from './broker/paper/paper-broker.js';
 import { InMemoryBarCache } from './market-data/bar-cache.js';
+import { RedisBarCache } from './market-data/redis-bar-cache.js';
+import type { IBarCache } from './market-data/data-provider-types.js';
 import { InternalProvider } from './market-data/internal-provider.js';
 import { toLogger } from './shared/lib/logger.js';
+import { createRedisClient } from './shared/lib/redis-client.js';
+import { RedisEventBridge } from './shared/lib/redis-event-bridge.js';
 import { TypedEventBus } from './shared/event-bus.js';
 import type { AppEventMap } from './shared/services/event-map.js';
 import { ServiceRegistry } from './shared/services/service-registry.js';
@@ -142,17 +146,35 @@ export async function buildApp(
   await primaryBrokerService.start();
   serviceRegistry.register(primaryBrokerService);
 
-  // 1c. Bar cache + internal data provider (bridges bar → normalized_bar)
-  const barCache = new InMemoryBarCache();
+  // 1c. Bar cache — Redis-backed if REDIS_URL is set, otherwise in-memory
+  const logger = toLogger(app.log);
+  const redis = createRedisClient(logger);
+  const barCache: IBarCache = redis ? new RedisBarCache(redis, logger) : new InMemoryBarCache();
   app.decorate('barCache', barCache);
 
-  const internalProvider = new InternalProvider(pair, 'M1', barCache, emitter, toLogger(app.log));
+  // If Redis available, hydrate cache from previous session
+  if (barCache instanceof RedisBarCache) {
+    const count = await barCache.hydrate(pair, 'M1');
+    if (count > 0) app.log.info(`Hydrated ${count} bars from Redis for ${pair}:M1`);
+  }
+
+  // 1c.2 Internal data provider (bridges bar → normalized_bar)
+  const internalProvider = new InternalProvider(pair, 'M1', barCache, emitter, logger);
   await internalProvider.start();
   serviceRegistry.register(internalProvider);
 
-  // 1d. Graceful shutdown — stop all registered services
+  // 1c.3 Redis event bridge — cross-instance pub/sub
+  let eventBridge: RedisEventBridge | undefined;
+  if (process.env.REDIS_URL) {
+    eventBridge = new RedisEventBridge(emitter, process.env.REDIS_URL, ['signal', 'order', 'normalized_bar'], logger);
+    await eventBridge.start();
+  }
+
+  // 1d. Graceful shutdown — stop all registered services + Redis
   app.addHook('onClose', async () => {
     await serviceRegistry.stopAll();
+    if (eventBridge) await eventBridge.stop();
+    if (redis) redis.disconnect();
   });
 
   // 4. Global error handler
