@@ -384,7 +384,7 @@ const openbbRoute: FastifyPluginAsync = async (fastify) => {
     const q = req.query as SSRMParams;
     const start = q.startRow ?? 0;
     const end   = q.endRow   ?? start + 100;
-    const limit = end - start;
+    const limit = Math.min(end - start, 1000);
 
     const [rows, totalResult] = await Promise.all([
       conn.db

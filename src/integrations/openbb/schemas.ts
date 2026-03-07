@@ -82,6 +82,6 @@ export const OpenBBOrderEventRowSchema = Type.Object({
   lots:       Type.Number(),
   price:      Type.Number(),
   limitPrice: Type.Union([Type.Number(), Type.Null()]),
-  timestamp:  Type.String(),
-  createdAt:  Type.String(),
+  timestamp:  Type.String({ format: 'date-time' }),
+  createdAt:  Type.String({ format: 'date-time' }),
 });

@@ -209,17 +209,18 @@ const ordersRoute: FastifyPluginAsync = async (fastify) => {
   }, async (req, reply) => {
     const release = await fastify.engineMutex.acquire();
     try {
+      const existing = fastify.engine.getOrders().find(o => o.id === req.params.id);
       const moved = fastify.engine.moveOrder(req.params.id, req.body.price);
       if (!moved) return reply.status(404).send({ error: `Order ${req.params.id} not found` });
       fastify.emitter.emit('order', {
         action:    'MODIFIED',
         orderId:   Number(req.params.id),
-        orderType: 'UNKNOWN',
+        orderType: existing?.type ?? 'UNKNOWN',
         source:    'http',
         brokerId:  'paper',
         symbol:    fastify.symbol.name,
-        direction: 'BUY',
-        lots:      0,
+        direction: (existing?.side ?? 0) > 0 ? 'BUY' : 'SELL',
+        lots:      existing?.size ?? 0,
         price:     req.body.price,
         metadata:  {},
         timestamp: new Date().toISOString(),
@@ -291,18 +292,19 @@ const ordersRoute: FastifyPluginAsync = async (fastify) => {
   }, async (req, reply) => {
     const release = await fastify.engineMutex.acquire();
     try {
+      const existing = fastify.engine.getOrders().find(o => o.id === req.params.id);
       const deleted = fastify.engine.deleteOrder(req.params.id);
       if (!deleted) return reply.status(404).send({ error: `Order ${req.params.id} not found` });
       fastify.emitter.emit('order', {
         action:    'CANCELLED',
         orderId:   Number(req.params.id),
-        orderType: 'UNKNOWN',
+        orderType: existing?.type ?? 'UNKNOWN',
         source:    'http',
         brokerId:  'paper',
         symbol:    fastify.symbol.name,
-        direction: 'BUY',
-        lots:      0,
-        price:     0,
+        direction: (existing?.side ?? 0) > 0 ? 'BUY' : 'SELL',
+        lots:      existing?.size ?? 0,
+        price:     existing?.price ?? 0,
         metadata:  {},
         timestamp: new Date().toISOString(),
       });
