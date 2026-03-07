@@ -168,8 +168,8 @@ tags:
       `SCREENER`, `ORDER_MANAGER`, `RISK_MANAGER`) and expose a health check
       that includes `status`, `lastCheckedAt`, and arbitrary `metadata`.
 
-      All service routes are **read-only or admin** — no `x-api-key` guard is
-      applied (services are internal infrastructure endpoints).
+      Service mutation routes (`start`, `stop`, `evaluate`, `scan`, `risk/validate`)
+      require `x-api-key` when the `API_KEY` env var is set.
 
   - name: Skills
     description: |

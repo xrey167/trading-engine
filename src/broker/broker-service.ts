@@ -1,4 +1,4 @@
-import { TradingEngine, type SymbolInfo, type Bar, type Bars } from '../../trading-engine.js';
+import { TradingEngine, type SymbolInfoBase, type Bar, type Bars } from '../../trading-engine.js';
 import type { IFullBrokerAdapter } from './types.js';
 import type { TypedEventBus } from '../shared/event-bus.js';
 import type { AppEventMap } from '../shared/services/event-map.js';
@@ -12,7 +12,7 @@ export interface BrokerServiceOptions {
   readonly id: string;
   readonly name: string;
   readonly broker: IFullBrokerAdapter;
-  readonly symbol: SymbolInfo;
+  readonly symbol: SymbolInfoBase;
   readonly hedging: boolean;
   readonly engine?: TradingEngine;
   readonly engineMutex?: Mutex;

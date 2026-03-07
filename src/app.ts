@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
 import websocket from '@fastify/websocket';
-import { SymbolInfo } from '../trading-engine.js';
+import { SymbolInfoForex } from '../trading-engine.js';
 import { PaperBroker } from './broker/paper/paper-broker.js';
 import { toLogger } from './shared/lib/logger.js';
 import { TypedEventBus } from './shared/event-bus.js';
@@ -113,7 +113,7 @@ export async function buildApp(
   // 1. Shared infrastructure
   const emitter = new TypedEventBus<AppEventMap>();
   const { pair = 'EURUSD', digits = 5 } = cfg.symbol ?? {};
-  const symbol  = new SymbolInfo(pair, digits);
+  const symbol  = new SymbolInfoForex(pair, digits);
   const broker  = new PaperBroker(emitter, app.log);
 
   app.decorate('emitter', emitter);

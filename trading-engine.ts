@@ -81,6 +81,18 @@ export interface OHLC {
   time: Date; volume?: number | undefined;
 }
 
+/**
+ * Single candlestick value object with analysis methods.
+ *
+ * Provides directional classification, proportional measurements (body/wick/tail
+ * as fraction of range), single-bar patterns (hammer, shooting star, doji, solid),
+ * price-action breakout/touch detection, time filtering, Fibonacci retracement,
+ * and classic pivot points.
+ *
+ * All proportion and pattern methods accept an optional {@link BarBase} parameter:
+ * - `BASE_HILO` (default) — uses high/low for range
+ * - `BASE_OPENCLOSE` — uses open/close for range (body-only, ignores wicks)
+ */
 export class Bar implements OHLC {
   constructor(
     public open:   number,
@@ -91,48 +103,79 @@ export class Bar implements OHLC {
     public volume?: number,
   ) {}
 
+  /** True when close > open. */
   isBullish(): boolean { return this.close > this.open; }
+  /** True when close < open. */
   isBearish(): boolean { return this.close < this.open; }
+  /** True when |open − close| ≤ `tol`. */
   isDoji(tol = 0): boolean { return Math.abs(this.open - this.close) <= tol; }
 
-  range():     number { return this.high - this.low; }
+  /** High price (or max(open,close) with `BASE_OPENCLOSE`). */
+  effectiveHigh(base: BarBase = BarBase.HiLo): number {
+    return base === BarBase.HiLo ? this.high : Math.max(this.open, this.close);
+  }
+  /** Low price (or min(open,close) with `BASE_OPENCLOSE`). */
+  effectiveLow(base: BarBase = BarBase.HiLo): number {
+    return base === BarBase.HiLo ? this.low : Math.min(this.open, this.close);
+  }
+
+  /** Total range: effectiveHigh − effectiveLow. */
+  range(base: BarBase = BarBase.HiLo): number { return this.effectiveHigh(base) - this.effectiveLow(base); }
+  /** Upper shadow: high − max(open, close). */
   wickRange(): number { return this.high - Math.max(this.open, this.close); }
+  /** Lower shadow: min(open, close) − low. */
   tailRange(): number { return Math.min(this.open, this.close) - this.low; }
+  /** Body size: |open − close|. */
   bodyRange(): number { return Math.abs(this.open - this.close); }
 
-  bodyPart(): number { const r = this.range(); return r === 0 ? 0 : this.bodyRange() / r; }
-  tailPart(): number { const r = this.range(); return r === 0 ? 0 : this.tailRange() / r; }
-  wickPart(): number { const r = this.range(); return r === 0 ? 0 : this.wickRange() / r; }
+  /** Body as fraction of total range [0..1]. */
+  bodyPart(base: BarBase = BarBase.HiLo): number { const r = this.range(base); return r === 0 ? 0 : this.bodyRange() / r; }
+  /** Lower shadow as fraction of total range [0..1]. */
+  tailPart(base: BarBase = BarBase.HiLo): number { const r = this.range(base); return r === 0 ? 0 : this.tailRange() / r; }
+  /** Upper shadow as fraction of total range [0..1]. */
+  wickPart(base: BarBase = BarBase.HiLo): number { const r = this.range(base); return r === 0 ? 0 : this.wickRange() / r; }
 
-  isHammer(tailMin = 0.55): boolean {
-    return this.tailPart() >= tailMin && this.wickPart() <= this.tailPart() * 0.5;
+  /** Hammer pattern: long lower shadow, small upper shadow. */
+  isHammer(tailMin = 0.55, base: BarBase = BarBase.HiLo): boolean {
+    return this.tailPart(base) >= tailMin && this.wickPart(base) <= this.tailPart(base) * 0.5;
   }
-  isShootingStar(wickMin = 0.55): boolean {
-    return this.wickPart() >= wickMin && this.tailPart() <= this.wickPart() * 0.5;
+  /** Shooting star pattern: long upper shadow, small lower shadow. */
+  isShootingStar(wickMin = 0.55, base: BarBase = BarBase.HiLo): boolean {
+    return this.wickPart(base) >= wickMin && this.tailPart(base) <= this.wickPart(base) * 0.5;
   }
-  isSolid(wickMax = 0.15, tailMax = 0.15): boolean {
-    return this.tailPart() <= tailMax && this.wickPart() <= wickMax;
+  /** Solid (marubozu-like): both shadows below thresholds. */
+  isSolid(wickMax = 0.15, tailMax = 0.15, base: BarBase = BarBase.HiLo): boolean {
+    return this.tailPart(base) <= tailMax && this.wickPart(base) <= wickMax;
   }
-  isSolidBullish(wickMax = 0.15): boolean { return this.isBullish() && this.wickPart() <= wickMax; }
-  isSolidBearish(tailMax = 0.15): boolean { return this.isBearish() && this.tailPart() <= tailMax; }
+  /** Bullish bar with small upper shadow. */
+  isSolidBullish(wickMax = 0.15, base: BarBase = BarBase.HiLo): boolean { return this.isBullish() && this.wickPart(base) <= wickMax; }
+  /** Bearish bar with small lower shadow. */
+  isSolidBearish(tailMax = 0.15, base: BarBase = BarBase.HiLo): boolean { return this.isBearish() && this.tailPart(base) <= tailMax; }
 
+  /** Price opened on one side and closed on the other. */
   isBreaking(price: number): boolean {
     return (this.open > price && this.close < price) || (this.open < price && this.close > price);
   }
+  /** Broke upward through `price`, optionally by at least `exceed`. */
   isBreakingLong(price: number, exceed = 0): boolean {
     return this.open < price && this.close > price && this.close > price + exceed;
   }
+  /** Broke downward through `price`, optionally by at least `exceed`. */
   isBreakingShort(price: number, exceed = 0): boolean {
     return this.open > price && this.close < price && this.close < price - exceed;
   }
+  /** High/low range includes `price`. */
   isCrossing(price: number): boolean { return this.high >= price && this.low <= price; }
+  /** Wick touched `price` from above (low ≤ price, body above). */
   isTouchingLow(price: number): boolean {
     return this.low <= price && Math.min(this.open, this.close) >= price;
   }
+  /** Wick touched `price` from below (high ≥ price, body below). */
   isTouchingHigh(price: number): boolean {
     return this.high >= price && Math.max(this.open, this.close) <= price;
   }
 
+  /** True if bar's UTC time falls within the given hour:minute range (supports overnight). */
   isInTimeRange(beginH: number, beginM: number, endH: number, endM: number): boolean {
     const begin = beginH * 60 + beginM;
     const end   = endH   * 60 + endM;
@@ -140,17 +183,50 @@ export class Bar implements OHLC {
     if (end < begin) return cur >= begin || cur <= end;  // overnight
     return cur >= begin && cur <= end;
   }
+
+  /** Fibonacci retracement: `low + range * level` (0 = low, 1 = high, 0.618 = golden ratio). */
+  fiboPrice(level: number): number { return this.low + this.range() * level; }
+
+  /**
+   * Classic floor trader pivot points.
+   * @param type - `PP` (pivot), `R1`/`R2` (resistance), `S1`/`S2` (support)
+   */
+  pivotPrice(type: 'PP' | 'R1' | 'R2' | 'S1' | 'S2'): number {
+    const pp = (this.high + this.low + this.close) / 3;
+    switch (type) {
+      case 'PP': return pp;
+      case 'R1': return 2 * pp - this.low;
+      case 'R2': return pp + (this.high - this.low);
+      case 'S1': return 2 * pp - this.high;
+      case 'S2': return pp - (this.high - this.low);
+    }
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
 // Bars series (index 0 = most-recent closed bar)
 // ─────────────────────────────────────────────────────────────
 
+/**
+ * Time-series of OHLC bars with built-in indicators and pattern detection.
+ *
+ * Index 0 is the **most recent** closed bar; higher indices are older.
+ * All shift parameters follow this convention.
+ *
+ * **Indicators:** SMA, EMA, LWMA, SMMA, ATR, RSI, Stochastic
+ *
+ * **Patterns:** Engulfing (long/short), Reversing (long/short), Outside bar
+ *
+ * **Lookups:** highestHigh/lowestLow (value + shift), binary search by time,
+ * daily OHLC aggregation, volume average/ratio, MA slope detection
+ */
 export class Bars {
   constructor(private readonly data: OHLC[]) {}
 
+  /** Number of bars in the series. */
   get length(): number { return this.data.length; }
 
+  /** Get the {@link Bar} value object at `shift`. Throws if out of range. */
   bar(shift = 0): Bar {
     const b = this.data[shift];
     if (!b) throw new RangeError(`shift ${shift} out of range (len=${this.data.length})`);
@@ -163,6 +239,7 @@ export class Bars {
   close(shift = 0): number { return this.data[shift].close; }
   time(shift = 0):  Date   { return this.data[shift].time;  }
 
+  /** Maximum high over `periods` bars starting at `shift`. */
   highestHigh(periods: number, shift = 0): number {
     let max = -Infinity;
     for (let i = shift; i < shift + periods && i < this.data.length; i++) {
@@ -171,6 +248,7 @@ export class Bars {
     return max;
   }
 
+  /** Minimum low over `periods` bars starting at `shift`. */
   lowestLow(periods: number, shift = 0): number {
     let min = Infinity;
     for (let i = shift; i < shift + periods && i < this.data.length; i++) {
@@ -179,6 +257,7 @@ export class Bars {
     return min;
   }
 
+  /** Simple Moving Average of close prices. */
   sma(periods: number, shift = 0): number {
     let sum = 0, cnt = 0;
     for (let i = shift; i < shift + periods && i < this.data.length; i++) {
@@ -187,6 +266,10 @@ export class Bars {
     return cnt === 0 ? 0 : sum / cnt;
   }
 
+  /**
+   * Average True Range. Supports SMA/EMA smoothing, directional filtering,
+   * and body-only base ({@link BarBase}).
+   */
   atr(
     periods: number,
     shift = 0,
@@ -211,6 +294,7 @@ export class Bars {
     return [...trs].reverse().reduce((ema, v, i) => i === 0 ? v : v * k + ema * (1 - k), 0);
   }
 
+  /** Wilder's RSI (Relative Strength Index). Returns 50 if insufficient data. */
   rsi(periods = 14, shift = 0): number {
     // Wilder's RSI needs shift + 2*periods + 1 bars:
     // one set of `periods` changes to seed the SMA, one set to smooth toward shift.
@@ -235,6 +319,7 @@ export class Bars {
     return avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
   }
 
+  /** True if bar at `shift` has the highest high in the `lookback` window behind it. */
   isLocalHigh(lookback: number, shift = 0, tol = 0): boolean {
     const peak = this.data[shift].high;
     for (let i = shift + 1; i <= shift + lookback && i < this.data.length; i++) {
@@ -243,6 +328,7 @@ export class Bars {
     return true;
   }
 
+  /** True if bar at `shift` has the lowest low in the `lookback` window behind it. */
   isLocalLow(lookback: number, shift = 0, tol = 0): boolean {
     const trough = this.data[shift].low;
     for (let i = shift + 1; i <= shift + lookback && i < this.data.length; i++) {
@@ -250,23 +336,355 @@ export class Bars {
     }
     return true;
   }
+
+  /** Exponential Moving Average (SMA-seeded, k = 2/(periods+1)). */
+  ema(periods: number, shift = 0): number {
+    const end = Math.min(shift + periods * 3, this.data.length);
+    if (end <= shift) return 0;
+    // Seed with SMA of exactly `periods` bars at the deepest end of the window
+    const seedStart = Math.max(end - periods, shift);
+    let seed = 0, cnt = 0;
+    for (let i = seedStart; i < end; i++) { seed += this.data[i].close; cnt++; }
+    if (cnt === 0) return this.data[shift].close;
+    seed /= cnt;
+    // Apply EMA from the bar before the seed range toward shift
+    const k = 2 / (periods + 1);
+    let ema = seed;
+    for (let i = seedStart - 1; i >= shift; i--) {
+      ema = this.data[i].close * k + ema * (1 - k);
+    }
+    return ema;
+  }
+
+  /** Bullish engulfing: current bar's low < prev low, close > prev high. */
+  isEngulfingLong(shift = 0): boolean {
+    if (shift + 1 >= this.data.length) return false;
+    return this.data[shift].low < this.data[shift + 1].low
+        && this.data[shift].close > this.data[shift + 1].high;
+  }
+
+  /** Bearish engulfing: current bar's high > prev high, close < prev low. */
+  isEngulfingShort(shift = 0): boolean {
+    if (shift + 1 >= this.data.length) return false;
+    return this.data[shift].high > this.data[shift + 1].high
+        && this.data[shift].close < this.data[shift + 1].low;
+  }
+
+  /** Bullish reversal: higher high, higher close, bullish close above prev open. */
+  isReversingLong(shift = 0): boolean {
+    if (shift + 1 >= this.data.length) return false;
+    const cur = this.data[shift], prev = this.data[shift + 1];
+    return cur.high > prev.high && cur.close > prev.close
+        && cur.close > prev.open && cur.close > cur.open;
+  }
+
+  /** Bearish reversal: lower low, lower close, bearish close below prev open. */
+  isReversingShort(shift = 0): boolean {
+    if (shift + 1 >= this.data.length) return false;
+    const cur = this.data[shift], prev = this.data[shift + 1];
+    return cur.low < prev.low && cur.close < prev.close
+        && cur.close < prev.open && cur.open > cur.close;
+  }
+
+  /** Average tick volume over `periods` bars. */
+  tickVolumeAverage(periods: number, shift = 0): number {
+    let sum = 0, cnt = 0;
+    for (let i = shift; i < shift + periods && i < this.data.length; i++) {
+      sum += this.data[i].volume ?? 0; cnt++;
+    }
+    return cnt === 0 ? 0 : sum / cnt;
+  }
+
+  /** Current bar's volume divided by the average of the next `periods` bars. */
+  volumeRatio(periods: number, shift = 0): number {
+    const avg = this.tickVolumeAverage(periods, shift + 1);
+    return avg === 0 ? 0 : (this.data[shift]?.volume ?? 0) / avg;
+  }
+
+  /** True if the MA forms a monotonic up (or down) slope over `span` consecutive bars. */
+  isMaSloping(type: 'sma' | 'ema', periods: number, span: number, shift = 0, up = true): boolean {
+    if (span < 2) return false;
+    const maFn = type === 'sma' ? (s: number) => this.sma(periods, s) : (s: number) => this.ema(periods, s);
+    let prev = maFn(shift + span - 1);
+    for (let i = shift + span - 2; i >= shift; i--) {
+      const cur = maFn(i);
+      if (up ? cur <= prev : cur >= prev) return false;
+      prev = cur;
+    }
+    return true;
+  }
+
+  /**
+   * Stochastic oscillator returning `{ main, signal }` (both 0–100).
+   * @param periodK - %K lookback period
+   * @param periodD - %D smoothing period (SMA of slowed %K)
+   * @param slowing - smoothing applied to raw %K before %D (1 = fast stochastic)
+   */
+  stochastic(periodK: number, periodD: number, slowing: number, shift = 0): { main: number; signal: number } {
+    // Compute raw %K values, then apply slowing (SMA of raw %K), then %D (SMA of slowed %K)
+    const rawKValues: number[] = [];
+    const needed = shift + slowing + periodD - 1;
+    for (let i = shift; i <= needed && i + periodK - 1 < this.data.length; i++) {
+      const hh = this.highestHigh(periodK, i);
+      const ll = this.lowestLow(periodK, i);
+      rawKValues.push(hh === ll ? 50 : ((this.data[i].close - ll) / (hh - ll)) * 100);
+    }
+    // Slowed %K values = SMA(rawK, slowing)
+    const slowedK: number[] = [];
+    for (let i = 0; i + slowing <= rawKValues.length; i++) {
+      let sum = 0;
+      for (let j = i; j < i + slowing; j++) sum += rawKValues[j];
+      slowedK.push(sum / slowing);
+    }
+    const main = slowedK.length > 0 ? slowedK[0] : 50;
+    // %D = SMA of slowed %K
+    let signal = main;
+    if (slowedK.length >= periodD) {
+      let sum = 0;
+      for (let i = 0; i < periodD; i++) sum += slowedK[i];
+      signal = sum / periodD;
+    }
+    return { main, signal };
+  }
+
+  /** Returns the **shift index** (not value) of the highest high in the window. */
+  highestHighShift(periods: number, shift = 0): number {
+    let max = -Infinity, idx = shift;
+    for (let i = shift; i < shift + periods && i < this.data.length; i++) {
+      if (this.data[i].high > max) { max = this.data[i].high; idx = i; }
+    }
+    return idx;
+  }
+
+  /** Returns the **shift index** (not value) of the lowest low in the window. */
+  lowestLowShift(periods: number, shift = 0): number {
+    let min = Infinity, idx = shift;
+    for (let i = shift; i < shift + periods && i < this.data.length; i++) {
+      if (this.data[i].low < min) { min = this.data[i].low; idx = i; }
+    }
+    return idx;
+  }
+
+  /** Binary search for the bar closest to `datetime`. Returns shift index. */
+  getBarShift(datetime: Date): number {
+    // Binary search — data is sorted descending by time (index 0 = newest)
+    let lo = 0, hi = this.data.length - 1;
+    const target = datetime.getTime();
+    while (lo <= hi) {
+      const mid = (lo + hi) >>> 1;
+      const t = this.data[mid].time.getTime();
+      if (t === target) return mid;
+      if (t > target) lo = mid + 1; else hi = mid - 1;
+    }
+    return lo < this.data.length ? lo : this.data.length - 1;
+  }
+
+  /** Scan backward for the nearest bar whose range fully encloses bar at `shift`. Returns shift or -1. */
+  findOutsideBar(shift = 0, maxScan = 100): number {
+    // Scan backward from shift+1 for a bar whose range encloses bar[shift]
+    const ref = this.data[shift];
+    if (!ref) return -1;
+    const limit = Math.min(shift + 1 + maxScan, this.data.length);
+    for (let i = shift + 1; i < limit; i++) {
+      if (this.data[i].high >= ref.high && this.data[i].low <= ref.low) return i;
+    }
+    return -1;
+  }
+
+  /** Aggregate intraday bars into daily OHLC. `daysBack=0` = today (most recent day). Returns null if day not found. */
+  dayOHLC(daysBack = 0): { open: number; high: number; low: number; close: number; timeBegin: Date; timeEnd: Date } | null {
+    // Group intraday bars by UTC date, then pick the Nth day back
+    let currentDate = '';
+    let dayCount = -1; // will increment to 0 on first date change
+    let startIdx = -1, endIdx = -1;
+    for (let i = 0; i < this.data.length; i++) {
+      const d = this.data[i].time.toISOString().slice(0, 10);
+      if (d !== currentDate) {
+        dayCount++;
+        if (dayCount === daysBack) startIdx = i;
+        if (dayCount === daysBack + 1) { endIdx = i; break; }
+        currentDate = d;
+      }
+    }
+    if (startIdx === -1) return null;
+    if (endIdx === -1) endIdx = this.data.length;
+    let high = -Infinity, low = Infinity;
+    for (let i = startIdx; i < endIdx; i++) {
+      if (this.data[i].high > high) high = this.data[i].high;
+      if (this.data[i].low < low) low = this.data[i].low;
+    }
+    // open = oldest bar of the day (highest index), close = newest (lowest index)
+    return {
+      open: this.data[endIdx - 1].open,
+      high,
+      low,
+      close: this.data[startIdx].close,
+      timeBegin: this.data[endIdx - 1].time,
+      timeEnd: this.data[startIdx].time,
+    };
+  }
+
+  /** Linearly Weighted Moving Average — newest bar gets weight `periods`, oldest gets 1. */
+  lwma(periods: number, shift = 0): number {
+    let weightedSum = 0, weightTotal = 0;
+    for (let i = 0; i < periods && shift + i < this.data.length; i++) {
+      const w = periods - i; // newest bar gets highest weight
+      weightedSum += this.data[shift + i].close * w;
+      weightTotal += w;
+    }
+    return weightTotal === 0 ? 0 : weightedSum / weightTotal;
+  }
+
+  /** Smoothed Moving Average (Wilder's): `prev × (n−1)/n + close/n`. SMA-seeded. */
+  smma(periods: number, shift = 0): number {
+    // Wilder's smoothed MA: seed with SMA of deeper bars, then smooth toward shift
+    const deepEnd = Math.min(shift + periods * 2, this.data.length);
+    if (deepEnd <= shift) return 0;
+    const seedStart = Math.min(shift + periods, deepEnd);
+    let sum = 0, cnt = 0;
+    for (let i = seedStart; i < deepEnd; i++) { sum += this.data[i].close; cnt++; }
+    if (cnt === 0) return this.data[shift].close;
+    let smma = sum / cnt;
+    for (let i = seedStart - 1; i >= shift; i--) {
+      smma = (smma * (periods - 1) + this.data[i].close) / periods;
+    }
+    return smma;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Crossing helpers (standalone — work on any two value series)
+// ─────────────────────────────────────────────────────────────
+
+/** True when A crosses above B: previously A ≤ B, now A > B. Works with any indicator pair. */
+export function isCrossingAbove(valueA: number, valueB: number, prevA: number, prevB: number): boolean {
+  return prevA <= prevB && valueA > valueB;
+}
+
+/** True when A crosses below B: previously A ≥ B, now A < B. Works with any indicator pair. */
+export function isCrossingBelow(valueA: number, valueB: number, prevA: number, prevB: number): boolean {
+  return prevA >= prevB && valueA < valueB;
 }
 
 // ─────────────────────────────────────────────────────────────
 // Symbol metadata
 // ─────────────────────────────────────────────────────────────
 
-export class SymbolInfo {
-  readonly pointSize: number;
+/** Discriminator for the symbol class hierarchy. */
+export const AssetType = {
+  Forex:  'FOREX',
+  Stock:  'STOCK',
+  Future: 'FUTURE',
+  Crypto: 'CRYPTO',
+  Index:  'INDEX',
+} as const;
+export type AssetType = (typeof AssetType)[keyof typeof AssetType];
 
-  constructor(public readonly name: string, public readonly digits: number) {
+/**
+ * Abstract base for all symbol descriptors.
+ *
+ * Holds the symbol `name`, decimal `digits`, and the derived `pointSize`
+ * (`10 ** -digits`). Shared conversion helpers are defined here so every
+ * subclass inherits identical math.
+ *
+ * @example
+ * // Subclass for a custom asset type
+ * class SymbolInfoCrypto extends SymbolInfoBase {
+ *   readonly assetType = AssetType.Crypto;
+ * }
+ */
+export abstract class SymbolInfoBase {
+  /** Smallest price increment: `10 ** -digits`. */
+  readonly pointSize: number;
+  /** Asset-class discriminator — set by each concrete subclass. */
+  abstract readonly assetType: AssetType;
+
+  constructor(
+    /** Broker symbol name, e.g. `'EURUSD'` or `'AAPL'`. */
+    public readonly name: string,
+    /** Number of decimal places in the price, e.g. `5` for forex. */
+    public readonly digits: number,
+  ) {
     this.pointSize = 10 ** -digits;
   }
 
+  /** Convert a raw price value to points (integer multiples of `pointSize`). */
   priceToPoints(price: number): number  { return price / this.pointSize; }
+  /** Convert points back to a price value. */
   pointsToPrice(points: number): number { return points * this.pointSize; }
+  /** Round `price` to `digits` decimal places. */
   normalize(price: number): number { return parseFloat(price.toFixed(this.digits)); }
 }
+
+/**
+ * Symbol descriptor for forex currency pairs.
+ *
+ * Automatically extracts `baseCurrency` and `quoteCurrency` from the
+ * first six characters of `name`.
+ *
+ * @example
+ * const sym = new SymbolInfoForex('EURUSD', 5);
+ * sym.baseCurrency;          // 'EUR'
+ * sym.quoteCurrency;         // 'USD'
+ * sym.pointSize;             // 0.00001
+ * sym.priceToPoints(0.0001); // 10
+ */
+export class SymbolInfoForex extends SymbolInfoBase {
+  readonly assetType = AssetType.Forex;
+  /** First three characters of the symbol name (base currency). */
+  readonly baseCurrency: string;
+  /** Characters 3–5 of the symbol name (quote currency). */
+  readonly quoteCurrency: string;
+
+  constructor(name: string, digits: number) {
+    super(name, digits);
+    this.baseCurrency  = name.slice(0, 3).toUpperCase();
+    this.quoteCurrency = name.slice(3, 6).toUpperCase();
+  }
+}
+
+/**
+ * Symbol descriptor for equities.
+ *
+ * @example
+ * const sym = new SymbolInfoStock('AAPL', 2, 'NASDAQ');
+ * sym.exchange; // 'NASDAQ'
+ */
+export class SymbolInfoStock extends SymbolInfoBase {
+  readonly assetType = AssetType.Stock;
+
+  constructor(
+    name: string,
+    digits: number,
+    /** Optional exchange identifier, e.g. `'NYSE'` or `'NASDAQ'`. */
+    readonly exchange?: string,
+  ) {
+    super(name, digits);
+  }
+}
+
+/**
+ * Symbol descriptor for futures contracts.
+ *
+ * @example
+ * const sym = new SymbolInfoFuture('ES', 2, 50); // E-mini S&P 500
+ * sym.contractSize; // 50
+ */
+export class SymbolInfoFuture extends SymbolInfoBase {
+  readonly assetType = AssetType.Future;
+
+  constructor(
+    name: string,
+    digits: number,
+    /** Number of underlying units per contract (default `1`). */
+    readonly contractSize: number = 1,
+  ) {
+    super(name, digits);
+  }
+}
+
+/** @deprecated Use {@link SymbolInfoForex} directly. Kept for backward compatibility. */
+export { SymbolInfoForex as SymbolInfo };
 
 // ─────────────────────────────────────────────────────────────
 // Trailing-stop calculation (per-bar, pure function)
@@ -297,7 +715,7 @@ export function calcTrailingSL(p: {
   trailBeginPts: number;
   trail:         TrailConfig;
   state:         TrailState; // mutable
-  symbol:        SymbolInfo;
+  symbol:        SymbolInfoBase;
 }): number {
   const { side, bar, bars, posPrice, spreadAbs, trail, state, symbol } = p;
   let { currentSL } = p;
@@ -568,7 +986,7 @@ export class TradingEngine {
   private _spreadAbs = 0;
 
   constructor(
-    private readonly symbol:  SymbolInfo,
+    private readonly symbol:  SymbolInfoBase,
     private readonly broker:  IBrokerAdapter,
     private readonly hedging  = true,   // false = net-mode (like MT4 non-hedge)
   ) {}
@@ -1393,7 +1811,7 @@ export class TradingEngine {
 export async function evaluateCandleATR03(
   bars:   Bars,
   engine: TradingEngine,
-  symbol: SymbolInfo,
+  symbol: SymbolInfoBase,
 ): Promise<void> {
   const prev  = bars.bar(1);
   const atr14 = bars.atr(14, 1);
@@ -1473,7 +1891,7 @@ export class AtrModule {
   constructor(
     private readonly cfg:    AtrModuleConfig,
     private readonly engine: TradingEngine,
-    private readonly symbol: SymbolInfo,
+    private readonly symbol: SymbolInfoBase,
   ) {}
 
   onBar(bars: Bars): void {
@@ -1623,7 +2041,7 @@ export class ScaledOrderEngine {
 
   constructor(
     private readonly engine:  TradingEngine,
-    private readonly symbol:  SymbolInfo,
+    private readonly symbol:  SymbolInfoBase,
     preset: ScaledOrderPreset | string,
   ) {
     this._preset = typeof preset === 'string'
@@ -1787,7 +2205,7 @@ class MyBroker implements IBrokerAdapter {
 }
 
 // 2. Set up
-const symbol = new SymbolInfo('EURUSD', 5);
+const symbol = new SymbolInfoForex('EURUSD', 5);
 const engine = new TradingEngine(symbol, new MyBroker(), true); // hedging=true
 
 // 3. Example: OCO bracket order
