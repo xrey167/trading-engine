@@ -1773,10 +1773,10 @@ export class TradingEngine {
       if (curSize > 0) await this._closeSlot(slot, 'REV');
       if (o.side === Side.Long) {
         await this.broker.marketOrder(Side.Long, o.size + curSize);
-        this._applyFill(this.longPos, o.price, o.size + curSize, bar.time, o.type);
+        this._applyFill(this.longPos, o.computeFillPrice(bar), o.size + curSize, bar.time, o.type);
       } else {
         await this.broker.marketOrder(Side.Short, o.size + curSize);
-        this._applyFill(this.shortPos, o.price, o.size + curSize, bar.time, o.type);
+        this._applyFill(this.shortPos, o.computeFillPrice(bar), o.size + curSize, bar.time, o.type);
       }
     } else if (isStopLimitOrder(o)) {
       // Stop-limit: only fill if bar's range covers the limit price
