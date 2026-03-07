@@ -60,23 +60,6 @@ info:
     Timing-safe comparison (`crypto.timingSafeEqual`) is used on both guards
     to prevent timing-based key enumeration.
 
-    ## Built-in Indicators & Analysis
-
-    The engine's `Bars` class provides a comprehensive indicator library that
-    strategies and screeners can use without external dependencies:
-
-    | Category | Functions |
-    |----------|-----------|
-    | **Trend** | SMA, EMA, LWMA (linear weighted), SMMA (Wilder's smoothed), `isMaSloping` |
-    | **Momentum** | RSI (Wilder's), Stochastic (%K/%D with slowing) |
-    | **Volatility** | ATR (SMA/EMA, filterable by bar direction and base) |
-    | **Volume** | `tickVolumeAverage`, `volumeRatio` |
-    | **Patterns** | Engulfing (long/short), Reversing (long/short), Outside bar scan |
-    | **Single-bar** | Hammer, Shooting star, Solid body, Doji, BarBase-aware proportions |
-    | **Levels** | Pivot points (PP/R1/R2/S1/S2), Fibonacci retracement |
-    | **Lookups** | `highestHigh/Low` + shift variants, `getBarShift` (binary search), `dayOHLC` aggregation |
-    | **Helpers** | `isCrossingAbove`/`isCrossingBelow`, `isLocalHigh`/`isLocalLow` |
-
 servers:
   - url: http://localhost:3000
     description: Local development (paper broker)
@@ -129,12 +112,8 @@ tags:
       engine state — they run a strategy against supplied bars and return results.
 
       Available strategies:
-      - **VolumeBreakout** — triggers when `volumeRatio` exceeds a threshold with a directional candle
+      - **VolumeBreakout** — triggers when volume exceeds a threshold with a directional candle
       - **CandleAtr** — uses candle body-to-ATR ratio for signal generation
-
-      Strategies have access to the full `Bars` indicator library (SMA, EMA, LWMA,
-      SMMA, RSI, Stochastic, ATR, volume helpers, pivot/fibo levels, multi-bar
-      patterns, crossing helpers, and day aggregation).
   - name: Gateway Positions
     description: |
       Broker-gateway position management using ticket-based addressing.
@@ -188,11 +167,6 @@ tags:
       Services are typed by `kind` (`BROKER`, `DATA_PROVIDER`, `STRATEGY`,
       `SCREENER`, `ORDER_MANAGER`, `RISK_MANAGER`) and expose a health check
       that includes `status`, `lastCheckedAt`, and arbitrary `metadata`.
-
-      **Strategy & Screener services** have access to the full engine indicator
-      library — SMA, EMA, LWMA, SMMA, RSI, Stochastic, ATR, volume helpers,
-      pivot/fibo levels, multi-bar patterns, MA slope detection, crossing helpers,
-      and daily OHLC aggregation.
 
       Service mutation routes (`start`, `stop`, `evaluate`, `scan`, `risk/validate`)
       require `x-api-key` when the `API_KEY` env var is set.
@@ -3348,34 +3322,6 @@ components:
         standard ATR it inflates volatility even though no directional move occurred.
         Body ATR filters that noise: only candles with real open→close displacement
         contribute meaningful TR.
-
-    PivotType:
-      type: string
-      enum: [PP, R1, R2, S1, S2]
-      description: |
-        Classic floor trader pivot point levels, computed from a single bar's
-        High (H), Low (L), and Close (C).
-
-        | Level | Formula | Description |
-        |-------|---------|-------------|
-        | `PP`  | (H + L + C) / 3 | Pivot point — central reference |
-        | `R1`  | 2 × PP − L | First resistance |
-        | `R2`  | PP + (H − L) | Second resistance |
-        | `S1`  | 2 × PP − H | First support |
-        | `S2`  | PP − (H − L) | Second support |
-
-    MaType:
-      type: string
-      enum: [sma, ema, lwma, smma]
-      description: |
-        Moving average type used by the engine's `Bars` class.
-
-        | Type   | Full Name                      | Weighting |
-        |--------|-------------------------------|-----------|
-        | `sma`  | Simple Moving Average          | Equal weights |
-        | `ema`  | Exponential Moving Average     | Exponentially decaying (k = 2/(n+1)) |
-        | `lwma` | Linearly Weighted MA           | Weight = n for newest, 1 for oldest |
-        | `smma` | Smoothed MA (Wilder's)         | prev × (n−1)/n + close/n |
 
     LimitConfirm:
       type: string
