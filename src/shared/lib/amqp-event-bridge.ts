@@ -100,15 +100,12 @@ export class AmqpEventBridge {
           ...(PERSISTENT_EVENTS.has(event) ? { deliveryMode: 2 } : {}),
         };
 
-        try {
-          this.cb.call(async () => {
-            this.channel.publish(EXCHANGE, `event.${event}`, content, options);
-          }).catch((err) =>
-            this.logger.error(`AMQP bridge publish error: ${(err as Error).message}`),
-          );
-        } catch (err) {
-          this.logger.error(`AMQP bridge circuit breaker open: ${(err as Error).message}`);
-        }
+        this.cb.call(async () => {
+          const drained = this.channel.publish(EXCHANGE, `event.${event}`, content, options);
+          if (!drained) throw new Error('AMQP channel backpressure — too many unconfirmed messages');
+        }).catch((err) =>
+          this.logger.error(`AMQP bridge publish error: ${(err as Error).message}`),
+        );
       };
       this.localHandlers.set(event, handler);
       this.eventBus.on(event, handler as (p: AppEventMap[typeof event]) => void);

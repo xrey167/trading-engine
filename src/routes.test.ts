@@ -1658,14 +1658,14 @@ describe('R27 – Cache-Control headers', () => {
     expect(res.headers['cache-control']).toBe('public, max-age=60');
   });
 
-  it('/openapi.yaml has Cache-Control: public, max-age=3600', async () => {
+  it('/openapi.yaml has Cache-Control: no-cache', async () => {
     const res = await app.inject({ method: 'GET', url: '/openapi.yaml' });
-    expect(res.headers['cache-control']).toBe('public, max-age=3600');
+    expect(res.headers['cache-control']).toBe('no-cache');
   });
 
-  it('/docs has Cache-Control: public, max-age=3600', async () => {
+  it('/docs has Cache-Control: no-cache', async () => {
     const res = await app.inject({ method: 'GET', url: '/docs' });
-    expect(res.headers['cache-control']).toBe('public, max-age=3600');
+    expect(res.headers['cache-control']).toBe('no-cache');
   });
 });
 

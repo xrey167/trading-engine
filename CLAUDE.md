@@ -45,6 +45,7 @@ analysis/           — ATR, strategies, signals, backtest, strategy-service, sc
 managers/           — execution-saga, order-manager, risk-manager
 money-management/   — SL/TP calculators, lot sizing (composite pattern)
 services/           — /services/* health + management routes
+audit/              — AMQP audit trail consumer + /audit/events route
 integrations/
   openbb/           — OpenBB widget routes
   skills/           — Agent SDK skill execution via SSE
@@ -68,6 +69,7 @@ integrations/
 | `/v1/money-management` | POST | validate money management config |
 | `/openbb/*` | GET | widgets.json, positions, orders, account, deals |
 | `/skills` | GET, POST | Agent SDK skill execution via SSE streaming |
+| `/audit/events` | GET | audit trail query (type/since/limit filters); 503 when RABBITMQ_URL unset |
 | `/docs`, `/openapi.yaml` | GET | Swagger UI (dark theme) and raw spec |
 
 ### Key wiring (src/app.ts → buildApp())
@@ -86,6 +88,7 @@ integrations/
 - `RedisEventBridge` — optional cross-instance pub/sub for `signal`, `normalized_bar` events (ephemeral)
 - `AmqpEventBridge` — optional durable cross-instance pub/sub via RabbitMQ for `order`, `risk` events; enabled when `RABBITMQ_URL` set
 - When both bridges active, events are split to prevent duplicate delivery
+- `AuditConsumer` — durable queue `te.audit` consuming all bridged events into a ring buffer; queryable via `GET /audit/events`
 
 ### Result type pattern
 

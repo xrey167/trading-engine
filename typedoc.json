@@ -30,7 +30,10 @@
     "src/analysis/screener-service.ts",
     "src/managers/risk-manager.ts",
     "src/managers/order-manager.ts",
-    "src/managers/execution-saga.ts"
+    "src/managers/execution-saga.ts",
+    "src/shared/lib/amqp-client.ts",
+    "src/shared/lib/amqp-event-bridge.ts",
+    "src/audit/audit-consumer.ts"
   ],
   "entryPointStrategy": "resolve",
   "out": "docs-api",
