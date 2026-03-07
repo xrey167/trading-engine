@@ -1476,12 +1476,10 @@ export class TradingEngine {
    * plain BUY_LIMIT at `limitPrice` for subsequent bars.
    */
   addBuyStopLimit(stopPrice: number, limitPrice: number, size?: number): string {
-    const id = `ord_${++this._orderSeq}`;
+    const id = this._nextOrderId();
     const p  = this._consumeNextParams(id, 'BUY_STOP_LIMIT', Side.Long, stopPrice, size);
     this._resetNextAttrs();
-    const o = createOrder({ ...p, limitPrice });
-    this.orders.push(o);
-    return o.id;
+    return this._registerOrder(createOrder({ ...p, limitPrice })).id;
   }
 
   /**
@@ -1489,12 +1487,10 @@ export class TradingEngine {
    * limit sell only if the bar's high reaches `limitPrice` (must be ≥ stopPrice).
    */
   addSellStopLimit(stopPrice: number, limitPrice: number, size?: number): string {
-    const id = `ord_${++this._orderSeq}`;
+    const id = this._nextOrderId();
     const p  = this._consumeNextParams(id, 'SELL_STOP_LIMIT', Side.Short, stopPrice, size);
     this._resetNextAttrs();
-    const o = createOrder({ ...p, limitPrice });
-    this.orders.push(o);
-    return o.id;
+    return this._registerOrder(createOrder({ ...p, limitPrice })).id;
   }
 
   /**
@@ -1504,12 +1500,10 @@ export class TradingEngine {
    * market buy is executed.
    */
   addBuyMTO(mode: TrailMode, distancePts: number, periods = 0): string {
-    const id = `ord_${++this._orderSeq}`;
+    const id = this._nextOrderId();
     const p  = this._consumeNextParams(id, 'BUY_MTO', Side.Long, Infinity);
     this._resetNextAttrs();
-    const o = createOrder({ ...p, trailEntry: { mode, distPts: distancePts, periods }, _trailRef: Infinity });
-    this.orders.push(o);
-    return o.id;
+    return this._registerOrder(createOrder({ ...p, trailEntry: { mode, distPts: distancePts, periods }, _trailRef: Infinity })).id;
   }
 
   /**
@@ -1519,12 +1513,10 @@ export class TradingEngine {
    * market sell is executed.
    */
   addSellMTO(mode: TrailMode, distancePts: number, periods = 0): string {
-    const id = `ord_${++this._orderSeq}`;
+    const id = this._nextOrderId();
     const p  = this._consumeNextParams(id, 'SELL_MTO', Side.Short, -Infinity);
     this._resetNextAttrs();
-    const o = createOrder({ ...p, trailEntry: { mode, distPts: distancePts, periods }, _trailRef: -Infinity });
-    this.orders.push(o);
-    return o.id;
+    return this._registerOrder(createOrder({ ...p, trailEntry: { mode, distPts: distancePts, periods }, _trailRef: -Infinity })).id;
   }
 
   /**
@@ -1533,40 +1525,32 @@ export class TradingEngine {
    * each bar as long as price rises.
    */
   addBuyLimitTrail(mode: TrailMode, distancePts: number, periods = 0): string {
-    const id = `ord_${++this._orderSeq}`;
+    const id = this._nextOrderId();
     const p  = this._consumeNextParams(id, 'BUY_LIMIT', Side.Long, 0);
     this._resetNextAttrs();
-    const o = createOrder({ ...p, trailEntry: { mode, distPts: distancePts, periods }, _trailRef: -Infinity });
-    this.orders.push(o);
-    return o.id;
+    return this._registerOrder(createOrder({ ...p, trailEntry: { mode, distPts: distancePts, periods }, _trailRef: -Infinity })).id;
   }
 
   addSellLimitTrail(mode: TrailMode, distancePts: number, periods = 0): string {
-    const id = `ord_${++this._orderSeq}`;
+    const id = this._nextOrderId();
     const p  = this._consumeNextParams(id, 'SELL_LIMIT', Side.Short, 0);
     this._resetNextAttrs();
-    const o = createOrder({ ...p, trailEntry: { mode, distPts: distancePts, periods }, _trailRef: Infinity });
-    this.orders.push(o);
-    return o.id;
+    return this._registerOrder(createOrder({ ...p, trailEntry: { mode, distPts: distancePts, periods }, _trailRef: Infinity })).id;
   }
 
   /** Trailing buy-stop — stop price trails above the market. */
   addBuyStopTrail(mode: TrailMode, distancePts: number, periods = 0): string {
-    const id = `ord_${++this._orderSeq}`;
+    const id = this._nextOrderId();
     const p  = this._consumeNextParams(id, 'BUY_STOP', Side.Long, Infinity);
     this._resetNextAttrs();
-    const o = createOrder({ ...p, trailEntry: { mode, distPts: distancePts, periods }, _trailRef: Infinity });
-    this.orders.push(o);
-    return o.id;
+    return this._registerOrder(createOrder({ ...p, trailEntry: { mode, distPts: distancePts, periods }, _trailRef: Infinity })).id;
   }
 
   addSellStopTrail(mode: TrailMode, distancePts: number, periods = 0): string {
-    const id = `ord_${++this._orderSeq}`;
+    const id = this._nextOrderId();
     const p  = this._consumeNextParams(id, 'SELL_STOP', Side.Short, 0);
     this._resetNextAttrs();
-    const o = createOrder({ ...p, trailEntry: { mode, distPts: distancePts, periods }, _trailRef: -Infinity });
-    this.orders.push(o);
-    return o.id;
+    return this._registerOrder(createOrder({ ...p, trailEntry: { mode, distPts: distancePts, periods }, _trailRef: -Infinity })).id;
   }
 
   /**
@@ -1796,16 +1780,23 @@ export class TradingEngine {
     this._nextLimitConfirm = LimitConfirm.None;
   }
 
+  private _nextOrderId(): string {
+    return `ord_${++this._orderSeq}`;
+  }
+
+  private _registerOrder(o: Order): Order {
+    this.orders.push(o);
+    return o;
+  }
+
   /** Factory for simple (non-trailing, non-stop-limit) order types. */
   private _addOrder(type: 'BUY_LIMIT' | 'SELL_LIMIT' | 'BUY_STOP' | 'SELL_STOP' | 'BUY_MIT' | 'SELL_MIT',
     side: Side, price: number, size?: number,
   ): Order {
-    const id = `ord_${++this._orderSeq}`;
+    const id = this._nextOrderId();
     const p  = this._consumeNextParams(id, type, side, price, size);
     this._resetNextAttrs();
-    const o = createOrder(p as CreateOrderParams);
-    this.orders.push(o);
-    return o;
+    return this._registerOrder(createOrder(p as CreateOrderParams));
   }
 
   private _findOrder(id: string): Order | undefined {
