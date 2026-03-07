@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { TypedEventBus } from '../event-bus.js';
 import type { AppEventMap, SignalEvent } from '../services/event-map.js';
@@ -46,11 +46,35 @@ describe('RedisEventBridge', () => {
     expect(channels).toEqual(['te:signal', 'te:order', 'te:normalized_bar']);
   });
 
-  it('type validation — rejects unknown event types', () => {
-    const allowedEvents = new Set<string>(['signal', 'order']);
-    const unknownType = 'malicious_event';
-    expect(allowedEvents.has(unknownType)).toBe(false);
-    expect(allowedEvents.has('signal')).toBe(true);
+  it('type validation — bridge does not re-emit unknown event types on local bus', async () => {
+    const bus = new TypedEventBus<AppEventMap>();
+    const pub = new MockRedisPubSub();
+    const sub = new MockRedisPubSub();
+
+    // Start the bridge with only 'signal' allowed
+    const bridge = new RedisEventBridge(
+      bus,
+      pub as unknown as import('ioredis').default,
+      sub as unknown as import('ioredis').default,
+      ['signal'],
+      nullLogger,
+    );
+    await bridge.start();
+
+    const received: unknown[] = [];
+    bus.on('signal', (e) => received.push(e));
+
+    // Simulate an inbound Redis message with an unknown event type from a remote instance
+    sub.emit('message', 'te:malicious_event', JSON.stringify({
+      instanceId: 'remote-999',
+      type: 'malicious_event',
+      payload: { action: 'BUY' },
+    }));
+
+    // The local bus must NOT have received anything — type was not in allow-list
+    expect(received).toHaveLength(0);
+
+    await bridge.stop();
   });
 
   it('envelope serialization round-trip', () => {

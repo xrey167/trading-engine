@@ -981,6 +981,10 @@ export class StopLimitOrder extends Order {
       ? bar.low  <= this.limitPrice   // bar reached the buy limit ceiling
       : bar.high >= this.limitPrice;  // bar reached the sell limit floor
   }
+
+  override toJSON() {
+    return { ...super.toJSON(), limitPrice: this.limitPrice };
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1886,6 +1890,7 @@ export class TradingEngine {
           side: o.side, price: o.limitPrice, size: o.size, time: o.time,
           oco: o.oco, co: o.co, cs: o.cs, rev: o.rev,
           bracketSL: o.bracketSL, bracketTP: o.bracketTP, limitConfirm: o.limitConfirm,
+          pullbackPts: o.pullbackPts,
         }));
         return;
       }
