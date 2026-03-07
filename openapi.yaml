@@ -4,12 +4,111 @@ info:
   title: Trading Engine API
   version: 1.0.0
   description: |
-    Modular trading platform with a bar-driven core engine, autonomous strategies,
+    High-fidelity paper trading engine ported from MQL/StereoTrader. Combines a
+    bar-driven core engine, a polymorphic order hierarchy, autonomous strategy pipeline,
     risk management, cross-instance event streaming (Redis + RabbitMQ), and an audit trail.
+
+    ---
+
+    ## Architecture
+
+    ### Two-Layer Design
+
+    ```
+    ┌─────────────────────────────────────────────────────────────┐
+    │                  Fastify HTTP Layer  (src/)                  │
+    │                                                             │
+    │  POST /bars ──┐   POST /ticks ──┐   REST Routes            │
+    │               │                 │   /positions  /orders     │
+    │               ▼                 ▼   /account   /services    │
+    │         BarsIngestion    TickIngestion                       │
+    │               │          Service │                           │
+    │               └────────┬────────┘                           │
+    │                        │ engineMutex (serialised)            │
+    └────────────────────────┼────────────────────────────────────┘
+                             │
+    ┌────────────────────────▼────────────────────────────────────┐
+    │              Core Engine  (trading-engine.ts)               │
+    │                                                             │
+    │  Order Book ──► Fill Logic ──► Position Manager             │
+    │      │                              │                        │
+    │  LimitOrder                    longPos / shortPos            │
+    │  StopOrder        polymorphic  ┌───────────────┐            │
+    │  MITOrder         dispatch     │ SL / TP       │            │
+    │  StopLimitOrder ──────────────►│ Trailing Stop │            │
+    │  TrailingLimit                 │ Brackets      │            │
+    │  TrailingStop                  └───────────────┘            │
+    │  MTOOrder                                                   │
+    │                                                             │
+    │  ATR / SMA / RSI indicators ◄── bars[] context             │
+    └─────────────────────────────────────────────────────────────┘
+    ```
+
+    ### Data Ingestion Modes
+
+    Two complementary paths feed price data to the engine:
+
+    | Mode | Endpoint | What it triggers | Typical use |
+    |------|----------|-----------------|-------------|
+    | **Bar-driven** | `POST /bars` | Full cycle: fills, SL/TP checks, trailing stop updates, ATR/SMA/RSI recalculation, WebSocket broadcast | Backtesting, candle-close feeds |
+    | **Tick-driven** | `POST /ticks` | Fills and SL/TP exits only — no indicator update | Live bid/ask feeds between candles |
+
+    You can mix both: push candles at each close and ticks in between for intra-bar exit accuracy.
+
+    ### Order Lifecycle
+
+    ```
+    POST /orders
+        │
+        ▼
+    ┌──────────┐   price crosses trigger
+    │ PENDING  │──────────────────────────► FILLED ──► Position updated
+    │ (order   │   (POST /bars or /ticks)             (entry averaged,
+    │  book)   │                                       brackets applied)
+    └──────────┘
+        │
+        │ DELETE /orders or OCO clear
+        ▼
+    CANCELLED
+
+    Position ──► SL/TP/trailing hit ──► CLOSED (deal recorded)
+              ──► manual close      ──► CLOSED
+    ```
+
+    ### Service Pipeline (Autonomous Mode)
+
+    ```
+    StrategyService ──signal──► RiskManagerService ──validated──► ExecutionSaga
+         │                           │                                  │
+    (subscribes to              (fail-closed:                    (per-symbol mutex,
+     bar events,                 checks max positions,            places order via
+     emits BUY/SELL/HOLD)        daily loss limit)                BrokerService)
+                                                                        │
+                                                                   BrokerService
+                                                                        │
+                                                                   TradingEngine
+    ```
+
+    ### Event Streaming
+
+    When optional infrastructure is configured, events are bridged across instances:
+
+    ```
+    TradingEngine / Services
+           │
+           ├── Redis PubSub (REDIS_URL) ──► signal, normalized_bar  [ephemeral]
+           │
+           └── RabbitMQ exchange te.events (RABBITMQ_URL)
+                   ├── order, risk events  [persistent, deliveryMode=2]
+                   └── te.audit queue ──► AuditConsumer ring buffer (1000 events)
+                                              └── GET /audit/events
+    ```
+
+    ---
 
     ## Quick Start
 
-    The engine is **bar-driven** — call `POST /bars` to advance state, then trade:
+    ### Bar-driven (recommended for backtesting)
 
     ```bash
     # 1. Push a bar to establish price
@@ -19,25 +118,72 @@ info:
     # 2. Open a long position
     curl -X POST localhost:3000/positions/long -H 'Content-Type: application/json' -d '{"size":1.0}'
 
-    # 3. Set a stop-loss
-    curl -X PUT localhost:3000/positions/long/sl-tp -H 'Content-Type: application/json' -d '{"sl":50,"slActive":true}'
+    # 3. Set a stop-loss (50 points) and take-profit (100 points)
+    curl -X PUT localhost:3000/positions/long/sl-tp -H 'Content-Type: application/json' \
+      -d '{"sl":50,"slActive":true,"tp":100,"tpActive":true}'
+
+    # 4. Place a pending buy limit at 1.0840
+    curl -X POST localhost:3000/orders -H 'Content-Type: application/json' \
+      -d '{"type":"BUY_LIMIT","price":1.084,"size":1.0}'
     ```
+
+    ### Tick-driven (for live feeds between candles)
+
+    ```bash
+    # Push a bid/ask tick — triggers fills without updating indicators
+    curl -X POST localhost:3000/ticks -H 'Content-Type: application/json' \
+      -d '{"bid":1.08490,"ask":1.08510}'
+    ```
+
+    ### WebSocket stream
+
+    ```javascript
+    const ws = new WebSocket('ws://localhost:3000/stream');
+    ws.onmessage = ({ data }) => {
+      const event = JSON.parse(data);
+      // event.type: 'bar' | 'fill' | 'close' | 'heartbeat'
+    };
+    ```
+
+    ---
 
     ## Authentication
 
-    Write routes require `x-api-key` header when `API_KEY` env var is set.
-    Read-only routes (`GET /positions`, `/orders`, `/account`, `/v1/*`, `/udf/*`) need no key.
-    OpenBB routes use a separate `?apiKey=` parameter via `OPENBB_API_KEY`.
+    | Route group | Auth mechanism |
+    |-------------|---------------|
+    | Write routes (`POST /bars`, `/ticks`, `/positions/*`, `/orders`, etc.) | `x-api-key` header when `API_KEY` env var is set |
+    | Read routes (`GET /positions`, `/orders`, `/account`, `/v1/*`, `/udf/*`) | No key required |
+    | OpenBB routes (`/openbb/*`) | `?apiKey=` query param via `OPENBB_API_KEY` |
+    | Skills routes (`/skills/*`) | `x-api-key` header |
+
+    When `API_KEY` is **not set**, all routes are accessible without authentication
+    (useful for local development).
+
+    ---
 
     ## Reference
 
-    **Sides:** `0` = flat, `1` = long, `-1` = short &nbsp;|&nbsp;
-    **Points:** smallest price unit (e.g. 0.00001 for 5-digit pairs) &nbsp;|&nbsp;
-    **Lots:** 1.0 = 100k units
+    **Sides:** `0` = flat · `1` = long · `-1` = short
 
-    **Environment:** `API_KEY`, `REDIS_URL` (bar cache + event bridge),
-    `RABBITMQ_URL` (durable events + audit), `ANTHROPIC_API_KEY` (skills),
-    `NODE_ENV=production` (hide stack traces)
+    **Points:** smallest price unit — e.g. `0.00001` for a 5-digit FX pair, `0.01` for an index
+
+    **Lots:** 1.0 = 100,000 units (standard FX lot)
+
+    **Order types:** `BUY_LIMIT` · `SELL_LIMIT` · `BUY_STOP` · `SELL_STOP` ·
+    `BUY_MIT` · `SELL_MIT` · `BUY_STOP_LIMIT` · `SELL_STOP_LIMIT` ·
+    `BUY_LIMIT_TRAIL` · `SELL_LIMIT_TRAIL` · `BUY_STOP_TRAIL` · `SELL_STOP_TRAIL` ·
+    `BUY_MTO` · `SELL_MTO`
+
+    ### Environment Variables
+
+    | Variable | Purpose | Default |
+    |----------|---------|---------|
+    | `API_KEY` | Write-route guard | Disabled |
+    | `OPENBB_API_KEY` | OpenBB widget guard | Disabled |
+    | `REDIS_URL` | Bar cache (write-through) + ephemeral event bridge | In-memory fallback |
+    | `RABBITMQ_URL` | Durable order/risk events + audit trail consumer | Disabled |
+    | `ANTHROPIC_API_KEY` | Claude Agent SDK for `/skills` routes | Required for skills |
+    | `NODE_ENV` | Set to `production` to hide stack traces | — |
 
 servers:
   - url: http://localhost:3000
@@ -47,9 +193,11 @@ tags:
   # ── Core Trading ──────────────────────────────────────────
   - name: Engine
     description: >
-      Push OHLC bars (`POST /bars`), get account snapshots, update engine flags,
-      and subscribe to real-time events via WebSocket (`GET /stream`).
-      The engine is bar-driven — call `/bars` at least once before trading.
+      Price ingestion and account state. Push OHLC bars (`POST /bars`) to advance the full
+      engine state machine, or push individual bid/ask ticks (`POST /ticks`) for intra-bar
+      fill precision. Get account equity via `GET /account`, toggle engine flags via
+      `PUT /engine/config`, and subscribe to real-time events via WebSocket (`GET /stream`).
+      Call `POST /bars` at least once before any position/order endpoint to establish a price reference.
   - name: Positions
     description: >
       Open/close market positions on LONG/SHORT slots. Multiple fills on the same
@@ -90,9 +238,11 @@ tags:
   # ── Infrastructure ────────────────────────────────────────
   - name: Services
     description: >
-      Service lifecycle management — list, inspect, start/stop registered services
-      (brokers, data providers, strategies, screeners, risk/order managers).
-      Mutation routes require `x-api-key`.
+      Service lifecycle management — list, inspect health, start/stop, and evaluate
+      the registered service instances. Services include: `BrokerService`,
+      `InternalProvider`, `RiskManagerService`, `ExecutionSaga`, `OrderManagerService`,
+      `TickIngestionService`, `StrategyService`, and `ScreenerService`.
+      Mutation routes (`start`, `stop`, `evaluate`, `scan`, `risk/validate`) require `x-api-key`.
   - name: Audit
     description: >
       Query the event audit trail — a ring buffer of the last 1000 events bridged
@@ -224,6 +374,84 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /ticks:
+    post:
+      tags: [Engine]
+      summary: Push a bid/ask tick to the engine
+      description: |
+        **Tick-driven fill mode.** Emits a `tick` event on the internal bus, which
+        `TickIngestionService` converts to a mid-price `onTick()` call on the core engine.
+
+        Unlike `POST /bars`, this call:
+        - **Does** trigger: pending order fills, SL/TP exits
+        - **Does NOT** trigger: ATR/SMA/RSI recalculation, trailing stop position updates,
+          WebSocket bar broadcasts, or bar cache writes
+
+        Use this endpoint alongside `POST /bars` for intra-bar fill precision — push
+        candle closes to `/bars` and individual ticks to `/ticks` in between.
+
+        The mid price used for fill checks is calculated as `(bid + ask) / 2`.
+
+        ### Rate Limit
+        10 requests/second (shared with the orders rate limiter).
+
+        ### Code Example
+
+        ```bash
+        # Push a live bid/ask tick from your broker feed
+        curl -X POST http://localhost:3000/ticks \
+          -H 'Content-Type: application/json' \
+          -d '{"bid": 1.08492, "ask": 1.08508, "time": "2024-01-15T10:00:01.234Z"}'
+        ```
+
+        ```javascript
+        // Continuous tick feed
+        brokerFeed.on('tick', async ({ bid, ask }) => {
+          await fetch('http://localhost:3000/ticks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ bid, ask }),
+          });
+        });
+        ```
+      operationId: postTick
+      security:
+        - ApiKeyHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bid, ask]
+              properties:
+                bid:
+                  type: number
+                  exclusiveMinimum: 0
+                  description: Current bid price
+                  example: 1.08492
+                ask:
+                  type: number
+                  exclusiveMinimum: 0
+                  description: Current ask price (must be ≥ bid)
+                  example: 1.08508
+                time:
+                  type: string
+                  format: date-time
+                  description: Tick timestamp (ISO 8601). Defaults to server time if omitted.
+                  example: "2024-01-15T10:00:01.234Z"
+            example:
+              bid: 1.08492
+              ask: 1.08508
+              time: "2024-01-15T10:00:01.234Z"
+      responses:
+        '204':
+          description: Tick accepted and emitted to the internal bus.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   /account:
     get:
