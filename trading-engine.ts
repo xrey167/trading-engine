@@ -339,18 +339,18 @@ export class Bars {
 
   /** Exponential Moving Average (SMA-seeded, k = 2/(periods+1)). */
   ema(periods: number, shift = 0): number {
-    const end = Math.min(shift + periods * 3, this.data.length); // use enough bars for convergence
+    const end = Math.min(shift + periods * 3, this.data.length);
     if (end <= shift) return 0;
-    // Seed with SMA of the oldest `periods` bars in the window
+    // Seed with SMA of exactly `periods` bars at the deepest end of the window
+    const seedStart = Math.max(end - periods, shift);
     let seed = 0, cnt = 0;
-    const seedStart = Math.min(shift + periods, end);
     for (let i = seedStart; i < end; i++) { seed += this.data[i].close; cnt++; }
     if (cnt === 0) return this.data[shift].close;
     seed /= cnt;
-    // Apply EMA from oldest toward shift
+    // Apply EMA from the bar before the seed range toward shift
     const k = 2 / (periods + 1);
     let ema = seed;
-    for (let i = Math.min(seedStart - 1, end - 1); i >= shift; i--) {
+    for (let i = seedStart - 1; i >= shift; i--) {
       ema = this.data[i].close * k + ema * (1 - k);
     }
     return ema;
