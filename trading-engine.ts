@@ -841,43 +841,200 @@ export type OrderEntryType =
   | 'BUY_MTO'         // Market-To-Order buy: pending limit below market, fills as market when touched
   | 'SELL_MTO';       // Market-To-Order sell: pending limit above market, fills as market when touched
 
-export interface PendingOrderAttributes {
-  /** One-Cancels-Other: when filled, cancel all other pending orders */
-  oco?: boolean;
-  /** Close-Opposite: when filled, close the opposite position */
-  co?: boolean;
-  /** Cancel-Same: when filled, cancel all same-direction pending orders */
-  cs?: boolean;
-  /** Reverse: when filled, reverse the current position */
-  rev?: boolean;
-  /** Stop-limit: the limit price used for BUY_STOP_LIMIT / SELL_STOP_LIMIT fills */
-  limitPrice?: number;
-  /** Bracket: automatic SL/TP applied when filled */
-  bracketSL?: number;  // points
-  bracketTP?: number;  // points
-  /** Trailing entry: the pending order price follows the market */
-  trailEntry?: {
-    mode:   TrailMode;
-    distPts: number;
-    periods: number;
-  };
-  /** Limit-pullback: limit order that follows (trails) the price by pullbackPts */
-  pullbackPts?: number;
-  /** Limit-confirm: require candle confirmation before treating as filled */
+// ─────────────────────────────────────────────────────────────
+// Order class hierarchy — polymorphic pending orders
+// ─────────────────────────────────────────────────────────────
+
+interface OrderParams {
+  id:            string;
+  type:          OrderEntryType;
+  side:          Side;
+  price:         number;
+  size:          number;
+  time:          Date;
+  oco?:          boolean;
+  co?:           boolean;
+  cs?:           boolean;
+  rev?:          boolean;
+  bracketSL?:    number;
+  bracketTP?:    number;
   limitConfirm?: LimitConfirm;
+  pullbackPts?:  number;
 }
 
-export interface PendingOrder {
-  id:         string;
-  type:       OrderEntryType;
-  side:       Side;          // Long or Short
-  price:      number;        // trigger price
-  size:       number;
-  time:       Date;
-  attributes: PendingOrderAttributes;
-  // Internal state for trailing entry / pullback
-  _trailRef?: number;       // highest/lowest reference for trailing entry
+/** Abstract base for all pending orders. Each subclass owns fill logic. */
+export abstract class Order {
+  readonly id:            string;
+  readonly type:          OrderEntryType;
+  readonly side:          Side;
+  price:                  number;   // mutable — trailing orders update this each bar
+  readonly size:          number;
+  readonly time:          Date;
+  // Execution modifiers — composable, applicable to any order type
+  oco:           boolean;
+  co:            boolean;
+  cs:            boolean;
+  rev:           boolean;
+  bracketSL?:    number;
+  bracketTP?:    number;
+  limitConfirm?: LimitConfirm;
+  pullbackPts?:  number;
+  // Internal: trailing/pullback reference price
+  protected _trailRef?: number;
+
+  constructor(p: OrderParams) {
+    this.id           = p.id;
+    this.type         = p.type;
+    this.side         = p.side;
+    this.price        = p.price;
+    this.size         = p.size;
+    this.time         = p.time;
+    this.oco          = p.oco  ?? false;
+    this.co           = p.co   ?? false;
+    this.cs           = p.cs   ?? false;
+    this.rev          = p.rev  ?? false;
+    this.bracketSL    = p.bracketSL;
+    this.bracketTP    = p.bracketTP;
+    this.limitConfirm = p.limitConfirm;
+    this.pullbackPts  = p.pullbackPts;
+  }
+
+  abstract isFilled(bar: Bar): boolean;
+  abstract computeFillPrice(bar: Bar): number;
+
+  /** True when fill must be routed through broker.marketOrder() (MIT and MTO types). */
+  get fillsAtMarket(): boolean { return false; }
+
+  /** Per-bar: update this.price for pullback orders. TrailingOrder overrides for trail entry. */
+  updateTrailingRef(bar: Bar, _bars: Bars, symbol: SymbolInfoBase): void {
+    if (this.pullbackPts == null) return;
+    const pullDist = symbol.pointsToPrice(this.pullbackPts);
+    if (this.side === Side.Long) {
+      if (bar.high > (this._trailRef ?? -Infinity)) {
+        this._trailRef = bar.high;
+        this.price     = bar.high - pullDist;
+      }
+    } else {
+      if (bar.low < (this._trailRef ?? Infinity)) {
+        this._trailRef = bar.low;
+        this.price     = bar.low + pullDist;
+      }
+    }
+  }
+
+  /** Returns shape expected by PendingOrderSchema and RedisEventBridge. */
+  toJSON(): { id: string; type: OrderEntryType; side: Side; price: number; size: number; time: Date } {
+    return { id: this.id, type: this.type, side: this.side, price: this.price, size: this.size, time: this.time };
+  }
 }
+
+export class LimitOrder extends Order {
+  isFilled(bar: Bar): boolean {
+    return this.side === Side.Long ? bar.low <= this.price : bar.high >= this.price;
+  }
+  computeFillPrice(_bar: Bar): number { return this.price; }
+}
+
+export class StopOrder extends Order {
+  isFilled(bar: Bar): boolean {
+    return this.side === Side.Long ? bar.high >= this.price : bar.low <= this.price;
+  }
+  computeFillPrice(_bar: Bar): number { return this.price; }
+}
+
+export class MITOrder extends Order {
+  // MIT triggers like a limit — touched from the opposite side
+  isFilled(bar: Bar): boolean {
+    return this.side === Side.Long ? bar.low <= this.price : bar.high >= this.price;
+  }
+  computeFillPrice(bar: Bar): number { return bar.close; }
+  override get fillsAtMarket(): boolean { return true; }
+}
+
+export class StopLimitOrder extends Order {
+  readonly limitPrice: number;  // always required — impossible state eliminated at type level
+
+  constructor(p: OrderParams & { limitPrice: number }) {
+    super(p);
+    this.limitPrice = p.limitPrice;
+  }
+  // Stop trigger: same as StopOrder
+  isFilled(bar: Bar): boolean {
+    return this.side === Side.Long ? bar.high >= this.price : bar.low <= this.price;
+  }
+  computeFillPrice(_bar: Bar): number { return this.limitPrice; }
+
+  /** True if the bar's range covers the limit price (fill can proceed). */
+  limitCovered(bar: Bar): boolean {
+    return this.side === Side.Long
+      ? bar.low  <= this.limitPrice   // bar reached the buy limit ceiling
+      : bar.high >= this.limitPrice;  // bar reached the sell limit floor
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Trailing-entry orders — price follows the market each bar
+// ─────────────────────────────────────────────────────────────
+
+interface TrailingOrderParams extends OrderParams {
+  trailEntry: { mode: TrailMode; distPts: number; periods: number };
+  _trailRef:  number;
+}
+
+export abstract class TrailingOrder extends Order {
+  readonly trailEntry: { mode: TrailMode; distPts: number; periods: number };
+
+  constructor(p: TrailingOrderParams) {
+    super(p);
+    this.trailEntry = p.trailEntry;
+    this._trailRef  = p._trailRef;
+  }
+
+  override updateTrailingRef(bar: Bar, _bars: Bars, symbol: SymbolInfoBase): void {
+    // Pullback takes priority
+    if (this.pullbackPts != null) { super.updateTrailingRef(bar, _bars, symbol); return; }
+    const dist = symbol.pointsToPrice(this.trailEntry.distPts);
+    if (this.type === 'BUY_LIMIT') {
+      if (bar.high > (this._trailRef ?? -Infinity)) { this._trailRef = bar.high; this.price = bar.high - dist; }
+    } else if (this.type === 'SELL_LIMIT') {
+      if (bar.low  < (this._trailRef ?? Infinity))  { this._trailRef = bar.low;  this.price = bar.low  + dist; }
+    } else if (this.type === 'BUY_STOP' || this.type === 'BUY_MTO') {
+      if (bar.low  < (this._trailRef ?? Infinity))  { this._trailRef = bar.low;  this.price = bar.low  + dist; }
+    } else if (this.type === 'SELL_STOP' || this.type === 'SELL_MTO') {
+      if (bar.high > (this._trailRef ?? -Infinity)) { this._trailRef = bar.high; this.price = bar.high - dist; }
+    }
+  }
+}
+
+export class TrailingLimitOrder extends TrailingOrder {
+  isFilled(bar: Bar): boolean {
+    return this.side === Side.Long ? bar.low <= this.price : bar.high >= this.price;
+  }
+  computeFillPrice(_bar: Bar): number { return this.price; }
+}
+
+export class TrailingStopOrder extends TrailingOrder {
+  isFilled(bar: Bar): boolean {
+    return this.side === Side.Long ? bar.high >= this.price : bar.low <= this.price;
+  }
+  computeFillPrice(_bar: Bar): number { return this.price; }
+}
+
+export class MTOOrder extends TrailingOrder {
+  // MTO triggers like a stop
+  isFilled(bar: Bar): boolean {
+    return this.side === Side.Long ? bar.high >= this.price : bar.low <= this.price;
+  }
+  computeFillPrice(bar: Bar): number { return bar.close; }
+  override get fillsAtMarket(): boolean { return true; }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Type guards
+// ─────────────────────────────────────────────────────────────
+
+export function isTrailingOrder(o: Order): o is TrailingOrder   { return o instanceof TrailingOrder;   }
+export function isStopLimitOrder(o: Order): o is StopLimitOrder { return o instanceof StopLimitOrder; }
 
 // ─────────────────────────────────────────────────────────────
 // Individual position slot
@@ -967,7 +1124,7 @@ export class TradingEngine {
   private longPos:  PositionSlot = emptySlot(Side.Long);
   private shortPos: PositionSlot = emptySlot(Side.Short);
 
-  private orders: PendingOrder[] = [];
+  private orders: Order[] = [];
   private _orderSeq = 0;
 
   // Defaults applied to next order/position
@@ -1094,22 +1251,22 @@ export class TradingEngine {
 
   /** Buy-limit: buy when price drops to `price`. */
   addBuyLimit(price: number, size?: number): string {
-    return this._addOrder('BUY_LIMIT', Side.Long, price, size);
+    return this._addOrder('BUY_LIMIT', Side.Long, price, size).id;
   }
 
   /** Buy-stop: buy when price rises to `price`. */
   addBuyStop(price: number, size?: number): string {
-    return this._addOrder('BUY_STOP', Side.Long, price, size);
+    return this._addOrder('BUY_STOP', Side.Long, price, size).id;
   }
 
   /** Sell-limit: sell when price rises to `price`. */
   addSellLimit(price: number, size?: number): string {
-    return this._addOrder('SELL_LIMIT', Side.Short, price, size);
+    return this._addOrder('SELL_LIMIT', Side.Short, price, size).id;
   }
 
   /** Sell-stop: sell when price drops to `price`. */
   addSellStop(price: number, size?: number): string {
-    return this._addOrder('SELL_STOP', Side.Short, price, size);
+    return this._addOrder('SELL_STOP', Side.Short, price, size).id;
   }
 
   /**
@@ -1118,11 +1275,11 @@ export class TradingEngine {
    * Sell: converts to market sell the first time price touches `price` (from below).
    */
   addBuyMIT(price: number, size?: number): string {
-    return this._addOrder('BUY_MIT', Side.Long, price, size);
+    return this._addOrder('BUY_MIT', Side.Long, price, size).id;
   }
 
   addSellMIT(price: number, size?: number): string {
-    return this._addOrder('SELL_MIT', Side.Short, price, size);
+    return this._addOrder('SELL_MIT', Side.Short, price, size).id;
   }
 
   /**
@@ -1132,10 +1289,12 @@ export class TradingEngine {
    * plain BUY_LIMIT at `limitPrice` for subsequent bars.
    */
   addBuyStopLimit(stopPrice: number, limitPrice: number, size?: number): string {
-    const id = this._addOrder('BUY_STOP_LIMIT', Side.Long, stopPrice, size);
-    const o  = this._getOrder(id);
-    o.attributes.limitPrice = limitPrice;
-    return id;
+    const id = `ord_${++this._orderSeq}`;
+    const p  = this._consumeNextParams(id, 'BUY_STOP_LIMIT', Side.Long, stopPrice, size);
+    this._resetNextAttrs();
+    const o = new StopLimitOrder({ ...p, limitPrice });
+    this.orders.push(o);
+    return o.id;
   }
 
   /**
@@ -1143,10 +1302,12 @@ export class TradingEngine {
    * limit sell only if the bar's high reaches `limitPrice` (must be ≥ stopPrice).
    */
   addSellStopLimit(stopPrice: number, limitPrice: number, size?: number): string {
-    const id = this._addOrder('SELL_STOP_LIMIT', Side.Short, stopPrice, size);
-    const o  = this._getOrder(id);
-    o.attributes.limitPrice = limitPrice;
-    return id;
+    const id = `ord_${++this._orderSeq}`;
+    const p  = this._consumeNextParams(id, 'SELL_STOP_LIMIT', Side.Short, stopPrice, size);
+    this._resetNextAttrs();
+    const o = new StopLimitOrder({ ...p, limitPrice });
+    this.orders.push(o);
+    return o.id;
   }
 
   /**
@@ -1154,17 +1315,14 @@ export class TradingEngine {
    * order when triggered. The stop price trails below the market by `distancePts`,
    * anchoring lower each bar. When the bar's high crosses the stop price a
    * market buy is executed.
-   *
-   * Pass `price = Infinity` (or any large value) to let the trailing logic set
-   * the first reference on the next bar. Pass a specific price to start
-   * immediately at that stop level.
    */
   addBuyMTO(mode: TrailMode, distancePts: number, periods = 0): string {
-    const id = this._addOrder('BUY_MTO', Side.Long, Infinity, undefined);
-    const o  = this._getOrder(id);
-    o.attributes.trailEntry = { mode, distPts: distancePts, periods };
-    o._trailRef = Infinity;
-    return id;
+    const id = `ord_${++this._orderSeq}`;
+    const p  = this._consumeNextParams(id, 'BUY_MTO', Side.Long, Infinity);
+    this._resetNextAttrs();
+    const o = new MTOOrder({ ...p, trailEntry: { mode, distPts: distancePts, periods }, _trailRef: Infinity });
+    this.orders.push(o);
+    return o.id;
   }
 
   /**
@@ -1174,11 +1332,12 @@ export class TradingEngine {
    * market sell is executed.
    */
   addSellMTO(mode: TrailMode, distancePts: number, periods = 0): string {
-    const id = this._addOrder('SELL_MTO', Side.Short, -Infinity, undefined);
-    const o  = this._getOrder(id);
-    o.attributes.trailEntry = { mode, distPts: distancePts, periods };
-    o._trailRef = -Infinity;
-    return id;
+    const id = `ord_${++this._orderSeq}`;
+    const p  = this._consumeNextParams(id, 'SELL_MTO', Side.Short, -Infinity);
+    this._resetNextAttrs();
+    const o = new MTOOrder({ ...p, trailEntry: { mode, distPts: distancePts, periods }, _trailRef: -Infinity });
+    this.orders.push(o);
+    return o.id;
   }
 
   /**
@@ -1187,36 +1346,40 @@ export class TradingEngine {
    * each bar as long as price rises.
    */
   addBuyLimitTrail(mode: TrailMode, distancePts: number, periods = 0): string {
-    const id = this._addOrder('BUY_LIMIT', Side.Long, 0, undefined);
-    const o = this._getOrder(id);
-    o.attributes.trailEntry = { mode, distPts: distancePts, periods };
-    o._trailRef = -Infinity;
-    return id;
+    const id = `ord_${++this._orderSeq}`;
+    const p  = this._consumeNextParams(id, 'BUY_LIMIT', Side.Long, 0);
+    this._resetNextAttrs();
+    const o = new TrailingLimitOrder({ ...p, trailEntry: { mode, distPts: distancePts, periods }, _trailRef: -Infinity });
+    this.orders.push(o);
+    return o.id;
   }
 
   addSellLimitTrail(mode: TrailMode, distancePts: number, periods = 0): string {
-    const id = this._addOrder('SELL_LIMIT', Side.Short, 0, undefined);
-    const o = this._getOrder(id);
-    o.attributes.trailEntry = { mode, distPts: distancePts, periods };
-    o._trailRef = Infinity;
-    return id;
+    const id = `ord_${++this._orderSeq}`;
+    const p  = this._consumeNextParams(id, 'SELL_LIMIT', Side.Short, 0);
+    this._resetNextAttrs();
+    const o = new TrailingLimitOrder({ ...p, trailEntry: { mode, distPts: distancePts, periods }, _trailRef: Infinity });
+    this.orders.push(o);
+    return o.id;
   }
 
   /** Trailing buy-stop — stop price trails above the market. */
   addBuyStopTrail(mode: TrailMode, distancePts: number, periods = 0): string {
-    const id = this._addOrder('BUY_STOP', Side.Long, Infinity, undefined);
-    const o = this._getOrder(id);
-    o.attributes.trailEntry = { mode, distPts: distancePts, periods };
-    o._trailRef = Infinity;
-    return id;
+    const id = `ord_${++this._orderSeq}`;
+    const p  = this._consumeNextParams(id, 'BUY_STOP', Side.Long, Infinity);
+    this._resetNextAttrs();
+    const o = new TrailingStopOrder({ ...p, trailEntry: { mode, distPts: distancePts, periods }, _trailRef: Infinity });
+    this.orders.push(o);
+    return o.id;
   }
 
   addSellStopTrail(mode: TrailMode, distancePts: number, periods = 0): string {
-    const id = this._addOrder('SELL_STOP', Side.Short, 0, undefined);
-    const o = this._getOrder(id);
-    o.attributes.trailEntry = { mode, distPts: distancePts, periods };
-    o._trailRef = -Infinity;
-    return id;
+    const id = `ord_${++this._orderSeq}`;
+    const p  = this._consumeNextParams(id, 'SELL_STOP', Side.Short, 0);
+    this._resetNextAttrs();
+    const o = new TrailingStopOrder({ ...p, trailEntry: { mode, distPts: distancePts, periods }, _trailRef: -Infinity });
+    this.orders.push(o);
+    return o.id;
   }
 
   /**
@@ -1231,11 +1394,10 @@ export class TradingEngine {
     size?:      number;
   }): string {
     const side = opts.entryType.startsWith('BUY') ? Side.Long : Side.Short;
-    const id = this._addOrder(opts.entryType, side, opts.entryPrice, opts.size);
-    const o  = this._getOrder(id);
-    o.attributes.bracketSL = opts.slPts;
-    o.attributes.bracketTP = opts.tpPts;
-    return id;
+    const o    = this._addOrder(opts.entryType, side, opts.entryPrice, opts.size);
+    o.bracketSL = opts.slPts;
+    o.bracketTP = opts.tpPts;
+    return o.id;
   }
 
   async deleteBuyOrders():  Promise<void> { this.orders = this.orders.filter(o => o.side !== Side.Long);  }
@@ -1369,7 +1531,7 @@ export class TradingEngine {
   getCntOrdersBuy():  number  { return this.orders.filter(o => o.side === Side.Long).length;  }
   getCntOrdersSell(): number  { return this.orders.filter(o => o.side === Side.Short).length; }
   getCntOrders():     number  { return this.orders.length; }
-  getOrders(): readonly PendingOrder[] { return this.orders; }
+  getOrders(): readonly Order[] { return this.orders; }
   isLong():           boolean { return this.longPos.size  > 0; }
   isShort():          boolean { return this.shortPos.size > 0; }
   isFlat(inclOrders = false): boolean {
@@ -1422,128 +1584,63 @@ export class TradingEngine {
   // Private — order book processing
   // ──────────────────────────────────────────────────────────
 
-  private _addOrder(
-    type:  OrderEntryType,
-    side:  Side,
-    price: number,
-    size?: number,
-  ): string {
-    const id = `ord_${++this._orderSeq}`;
-    this.orders.push({
-      id,
-      type,
-      side,
-      price,
+  /** Build OrderParams from current next-attributes and reset them. */
+  private _consumeNextParams(id: string, type: OrderEntryType, side: Side, price: number, size?: number): OrderParams {
+    return {
+      id, type, side, price,
       size: size ?? this._nextOrderSize,
       time: new Date(),
-      attributes: {
-        ...(this._nextOCO  && { oco:  true as const }),
-        ...(this._nextCO   && { co:   true as const }),
-        ...(this._nextCS   && { cs:   true as const }),
-        ...(this._nextREV  && { rev:  true as const }),
-        ...(this._nextBracketSL != null && { bracketSL: this._nextBracketSL }),
-        ...(this._nextBracketTP != null && { bracketTP: this._nextBracketTP }),
-        ...(this._nextPullback  != null && { pullbackPts: this._nextPullback }),
-        ...(this._nextLimitConfirm !== LimitConfirm.None && { limitConfirm: this._nextLimitConfirm }),
-      },
-    });
-    // Reset one-shot attributes
+      oco:  this._nextOCO  ? true : undefined,
+      co:   this._nextCO   ? true : undefined,
+      cs:   this._nextCS   ? true : undefined,
+      rev:  this._nextREV  ? true : undefined,
+      bracketSL:    this._nextBracketSL,
+      bracketTP:    this._nextBracketTP,
+      pullbackPts:  this._nextPullback,
+      limitConfirm: this._nextLimitConfirm !== LimitConfirm.None ? this._nextLimitConfirm : undefined,
+    };
+  }
+
+  private _resetNextAttrs(): void {
     this._nextOCO = false; this._nextCO = false; this._nextCS = false;
     this._nextREV = false;
     this._nextBracketSL = undefined; this._nextBracketTP = undefined;
     this._nextPullback  = undefined;
     this._nextLimitConfirm = LimitConfirm.None;
-    return id;
   }
 
-  private _findOrder(id: string): PendingOrder | undefined {
-    return this.orders.find(o => o.id === id);
-  }
-
-  /** Like _findOrder but throws if not found — used right after _addOrder where existence is guaranteed. */
-  private _getOrder(id: string): PendingOrder {
-    const o = this._findOrder(id);
-    if (!o) throw new Error(`Order ${id} not found immediately after creation`);
+  /** Factory for simple (non-trailing, non-stop-limit) order types. */
+  private _addOrder(type: OrderEntryType, side: Side, price: number, size?: number): Order {
+    const id = `ord_${++this._orderSeq}`;
+    const p  = this._consumeNextParams(id, type, side, price, size);
+    this._resetNextAttrs();
+    let o: Order;
+    switch (type) {
+      case 'BUY_LIMIT':  case 'SELL_LIMIT': o = new LimitOrder(p); break;
+      case 'BUY_STOP':   case 'SELL_STOP':  o = new StopOrder(p);  break;
+      case 'BUY_MIT':    case 'SELL_MIT':   o = new MITOrder(p);   break;
+      default: throw new Error(`_addOrder: use specific factory for type ${type}`);
+    }
+    this.orders.push(o);
     return o;
   }
 
-  /** Per-bar: update trailing-entry order prices */
-  private async _updateTrailingEntryOrders(bar: Bar, _bars: Bars): Promise<void> {
-    for (const o of this.orders) {
-      // Limit-pullback: trailing pending limit that follows the market
-      if (o.attributes.pullbackPts != null) {
-        const pullDist = this.symbol.pointsToPrice(o.attributes.pullbackPts);
-        if (o.side === Side.Long) {
-          // Buy-limit follows price down: anchor = highest high, limit = anchor - pullback
-          if (bar.high > (o._trailRef ?? -Infinity)) {
-            o._trailRef = bar.high;
-            o.price = bar.high - pullDist;
-          }
-        } else {
-          // Sell-limit follows price up: anchor = lowest low, limit = anchor + pullback
-          if (bar.low < (o._trailRef ?? Infinity)) {
-            o._trailRef = bar.low;
-            o.price = bar.low + pullDist;
-          }
-        }
-      }
-
-      // Trailing entry (stop/limit that follows the market)
-      if (o.attributes.trailEntry) {
-        const te = o.attributes.trailEntry;
-        const dist = this.symbol.pointsToPrice(te.distPts);
-        if (o.type === 'BUY_LIMIT') {
-          // Anchor rises with the market; limit = anchor - dist
-          if (bar.high > (o._trailRef ?? -Infinity)) {
-            o._trailRef = bar.high;
-            o.price = bar.high - dist;
-          }
-        } else if (o.type === 'SELL_LIMIT') {
-          // Anchor falls with the market; limit = anchor + dist
-          if (bar.low < (o._trailRef ?? Infinity)) {
-            o._trailRef = bar.low;
-            o.price = bar.low + dist;
-          }
-        } else if (o.type === 'BUY_STOP' || o.type === 'BUY_MTO') {
-          // Stop / MTO trails below, anchors down; triggers when price rises to stop level
-          if (bar.low < (o._trailRef ?? Infinity)) {
-            o._trailRef = bar.low;
-            o.price = bar.low + dist;
-          }
-        } else if (o.type === 'SELL_STOP' || o.type === 'SELL_MTO') {
-          // Stop / MTO trails above, anchors up; triggers when price drops to stop level
-          if (bar.high > (o._trailRef ?? -Infinity)) {
-            o._trailRef = bar.high;
-            o.price = bar.high - dist;
-          }
-        }
-      }
-    }
+  private _findOrder(id: string): Order | undefined {
+    return this.orders.find(o => o.id === id);
   }
 
-  /** Per-bar: check which pending orders were triggered */
+
+  /** Per-bar: update trailing-entry order prices — each order class owns its own logic. */
+  private async _updateTrailingEntryOrders(bar: Bar, bars: Bars): Promise<void> {
+    for (const o of this.orders) o.updateTrailingRef(bar, bars, this.symbol);
+  }
+
+  /** Per-bar: check which pending orders were triggered — each class owns isFilled(). */
   private async _checkOrderFills(bar: Bar, bars: Bars): Promise<void> {
-    const toFill: PendingOrder[] = [];
-
+    const toFill: Order[] = [];
     for (const o of this.orders) {
-      let triggered = false;
-      switch (o.type) {
-        case 'BUY_LIMIT':       triggered = bar.low  <= o.price; break;
-        case 'BUY_STOP':        triggered = bar.high >= o.price; break;
-        case 'SELL_LIMIT':      triggered = bar.high >= o.price; break;
-        case 'SELL_STOP':       triggered = bar.low  <= o.price; break;
-        case 'BUY_MIT':         triggered = bar.low  <= o.price; break;
-        case 'SELL_MIT':        triggered = bar.high >= o.price; break;
-        // Stop-limit: triggered like a stop, but fill is constrained by limitPrice
-        case 'BUY_STOP_LIMIT':  triggered = bar.high >= o.price; break;
-        case 'SELL_STOP_LIMIT': triggered = bar.low  <= o.price; break;
-        // MTO (Market Trail Order): triggered like a stop, fills as market
-        case 'BUY_MTO':         triggered = bar.high >= o.price; break;
-        case 'SELL_MTO':        triggered = bar.low  <= o.price; break;
-      }
-      if (triggered) toFill.push(o);
+      if (o.isFilled(bar)) toFill.push(o);
     }
-
     for (const o of toFill) {
       // Skip if a prior fill on this bar cancelled this order (OCO / CS).
       if (!this.orders.some(x => x.id === o.id)) continue;
@@ -1551,30 +1648,19 @@ export class TradingEngine {
     }
   }
 
-  private async _fillOrder(o: PendingOrder, bar: Bar, _bars: Bars): Promise<void> {
-    const attrs = o.attributes;
-
+  private async _fillOrder(o: Order, bar: Bar, _bars: Bars): Promise<void> {
     // Limit-confirm check (require wick / color confirmation)
-    if (attrs.limitConfirm != null) {
-      if (!this._checkLimitConfirm(o, bar, attrs.limitConfirm)) return;
+    if (o.limitConfirm != null) {
+      if (!this._checkLimitConfirm(o, bar, o.limitConfirm)) return;
     }
 
     // Remove this order from the book
     this.orders = this.orders.filter(x => x.id !== o.id);
 
-    const fillPrice = o.price; // simplified — market fill at trigger price
-
     // Apply order attributes before executing
-    if (attrs.oco) {
-      // Cancel all other pending orders
-      this.orders = [];
-    }
-    if (attrs.cs) {
-      // Cancel same-direction pending orders
-      this.orders = this.orders.filter(x => x.side !== o.side);
-    }
-    if (attrs.co) {
-      // Close opposite position
+    if (o.oco) this.orders = [];
+    if (o.cs)  this.orders = this.orders.filter(x => x.side !== o.side);
+    if (o.co) {
       if (o.side === Side.Long  && this.shortPos.size > 0) await this._closeSlot(this.shortPos, 'CO');
       if (o.side === Side.Short && this.longPos.size  > 0) await this._closeSlot(this.longPos,  'CO');
     }
@@ -1582,49 +1668,48 @@ export class TradingEngine {
     // Execute the fill
     const slot = o.side === Side.Long ? this.longPos : this.shortPos;
 
-    if (attrs.rev) {
+    if (o.rev) {
       // Reverse: close current + open opposite of same size
       const curSize = slot.size;
       if (curSize > 0) await this._closeSlot(slot, 'REV');
       if (o.side === Side.Long) {
         await this.broker.marketOrder(Side.Long, o.size + curSize);
-        this._applyFill(this.longPos, fillPrice, o.size + curSize, bar.time);
+        this._applyFill(this.longPos, o.price, o.size + curSize, bar.time);
       } else {
         await this.broker.marketOrder(Side.Short, o.size + curSize);
-        this._applyFill(this.shortPos, fillPrice, o.size + curSize, bar.time);
+        this._applyFill(this.shortPos, o.price, o.size + curSize, bar.time);
       }
+    } else if (isStopLimitOrder(o)) {
+      // Stop-limit: only fill if bar's range covers the limit price
+      if (!o.limitCovered(bar)) {
+        // Re-queue as a plain LimitOrder at limitPrice for subsequent bars
+        this.orders.push(new LimitOrder({
+          id: o.id,
+          type: o.side === Side.Long ? 'BUY_LIMIT' : 'SELL_LIMIT',
+          side: o.side, price: o.limitPrice, size: o.size, time: o.time,
+          oco: o.oco, co: o.co, cs: o.cs, rev: o.rev,
+          bracketSL: o.bracketSL, bracketTP: o.bracketTP, limitConfirm: o.limitConfirm,
+        }));
+        return;
+      }
+      this._applyFill(slot, o.limitPrice, o.size, bar.time);
+    } else if (o.fillsAtMarket) {
+      // MIT / MTO: execute as market order; actual fill price comes from broker
+      const r = await this.broker.marketOrder(o.side, o.size);
+      this._applyFill(slot, r.price, o.size, r.time);
     } else {
-      if (o.type === 'BUY_MIT' || o.type === 'SELL_MIT' ||
-          o.type === 'BUY_MTO' || o.type === 'SELL_MTO') {
-        // MIT / MTO: execute as market order
-        const r = await this.broker.marketOrder(o.side, o.size);
-        this._applyFill(slot, r.price, o.size, r.time);
-      } else if (o.type === 'BUY_STOP_LIMIT' || o.type === 'SELL_STOP_LIMIT') {
-        // Stop-limit: only fill if bar's range covers the limit price
-        const lp = attrs.limitPrice ?? o.price;
-        const canFill = o.type === 'BUY_STOP_LIMIT'
-          ? bar.low  <= lp   // bar must have reached the buy limit ceiling
-          : bar.high >= lp;  // bar must have reached the sell limit floor
-        if (!canFill) {
-          // Re-queue the order as a plain limit at limitPrice for subsequent bars
-          this.orders.push({ ...o, type: o.type === 'BUY_STOP_LIMIT' ? 'BUY_LIMIT' : 'SELL_LIMIT', price: lp });
-          return;
-        }
-        this._applyFill(slot, lp, o.size, bar.time);
-      } else {
-        // Limit / stop fill
-        this._applyFill(slot, fillPrice, o.size, bar.time);
-      }
+      // Limit / stop fill at computed price
+      this._applyFill(slot, o.computeFillPrice(bar), o.size, bar.time);
     }
 
     // Apply bracket SL/TP
-    this._applyBracketPts(slot, attrs.bracketSL, attrs.bracketTP);
+    this._applyBracketPts(slot, o.bracketSL, o.bracketTP);
 
     await this._pushSLTP(slot);
   }
 
   /** Check limit-confirmation candle logic */
-  private _checkLimitConfirm(o: PendingOrder, bar: Bar, confirm: LimitConfirm): boolean {
+  private _checkLimitConfirm(o: Order, bar: Bar, confirm: LimitConfirm): boolean {
     switch (confirm) {
       case LimitConfirm.Wick:
         // Price must have wicked through the limit but closed on the other side
