@@ -16,13 +16,17 @@
     "dev": "node --watch dist/src/server.js"
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
     "@biomejs/biome": "^2.4.4",
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "@types/node": "^25.3.3",
     "@types/ws": "^8.18.1",
     "typescript": "^5.8.3",
-    "vitest": "^4.0.18"
+    "vitest": "^4.0.18",
+    "zod": "^4.3.6"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.71",
     "@fastify/cors": "^11.2.0",
     "@fastify/rate-limit": "^10.3.0",
     "@fastify/websocket": "^11.2.0",
