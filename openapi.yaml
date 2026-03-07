@@ -39,6 +39,14 @@ info:
       -d '{"sl":50,"slActive":true}'
     ```
 
+    ## Data Pipeline
+    Bars pushed via `POST /bars` flow through an internal data provider that
+    normalizes them into `normalized_bar` events and caches them in an in-memory
+    bar cache. Autonomous strategies subscribe to `normalized_bar` and receive
+    full historical context from the cache. Additional data providers (external
+    APIs, WebSocket feeds) can be registered via the service registry and feed
+    the same pipeline. Use `GET /services` to inspect registered providers.
+
     ## Coordinate System
     - **Side** integers: `0` = None/flat, `1` = Long, `-1` = Short
     - **Points** (pts): smallest price unit (e.g. 0.00001 for EURUSD with 5 digits)
