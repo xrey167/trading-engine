@@ -302,6 +302,76 @@ export class Bars {
     return cur.low < prev.low && cur.close < prev.close
         && cur.close < prev.open && cur.open > cur.close;
   }
+
+  // ── Volume helpers ──────────────────────────────────────────
+
+  tickVolumeAverage(periods: number, shift = 0): number {
+    let sum = 0, cnt = 0;
+    for (let i = shift; i < shift + periods && i < this.data.length; i++) {
+      sum += this.data[i].volume ?? 0; cnt++;
+    }
+    return cnt === 0 ? 0 : sum / cnt;
+  }
+
+  volumeRatio(periods: number, shift = 0): number {
+    const avg = this.tickVolumeAverage(periods, shift + 1);
+    return avg === 0 ? 0 : (this.data[shift]?.volume ?? 0) / avg;
+  }
+
+  // ── MA slope detection ──────────────────────────────────────
+
+  isMaSloping(type: 'sma' | 'ema', periods: number, span: number, shift = 0, up = true): boolean {
+    if (span < 2) return false;
+    const maFn = type === 'sma' ? (s: number) => this.sma(periods, s) : (s: number) => this.ema(periods, s);
+    let prev = maFn(shift + span - 1);
+    for (let i = shift + span - 2; i >= shift; i--) {
+      const cur = maFn(i);
+      if (up ? cur <= prev : cur >= prev) return false;
+      prev = cur;
+    }
+    return true;
+  }
+
+  // ── Stochastic oscillator ───────────────────────────────────
+
+  stochastic(periodK: number, periodD: number, slowing: number, shift = 0): { main: number; signal: number } {
+    // Compute raw %K values, then apply slowing (SMA of raw %K), then %D (SMA of slowed %K)
+    const rawKValues: number[] = [];
+    const needed = shift + slowing + periodD - 1;
+    for (let i = shift; i <= needed && i + periodK - 1 < this.data.length; i++) {
+      const hh = this.highestHigh(periodK, i);
+      const ll = this.lowestLow(periodK, i);
+      rawKValues.push(hh === ll ? 50 : ((this.data[i].close - ll) / (hh - ll)) * 100);
+    }
+    // Slowed %K values = SMA(rawK, slowing)
+    const slowedK: number[] = [];
+    for (let i = 0; i + slowing <= rawKValues.length; i++) {
+      let sum = 0;
+      for (let j = i; j < i + slowing; j++) sum += rawKValues[j];
+      slowedK.push(sum / slowing);
+    }
+    const main = slowedK.length > 0 ? slowedK[0] : 50;
+    // %D = SMA of slowed %K
+    let signal = main;
+    if (slowedK.length >= periodD) {
+      let sum = 0;
+      for (let i = 0; i < periodD; i++) sum += slowedK[i];
+      signal = sum / periodD;
+    }
+    return { main, signal };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Crossing helpers (standalone — work on any two value series)
+// ─────────────────────────────────────────────────────────────
+
+export function isCrossingAbove(valueA: number, valueB: number, prevA: number, prevB: number): boolean {
+  return prevA <= prevB && valueA > valueB;
+}
+
+export function isCrossingBelow(valueA: number, valueB: number, prevA: number, prevB: number): boolean {
+  return prevA >= prevB && valueA < valueB;
 }
 
 // ─────────────────────────────────────────────────────────────

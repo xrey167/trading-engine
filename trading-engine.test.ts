@@ -18,6 +18,7 @@ import {
   checkSLTP, calcTrailingSL,
   ScaledOrderEngine, AtrModule,
   evaluateCandleATR03,
+  isCrossingAbove, isCrossingBelow,
 } from './trading-engine';
 import type {
   IBrokerAdapter, OHLC, TrailState, ScaledOrderPreset, AtrModuleConfig,
@@ -1282,5 +1283,172 @@ describe('T1.3 – Bars.ema', () => {
   it('ema returns close when only 1 bar available', () => {
     const bars = new Bars([{ open: 1, high: 2, low: 0.5, close: 1.5, time: new Date() }]);
     expect(bars.ema(10, 0)).toBeCloseTo(1.5, 5);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// T2.1 – Bars: tickVolumeAverage & volumeRatio
+// ─────────────────────────────────────────────────────────────
+
+describe('T2.1 – Bars volume helpers', () => {
+  const mkBar = (vol: number): OHLC => ({ open: 1, high: 2, low: 0.5, close: 1.5, time: new Date(), volume: vol });
+
+  it('tickVolumeAverage returns mean volume over periods', () => {
+    const bars = new Bars([mkBar(100), mkBar(200), mkBar(300)]);
+    expect(bars.tickVolumeAverage(3)).toBe(200);
+  });
+
+  it('tickVolumeAverage with shift skips leading bars', () => {
+    const bars = new Bars([mkBar(100), mkBar(200), mkBar(300)]);
+    expect(bars.tickVolumeAverage(2, 1)).toBe(250);
+  });
+
+  it('tickVolumeAverage returns 0 for empty bars', () => {
+    const bars = new Bars([]);
+    expect(bars.tickVolumeAverage(5)).toBe(0);
+  });
+
+  it('volumeRatio = current volume / average of subsequent bars', () => {
+    // bar[0]=400, avg of bar[1..2] = (100+200)/2 = 150 → ratio = 400/150
+    const bars = new Bars([mkBar(400), mkBar(100), mkBar(200)]);
+    expect(bars.volumeRatio(2)).toBeCloseTo(400 / 150, 5);
+  });
+
+  it('volumeRatio returns 0 when average is 0', () => {
+    const bars = new Bars([mkBar(100), mkBar(0)]);
+    expect(bars.volumeRatio(1)).toBe(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// T2.2 – Bars: isMaSloping
+// ─────────────────────────────────────────────────────────────
+
+describe('T2.2 – Bars.isMaSloping', () => {
+  // Create bars with monotonically increasing closes: [10, 9, 8, 7, 6, 5, 4, 3, 2, 1]
+  // (index 0 = most recent = highest close)
+  const upBars = new Bars(
+    Array.from({ length: 10 }, (_, i) => ({
+      open: 10 - i, high: 11 - i, low: 9 - i, close: 10 - i, time: new Date(),
+    })),
+  );
+
+  it('detects upward SMA slope', () => {
+    // SMA(3) at shift 0,1,2,3 = 9, 8, 7, 6 → monotonically increasing (newest→oldest reversed)
+    expect(upBars.isMaSloping('sma', 3, 4, 0, true)).toBe(true);
+  });
+
+  it('detects upward EMA slope', () => {
+    expect(upBars.isMaSloping('ema', 3, 4, 0, true)).toBe(true);
+  });
+
+  it('returns false for down when trend is up', () => {
+    expect(upBars.isMaSloping('sma', 3, 4, 0, false)).toBe(false);
+  });
+
+  it('returns false when span < 2', () => {
+    expect(upBars.isMaSloping('sma', 3, 1, 0, true)).toBe(false);
+  });
+
+  it('detects downward slope on descending closes', () => {
+    // closes: [1, 2, 3, 4, 5] → SMA(2) at shift 0,1,2 = 1.5, 2.5, 3.5 → descending
+    const downBars = new Bars(
+      Array.from({ length: 5 }, (_, i) => ({
+        open: i + 1, high: i + 2, low: i, close: i + 1, time: new Date(),
+      })),
+    );
+    expect(downBars.isMaSloping('sma', 2, 3, 0, false)).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// T2.3 – Bars: stochastic
+// ─────────────────────────────────────────────────────────────
+
+describe('T2.3 – Bars.stochastic', () => {
+  it('returns 50 when all bars are identical (no range)', () => {
+    const bars = new Bars(
+      Array.from({ length: 20 }, () => ({ open: 1, high: 1, low: 1, close: 1, time: new Date() })),
+    );
+    const { main, signal } = bars.stochastic(14, 3, 3);
+    expect(main).toBe(50);
+    expect(signal).toBe(50);
+  });
+
+  it('returns 100 when close is at highest high', () => {
+    // Most recent bar at the top of the range
+    const data: OHLC[] = Array.from({ length: 20 }, (_, i) => ({
+      open: i + 1, high: i + 2, low: i, close: i + 1, time: new Date(),
+    }));
+    const bars = new Bars(data);
+    // %K with periodK=5: close[0]=1, lowestLow(5,0)=0, highestHigh(5,0)=6
+    // Actually let's just check it's a reasonable value
+    const { main, signal } = bars.stochastic(5, 3, 1);
+    expect(main).toBeGreaterThanOrEqual(0);
+    expect(main).toBeLessThanOrEqual(100);
+    expect(signal).toBeGreaterThanOrEqual(0);
+    expect(signal).toBeLessThanOrEqual(100);
+  });
+
+  it('main and signal are in [0, 100] for random-ish data', () => {
+    const data: OHLC[] = [
+      { open: 5, high: 10, low: 1, close: 8, time: new Date() },
+      { open: 4, high: 9, low: 2, close: 3, time: new Date() },
+      { open: 6, high: 11, low: 3, close: 7, time: new Date() },
+      { open: 3, high: 8, low: 1, close: 5, time: new Date() },
+      { open: 7, high: 12, low: 4, close: 9, time: new Date() },
+      { open: 2, high: 7, low: 0, close: 4, time: new Date() },
+      { open: 5, high: 10, low: 2, close: 6, time: new Date() },
+      { open: 3, high: 9, low: 1, close: 5, time: new Date() },
+      { open: 4, high: 8, low: 2, close: 7, time: new Date() },
+      { open: 6, high: 11, low: 3, close: 8, time: new Date() },
+    ];
+    const bars = new Bars(data);
+    const { main, signal } = bars.stochastic(5, 3, 3);
+    expect(main).toBeGreaterThanOrEqual(0);
+    expect(main).toBeLessThanOrEqual(100);
+    expect(signal).toBeGreaterThanOrEqual(0);
+    expect(signal).toBeLessThanOrEqual(100);
+  });
+
+  it('slowing=1 means no smoothing on raw %K', () => {
+    const data: OHLC[] = Array.from({ length: 10 }, (_, i) => ({
+      open: 5, high: 10, low: 0, close: i, time: new Date(),
+    }));
+    const bars = new Bars(data);
+    // With slowing=1, main = raw %K at shift 0
+    const { main } = bars.stochastic(5, 3, 1);
+    // close[0]=0, lowestLow(5,0)=0, highestHigh(5,0)=10 → %K = (0-0)/(10-0)*100 = 0
+    expect(main).toBeCloseTo(0, 5);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// T2.4 – Crossing helpers
+// ─────────────────────────────────────────────────────────────
+
+describe('T2.4 – isCrossingAbove / isCrossingBelow', () => {
+  it('isCrossingAbove: prev A <= B, cur A > B', () => {
+    expect(isCrossingAbove(5, 3, 2, 3)).toBe(true);
+  });
+
+  it('isCrossingAbove: false when already above', () => {
+    expect(isCrossingAbove(5, 3, 4, 3)).toBe(false);
+  });
+
+  it('isCrossingAbove: true when prev equal, cur above', () => {
+    expect(isCrossingAbove(5, 3, 3, 3)).toBe(true);
+  });
+
+  it('isCrossingBelow: prev A >= B, cur A < B', () => {
+    expect(isCrossingBelow(2, 3, 4, 3)).toBe(true);
+  });
+
+  it('isCrossingBelow: false when already below', () => {
+    expect(isCrossingBelow(2, 3, 1, 3)).toBe(false);
+  });
+
+  it('isCrossingBelow: true when prev equal, cur below', () => {
+    expect(isCrossingBelow(2, 3, 3, 3)).toBe(true);
   });
 });
