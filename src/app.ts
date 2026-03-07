@@ -102,7 +102,7 @@ SwaggerUIBundle({
   tryItOutEnabled: true,
   docExpansion: 'list',
   defaultModelsExpandDepth: 1,
-  tagsSorter: 'alpha',
+  // Tags follow the order defined in openapi.yaml (no alpha sort)
   operationsSorter: 'method',
 });
 </script>
@@ -246,13 +246,13 @@ export async function buildApp(
 
   app.get('/openapi.yaml', async (_req, reply) => {
     reply.header('Content-Type', 'text/yaml; charset=utf-8');
-    reply.header('Cache-Control', 'public, max-age=3600');
+    reply.header('Cache-Control', 'no-cache');
     return reply.send(specContent);
   });
 
   const sendDocs = async (_req: unknown, reply: { header: (k: string, v: string) => unknown; send: (v: string) => unknown }) => {
     reply.header('Content-Type', 'text/html; charset=utf-8');
-    reply.header('Cache-Control', 'public, max-age=3600');
+    reply.header('Cache-Control', 'no-cache');
     return reply.send(SWAGGER_UI_HTML);
   };
   app.get('/docs', sendDocs);

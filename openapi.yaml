@@ -4,270 +4,114 @@ info:
   title: Trading Engine API
   version: 1.0.0
   description: |
-    Modular trading platform built on a bar-driven core engine (ported from
-    MQL/StereoTrader) with autonomous strategy execution, risk management,
-    cross-instance event streaming, and an audit trail.
+    Modular trading platform with a bar-driven core engine, autonomous strategies,
+    risk management, cross-instance event streaming (Redis + RabbitMQ), and an audit trail.
 
-    ## Architecture
+    ## Quick Start
 
-    The system is organised in layers:
-
-    | Layer | What it does |
-    |-------|-------------|
-    | **Core engine** | In-memory order book, position management, trailing stops, ATR/SMA/RSI. Stateful — state resets on restart. |
-    | **Broker gateway** | Adapter interface (`IFullBrokerAdapter`). Default is `PaperBroker`; MT5 stubs available. |
-    | **Service registry** | Manages autonomous services: strategies, screeners, data providers, risk/order managers. `GET /services` to inspect. |
-    | **Event bus** | Typed pub/sub (`TypedEventBus<AppEventMap>`) — `signal`, `order`, `risk`, `normalized_bar`, `screener`, `tick`, `service:lifecycle`. |
-    | **Event bridges** | Optional cross-instance delivery via **Redis Pub/Sub** (`REDIS_URL`) and/or **RabbitMQ** (`RABBITMQ_URL`) with echo prevention. |
-    | **Audit trail** | Durable RabbitMQ queue (`te.audit`) stores the last 1000 bridged events. Query via `GET /audit/events`. |
-    | **HTTP + WebSocket** | Fastify REST API + `/stream` WebSocket for real-time events. |
-
-    The engine is **bar-driven**: nothing happens between bars. Call `POST /bars`
-    to advance state — orders fill, trailing stops adjust, strategies evaluate.
-
-    ## Workflow — Getting Started
-
-    1. **Push bars** via `POST /bars` to establish a price reference
-    2. **Open positions** via `POST /positions/long` or `POST /positions/short`
-    3. **Set risk management** via `PUT /positions/{side}/sl-tp`
-    4. **Place pending orders** via `POST /orders`
-    5. **Monitor in real-time** via `GET /stream` (WebSocket)
+    The engine is **bar-driven** — call `POST /bars` to advance state, then trade:
 
     ```bash
-    # 1. Feed the first bar
-    curl -X POST http://localhost:3000/bars \
-      -H 'Content-Type: application/json' \
+    # 1. Push a bar to establish price
+    curl -X POST localhost:3000/bars -H 'Content-Type: application/json' \
       -d '{"bar":{"open":1.085,"high":1.087,"low":1.084,"close":1.086,"time":"2024-01-15T10:00:00Z"},"bars":[]}'
 
-    # 2. Open a long position (1.0 lot)
-    curl -X POST http://localhost:3000/positions/long \
-      -H 'Content-Type: application/json' \
-      -d '{"size":1.0}'
+    # 2. Open a long position
+    curl -X POST localhost:3000/positions/long -H 'Content-Type: application/json' -d '{"size":1.0}'
 
-    # 3. Set a 50-point stop-loss
-    curl -X PUT http://localhost:3000/positions/long/sl-tp \
-      -H 'Content-Type: application/json' \
-      -d '{"sl":50,"slActive":true}'
+    # 3. Set a stop-loss
+    curl -X PUT localhost:3000/positions/long/sl-tp -H 'Content-Type: application/json' -d '{"sl":50,"slActive":true}'
     ```
-
-    ## Data Pipeline
-
-    Bars pushed via `POST /bars` flow through an internal data provider that
-    normalizes them into `normalized_bar` events and caches them in a bar cache.
-
-    **Bar cache** — When `REDIS_URL` is set, the cache uses a **write-through**
-    pattern (`RedisBarCache`): synchronous reads from an in-memory mirror, async
-    writes to Redis Lists. On startup, `hydrate()` restores bars from the
-    previous session. Without Redis, falls back to a plain in-memory cache.
-
-    **Cross-instance event bridges:**
-    - **Redis Pub/Sub** (`RedisEventBridge`) — fire-and-forget delivery of
-      `signal`, `order`, `normalized_bar` events with echo prevention and type
-      validation. Enabled when `REDIS_URL` is set.
-    - **RabbitMQ** (`AmqpEventBridge`) — durable delivery via topic exchange
-      `te.events`. Critical events (`order`, `risk`) use persistent messages
-      (disk-backed). Enabled when `RABBITMQ_URL` is set.
-
-    **Audit trail** — An `AuditConsumer` subscribes to the durable `te.audit`
-    queue (wildcard `event.#` binding) and stores the most recent 1000 events
-    in a ring buffer, queryable via `GET /audit/events`.
-
-    **Autonomous services** — Strategies subscribe to `normalized_bar` and
-    receive full historical context from the cache. A signal→risk→order
-    execution pipeline (`ExecutionSaga`) processes strategy signals through
-    risk validation before order placement. Additional data providers can be
-    registered via the service registry. Use `GET /services` to inspect.
-
-    ## Environment Variables
-
-    | Variable | Required | Purpose |
-    |----------|----------|---------|
-    | `API_KEY` | No | `x-api-key` header guard on write routes |
-    | `OPENBB_API_KEY` | No | Separate key for `/openbb/*` routes |
-    | `ANTHROPIC_API_KEY` | For `/skills` | Agent SDK key |
-    | `REDIS_URL` | No | Bar cache (write-through) + Redis event bridge |
-    | `RABBITMQ_URL` | No | AMQP event bridge + audit trail |
-    | `NODE_ENV` | No | `production` hides stack traces |
-
-    ## Coordinate System
-    - **Side** integers: `0` = None/flat, `1` = Long, `-1` = Short
-    - **Points** (pts): smallest price unit (e.g. 0.00001 for EURUSD with 5 digits)
-    - **Lots**: standard FX lots (1.0 = 100 000 units)
 
     ## Authentication
 
-    **Write routes** (`POST /bars`, all position/order mutations, engine/ATR config,
-    `/skills/*`) require an `x-api-key` header when the `API_KEY` environment
-    variable is set on the server. When `API_KEY` is not set, the guard is a
-    no-op — useful for local development and tests.
+    Write routes require `x-api-key` header when `API_KEY` env var is set.
+    Read-only routes (`GET /positions`, `/orders`, `/account`, `/v1/*`, `/udf/*`) need no key.
+    OpenBB routes use a separate `?apiKey=` parameter via `OPENBB_API_KEY`.
 
-    **OpenBB routes** (`/openbb/*`) use a separate `?apiKey=<value>` query
-    parameter tied to `OPENBB_API_KEY`. The two API keys are independent.
+    ## Reference
 
-    **Read-only routes** (`GET /positions`, `GET /orders`, `GET /account`,
-    `/v1/*`, `/udf/*`, `/skills` list, signal/backtest) require no key.
+    **Sides:** `0` = flat, `1` = long, `-1` = short &nbsp;|&nbsp;
+    **Points:** smallest price unit (e.g. 0.00001 for 5-digit pairs) &nbsp;|&nbsp;
+    **Lots:** 1.0 = 100k units
 
-    Timing-safe comparison (`crypto.timingSafeEqual`) is used on both guards
-    to prevent timing-based key enumeration.
+    **Environment:** `API_KEY`, `REDIS_URL` (bar cache + event bridge),
+    `RABBITMQ_URL` (durable events + audit), `ANTHROPIC_API_KEY` (skills),
+    `NODE_ENV=production` (hide stack traces)
 
 servers:
   - url: http://localhost:3000
     description: Local development (paper broker)
 
 tags:
+  # ── Core Trading ──────────────────────────────────────────
   - name: Engine
-    description: |
-      Core engine lifecycle endpoints. Push OHLC bars to drive the engine's
-      state machine, retrieve account snapshots, update engine flags, and
-      subscribe to real-time events via WebSocket.
-
-      **Important:** The engine is bar-driven. You must call `POST /bars` at least
-      once before any position or order endpoint will work, because the engine
-      needs a price reference.
+    description: >
+      Push OHLC bars (`POST /bars`), get account snapshots, update engine flags,
+      and subscribe to real-time events via WebSocket (`GET /stream`).
+      The engine is bar-driven — call `/bars` at least once before trading.
   - name: Positions
-    description: |
-      Engine-level LONG/SHORT position slots. The engine maintains exactly two
-      position slots — one for LONG and one for SHORT. Multiple fills on the
-      same side are averaged into a single slot (weighted average entry price).
-
-      Use these endpoints to open/close market positions, set SL/TP/trailing stops,
-      and manage hedging.
+    description: >
+      Open/close market positions on LONG/SHORT slots. Multiple fills on the same
+      side are averaged (weighted average entry). Set SL/TP/trailing stops and manage hedging.
   - name: Orders
-    description: |
-      Pending limit, stop, MIT (Market If Touched), and trailing-entry orders.
-      Orders live in the engine's order book and are checked on every `POST /bars`
-      call. When price crosses an order's trigger level, the order fills automatically
-      and emits a `fill` event on the WebSocket stream.
-
-      **Order attributes** (OCO, bracket SL/TP, pullback, etc.) are set on the engine
-      before the order is placed and apply to the next order only.
+    description: >
+      Pending limit, stop, MIT, and trailing-entry orders. Orders live in the
+      engine's order book and fill automatically when price crosses the trigger on
+      `POST /bars`. Supports OCO, bracket SL/TP, and pullback attributes.
   - name: Scaled Orders
-    description: |
-      Multi-order grid placement using named presets. The `ScaledOrderEngine`
-      calculates distances between orders based on fixed-point or ATR-based
-      spacing and places multiple limit/stop orders in a single call.
-
-      ATR-based presets require `dailyBars` to compute distances dynamically.
+    description: >
+      Multi-order grid placement using named presets with fixed-point or ATR-based spacing.
   - name: ATR
-    description: |
-      ATR (Average True Range) module runtime configuration. The ATR module
-      automatically adjusts SL/TP/trailing stop offsets after each bar based on
-      the current ATR value and configured multipliers.
+    description: >
+      Runtime configuration for the ATR module — adjusts SL/TP/trailing offsets
+      after each bar based on current ATR value and multipliers.
 
-      For example, with `slMultiplier: 1.5` and an ATR of 40 points, the SL will
-      be set to 60 points from entry. This runs on every `POST /bars` call.
+  # ── Analysis & Strategy ───────────────────────────────────
   - name: Signal
-    description: |
-      Stateless signal evaluation and backtesting. These endpoints do NOT affect
-      engine state — they run a strategy against supplied bars and return results.
-
-      Available strategies:
-      - **VolumeBreakout** — triggers when volume exceeds a threshold with a directional candle
-      - **CandleAtr** — uses candle body-to-ATR ratio for signal generation
-  - name: Gateway Positions
-    description: |
-      Broker-gateway position management using ticket-based addressing.
-      Unlike the engine-level `/positions` endpoints (which use LONG/SHORT slots),
-      gateway positions are identified by unique ticket numbers, similar to MT5.
-
-      Currently backed by `PaperBroker` — user is hardcoded to `default`.
-      Replace with real auth (JWT/session) before production use.
-  - name: UDF
-    description: |
-      TradingView Universal Data Feed (UDF) endpoints. These implement the UDF
-      protocol so any TradingView charting widget can consume OHLCV data from
-      this server without an additional adapter.
-
-      **Setup:** Point the charting library's `datafeed` URL at
-      `http://localhost:3000` — it will call `/udf/config` on startup,
-      resolve symbols via `/udf/symbols`, and fetch bars via `/udf/history`.
-
-      **Data source:** `/udf/history` reads bars stored by `PaperBroker`
-      (`broker.getBars(symbol, timeframe)`). Only bars pushed via `POST /bars`
-      are available, so seed the engine first.
-
-      **Supported resolutions:** `1`, `5`, `15`, `30`, `60`, `240`, `1D`, `1W`, `1M`
-      (mapped to MT5 timeframe strings M1 … MN1 internally).
-  - name: OpenBB
-    description: |
-      OpenBB Workspace integration endpoints. These follow the OpenBB backend
-      discovery protocol — point your Workspace at `http://localhost:3000` and
-      it will auto-discover widgets, dashboards, and data endpoints.
-
-      **Setup:**
-      1. In OpenBB Workspace, go to Settings > Backends
-      2. Add `http://localhost:3000` as a custom backend
-      3. The trading dashboard will appear with live position/order grids
-
-      Optionally protect with an API key via `OPENBB_API_KEY` env var.
+    description: >
+      Stateless signal evaluation and backtesting. Does NOT affect engine state.
+      Strategies: VolumeBreakout, CandleAtr.
   - name: Money Management
-    description: |
-      Money-management configuration validation. These endpoints let you verify
-      that a SL/TP/lot-sizing configuration is structurally valid before deploying
-      it in a live strategy.
-
-      The `MoneyManagementConfig` schema encodes the full factory configuration —
-      `stopLossType`, `takeProfitType`, and `lotsType` each select a calculation
-      strategy, while the corresponding value fields parameterise it.
+    description: >
+      Validate SL/TP/lot-sizing configurations before deploying in a live strategy.
   - name: Events
-    description: |
-      Static economic event catalog — 250+ `EventDefinition` records spanning
-      11 domains: economic (US, EU, GB, JP, others), equity, pharma, commodity,
-      fixed-income, crypto, and news/geopolitical.
+    description: >
+      Static economic event catalog — 250+ definitions across 11 domains.
+      Filter by domain, importance, sector, country, or text search.
+      All query parameters are ANDed.
 
-      **Filtering** — all query parameters on `GET /v1/events` are ANDed.
-      Numeric enum fields accept comma-separated integer values.
+  # ── Gateway & Broker ──────────────────────────────────────
+  - name: Gateway Positions
+    description: >
+      Ticket-based position management (similar to MT5). Unlike engine-level `/positions`
+      (LONG/SHORT slots), these use unique ticket numbers. Backed by PaperBroker.
 
-      **Enum reference:**
-
-      | Enum | Values |
-      |------|--------|
-      | `domain` | `0` Economic · `1` Equity · `2` Pharma · `3` Commodity · `4` Crypto · `5` FixedIncome · `6` News · `7` Custom |
-      | `importance` | `0` None · `1` Low · `2` Moderate · `3` High (filter is **minimum**, i.e. ≥) |
-      | `type` | `0` Event · `1` Indicator · `2` Holiday |
-      | `sector` | `0` None · `1` Market · `2` GDP · `3` Jobs · `4` Prices · `5` Money · `6` Trade · `7` Government · `8` Business · `9` Consumer · `10` Housing · `11` Taxes · `12` Holidays · `13` Elections · `14` Futures · `15` Calendar · `16` Equity · `17` Pharma · `18` Commodity · `19` FixedIncome · `20` Crypto · `21` Geopolitical · `22` Energy · `23` Sentiment |
-
-      **Example — all high-impact US economic events:**
-      ```
-      GET /v1/events?domain=0&importance=3&countryCode=US
-      ```
-
-      **Example — text search:**
-      ```
-      GET /v1/events?search=non-farm
-      GET /v1/events?search=Federal+Open+Market
-      ```
-
-  - name: Audit
-    description: |
-      Event audit trail — query a ring buffer of all events bridged through RabbitMQ.
-      Requires `RABBITMQ_URL` to be set; returns 503 otherwise.
-
-      The `AuditConsumer` subscribes to the durable `te.audit` queue (wildcard
-      `event.#` binding) and stores the most recent 1000 events in memory.
-      Use query parameters to filter by event type, time range, and limit.
-
+  # ── Infrastructure ────────────────────────────────────────
   - name: Services
-    description: |
-      Service lifecycle management — list, inspect, start, and stop registered
-      services (brokers, data providers, strategies, etc.).
+    description: >
+      Service lifecycle management — list, inspect, start/stop registered services
+      (brokers, data providers, strategies, screeners, risk/order managers).
+      Mutation routes require `x-api-key`.
+  - name: Audit
+    description: >
+      Query the event audit trail — a ring buffer of the last 1000 events bridged
+      through RabbitMQ. Requires `RABBITMQ_URL`; returns 503 otherwise.
+      Filter by event type, time range, and limit.
 
-      Services are typed by `kind` (`BROKER`, `DATA_PROVIDER`, `STRATEGY`,
-      `SCREENER`, `ORDER_MANAGER`, `RISK_MANAGER`) and expose a health check
-      that includes `status`, `lastCheckedAt`, and arbitrary `metadata`.
-
-      Service mutation routes (`start`, `stop`, `evaluate`, `scan`, `risk/validate`)
-      require `x-api-key` when the `API_KEY` env var is set.
-
+  # ── Integrations ──────────────────────────────────────────
+  - name: UDF
+    description: >
+      TradingView Universal Data Feed — point a charting widget at `localhost:3000`
+      for auto-discovery. Supported resolutions: 1, 5, 15, 30, 60, 240, 1D, 1W, 1M.
+  - name: OpenBB
+    description: >
+      OpenBB Workspace integration — auto-discovered widgets for positions, orders,
+      account, deals, and engine config. Protect with `OPENBB_API_KEY`.
   - name: Skills
-    description: |
-      Agent SDK skills integration — run 56+ AI-powered financial analysis and
-      research skills via HTTP. Each skill wraps a Claude Agent SDK session with
-      sandboxed permissions (`permissionMode: dontAsk`, restricted tool access).
-
-      **Authentication:** All skills routes require an `x-api-key` header. Set the
-      `API_KEY` environment variable on the server. When `API_KEY` is not set, the
-      auth check is a no-op (useful for local development).
+    description: >
+      Run 56+ AI-powered financial analysis skills via HTTP (SSE streaming).
+      Each skill wraps a Claude Agent SDK session. Requires `x-api-key`.
 
       **Streaming:** `POST /skills/{path}` returns Server-Sent Events (SSE). The
       stream emits typed events (`init`, `text`, `tool_use`, `tool_result`,
