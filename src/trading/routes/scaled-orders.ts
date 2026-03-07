@@ -60,20 +60,25 @@ const scaledOrdersRoute: FastifyPluginAsync = async (fastify) => {
 
     if (rawDailyBars) soe.setDailyBars(currentBars);
 
-    if (side === 'long') {
-      const result = await soe.placeLong(currentBars, currentPrice);
-      return reply.send({ orderIds: result.orderIds, baseDist: result.baseDist, slDist: result.slDist });
+    const release = await fastify.engineMutex.acquire();
+    try {
+      if (side === 'long') {
+        const result = await soe.placeLong(currentBars, currentPrice);
+        return reply.send({ orderIds: result.orderIds, baseDist: result.baseDist, slDist: result.slDist });
+      }
+      if (side === 'short') {
+        const result = await soe.placeShort(currentBars, currentPrice);
+        return reply.send({ orderIds: result.orderIds, baseDist: result.baseDist, slDist: result.slDist });
+      }
+      // both
+      const result = await soe.placeBoth(currentBars, currentPrice);
+      return reply.send({
+        long:  { orderIds: result.long.orderIds,  baseDist: result.long.baseDist,  slDist: result.long.slDist  },
+        short: { orderIds: result.short.orderIds, baseDist: result.short.baseDist, slDist: result.short.slDist },
+      });
+    } finally {
+      release();
     }
-    if (side === 'short') {
-      const result = await soe.placeShort(currentBars, currentPrice);
-      return reply.send({ orderIds: result.orderIds, baseDist: result.baseDist, slDist: result.slDist });
-    }
-    // both
-    const result = await soe.placeBoth(currentBars, currentPrice);
-    return reply.send({
-      long:  { orderIds: result.long.orderIds,  baseDist: result.long.baseDist,  slDist: result.long.slDist  },
-      short: { orderIds: result.short.orderIds, baseDist: result.short.baseDist, slDist: result.short.slDist },
-    });
   });
 };
 

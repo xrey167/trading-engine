@@ -120,9 +120,14 @@ const ordersRoute: FastifyPluginAsync = async (fastify) => {
       },
     },
   }, async (req, reply) => {
-    const { entryType, entryPrice, slPts, tpPts, size } = req.body;
-    const id = fastify.engine.addBracket({ entryType, entryPrice, slPts, tpPts, size });
-    return reply.send({ id });
+    const release = await fastify.engineMutex.acquire();
+    try {
+      const { entryType, entryPrice, slPts, tpPts, size } = req.body;
+      const id = fastify.engine.addBracket({ entryType, entryPrice, slPts, tpPts, size });
+      return reply.send({ id });
+    } finally {
+      release();
+    }
   });
 
   // PATCH /orders/:id — move order to a new price
@@ -134,9 +139,14 @@ const ordersRoute: FastifyPluginAsync = async (fastify) => {
       response: { 200: OkResponseSchema, 404: ErrorResponseSchema },
     },
   }, async (req, reply) => {
-    const moved = fastify.engine.moveOrder(req.params.id, req.body.price);
-    if (!moved) return reply.status(404).send({ error: `Order ${req.params.id} not found` });
-    return reply.send({ ok: true });
+    const release = await fastify.engineMutex.acquire();
+    try {
+      const moved = fastify.engine.moveOrder(req.params.id, req.body.price);
+      if (!moved) return reply.status(404).send({ error: `Order ${req.params.id} not found` });
+      return reply.send({ ok: true });
+    } finally {
+      release();
+    }
   });
 
   // DELETE /orders — bulk delete by side (Unit 2): ?side=buy|sell|all
@@ -149,15 +159,20 @@ const ordersRoute: FastifyPluginAsync = async (fastify) => {
       response: { 200: OkResponseSchema, 400: ErrorResponseSchema },
     },
   }, async (req, reply) => {
-    const { side } = req.query as { side: string };
-    switch (side) {
-      case 'buy':  await fastify.engine.deleteBuyOrders();  break;
-      case 'sell': await fastify.engine.deleteSellOrders(); break;
-      case 'all':  await fastify.engine.deleteAllOrders();  break;
-      default:
-        return reply.status(400).send({ error: `Unknown side: ${side}` });
+    const release = await fastify.engineMutex.acquire();
+    try {
+      const { side } = req.query as { side: string };
+      switch (side) {
+        case 'buy':  await fastify.engine.deleteBuyOrders();  break;
+        case 'sell': await fastify.engine.deleteSellOrders(); break;
+        case 'all':  await fastify.engine.deleteAllOrders();  break;
+        default:
+          return reply.status(400).send({ error: `Unknown side: ${side}` });
+      }
+      return reply.send({ ok: true });
+    } finally {
+      release();
     }
-    return reply.send({ ok: true });
   });
 
   // DELETE /orders/:id
@@ -171,9 +186,14 @@ const ordersRoute: FastifyPluginAsync = async (fastify) => {
       },
     },
   }, async (req, reply) => {
-    const deleted = fastify.engine.deleteOrder(req.params.id);
-    if (!deleted) return reply.status(404).send({ error: `Order ${req.params.id} not found` });
-    return reply.send({ ok: true });
+    const release = await fastify.engineMutex.acquire();
+    try {
+      const deleted = fastify.engine.deleteOrder(req.params.id);
+      if (!deleted) return reply.status(404).send({ error: `Order ${req.params.id} not found` });
+      return reply.send({ ok: true });
+    } finally {
+      release();
+    }
   });
 };
 

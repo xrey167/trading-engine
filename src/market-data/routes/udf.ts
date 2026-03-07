@@ -107,7 +107,9 @@ const udfRoute: FastifyPluginAsync = async (fastify) => {
   });
 
   // GET /udf/time — server time as Unix timestamp (seconds)
-  fastify.get('/udf/time', async () => {
+  fastify.get('/udf/time', {
+    schema: { response: { 200: Type.String() } },
+  }, async () => {
     return Math.floor(Date.now() / 1000).toString();
   });
 
