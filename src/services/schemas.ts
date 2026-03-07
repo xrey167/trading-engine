@@ -16,6 +16,7 @@ export const ServiceKindSchema = Type.Union([
   Type.Literal('SCREENER'),
   Type.Literal('ORDER_MANAGER'),
   Type.Literal('RISK_MANAGER'),
+  Type.Literal('EXECUTION_SAGA'),
 ]);
 
 export const ServiceSummarySchema = Type.Object({

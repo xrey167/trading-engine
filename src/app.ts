@@ -17,6 +17,9 @@ import { TypedEventBus } from './shared/event-bus.js';
 import type { AppEventMap } from './shared/services/event-map.js';
 import { ServiceRegistry } from './shared/services/service-registry.js';
 import { BrokerService } from './broker/broker-service.js';
+import { RiskManagerService } from './managers/risk-manager.js';
+import { ExecutionSaga } from './managers/execution-saga.js';
+import { OrderManagerService } from './managers/order-manager.js';
 import rateLimitPlugin from './shared/plugins/rate-limit.js';
 import corsPlugin from './shared/plugins/cors.js';
 import engineModule from './engine/index.js';
@@ -173,6 +176,21 @@ export async function buildApp(
       await eventBridge.start();
     }
   }
+
+  // 1c.4 Manager services (risk → saga → order-manager)
+  const riskManager = new RiskManagerService(
+    { id: 'risk:primary', name: 'risk-primary', maxOpenPositions: 10, maxPositionsPerSymbol: 3, maxDailyLoss: 1000 },
+    emitter,
+    logger,
+  );
+  const executionSaga = new ExecutionSaga('saga:primary', 'execution-saga-primary', riskManager, serviceRegistry, emitter, logger);
+  const orderManager = new OrderManagerService({ id: 'order-mgr:primary', name: 'order-manager-primary' }, executionSaga, emitter, logger);
+  await riskManager.start();
+  await executionSaga.start();
+  await orderManager.start();
+  serviceRegistry.register(riskManager);
+  serviceRegistry.register(executionSaga);
+  serviceRegistry.register(orderManager);
 
   // 1d. Graceful shutdown — bridge first (prevent cross-instance propagation during teardown)
   app.addHook('onClose', async () => {
