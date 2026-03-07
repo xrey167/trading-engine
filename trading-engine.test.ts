@@ -531,15 +531,16 @@ describe('P2 – onBar: SL/TP exit checking', () => {
 // ─────────────────────────────────────────────────────────────
 
 describe('P3 – onBar: break-even raises SL to open price + offset', () => {
-  it('long BE: SL moves to openPrice + beAddPts when bar.high exceeds the trigger', async () => {
+  it('long BE: SL moves to openPrice + beAddPts when bar.close meets the trigger (MQL close-based)', async () => {
     const broker = mockBroker(1.10000);
     const eng = new TradingEngine(EURUSD5, broker);
     await eng.buy();  // fill at 1.10000
     eng.beActivateBuy(true);
     eng.trailBeginBuy(100);  // trigger at openPrice + 100pts = 1.10100
     eng.beBuy(50);           // SL target = openPrice + 50pts = 1.10050
-    // bar.high = 1.10100 (at trigger), bar.low = 1.10060 (above new SL — no exit)
-    const bar = makeSingleCandle(1.10080, 1.10100, 1.10060, 1.10080);
+    // bar.close = 1.10100 (≥ trigger), bar.low = 1.10060 (above new SL — no exit)
+    // MQL uses bar_close (not bar_high) to check the trigger
+    const bar = makeSingleCandle(1.10080, 1.10110, 1.10060, 1.10100);
     await eng.onBar(bar, makeBars(Array(3).fill(1.1008)));
     expect(eng.getSLBuy()).toBeCloseTo(1.10000 + 50 * 0.00001, 5);
     expect(eng.isLong()).toBe(true);
@@ -679,26 +680,27 @@ describe('P6 – evaluateCandleATR03', () => {
 // ─────────────────────────────────────────────────────────────
 
 describe('P7 – checkSLTP: both SL and TP hit on the same bar', () => {
-  it('bullish bar hitting both SL and TP → TP_BOTH (TP assumed first)', () => {
-    // open=1.099, close=1.110 → bullish; high=1.111 >= tp=1.110; low=1.089 <= sl=1.090
+  // MQL rule: Long → SL always wins; Short → TP always wins (conservative worst-case)
+  it('Long position hitting both SL and TP → SL_BOTH (Long: SL always wins per MQL)', () => {
+    // even bullish bar: high=1.111 >= tp=1.110; low=1.089 <= sl=1.090 — SL wins
     const bar = new Bar(1.099, 1.111, 1.089, 1.110, new Date());
     const result = checkSLTP({
       side: Side.Long, bar,
       sl: 1.090, tp: 1.110,
       slActive: true, tpActive: true, trailActive: false, spreadAbs: 0,
     });
-    expect(result?.reason).toBe('TP_BOTH');
+    expect(result?.reason).toBe('SL_BOTH');
   });
 
-  it('bearish bar hitting both SL and TP → SL_BOTH (SL assumed first)', () => {
-    // open=1.102, close=1.095 → bearish; high=1.111 >= tp=1.110; low=1.089 <= sl=1.090
+  it('Short position hitting both SL and TP → TP_BOTH (Short: TP always wins per MQL)', () => {
+    // high=1.111 >= sl=1.110 (short SL above entry); low=1.089 <= tp=1.090 (short TP below entry)
     const bar = new Bar(1.102, 1.111, 1.089, 1.095, new Date());
     const result = checkSLTP({
-      side: Side.Long, bar,
-      sl: 1.090, tp: 1.110,
+      side: Side.Short, bar,
+      sl: 1.110, tp: 1.090,
       slActive: true, tpActive: true, trailActive: false, spreadAbs: 0,
     });
-    expect(result?.reason).toBe('SL_BOTH');
+    expect(result?.reason).toBe('TP_BOTH');
   });
 });
 
@@ -747,17 +749,18 @@ describe('P9 – REV attribute: re-enters same side with original + new size', (
 // ─────────────────────────────────────────────────────────────
 
 describe('P10 – addBracket: SL and TP computed from pending order fill price', () => {
-  it('BUY_LIMIT bracket fills → SL below and TP above fill price', async () => {
+  it('BUY_LIMIT bracket fills → SL below and TP above gap-clamped fill price', async () => {
     const eng = new TradingEngine(EURUSD5, mockBroker());
-    // tpPts=500 → TP=1.0980+0.005=1.1030; bar.high=1.1005 < TP so it stays open
+    // BUY_LIMIT at 1.0980; bar.open=1.1000 > trigger → gap-clamped fill = max(1.0980, 1.1000) = 1.1000
+    // tpPts=500 → TP = 1.1000 + 0.005 = 1.1050; bar.high=1.1005 < TP so position stays open
     eng.addBracket({ entryType: 'BUY_LIMIT', entryPrice: 1.0980, slPts: 100, tpPts: 500 });
     const bar = makeSingleCandle(1.1000, 1.1005, 1.0980, 1.0990);
     await eng.onBar(bar, makeBars(Array(3).fill(1.099)));
     expect(eng.isLong()).toBe(true);
-    // SL = 1.0980 − 100 pts = 1.0970
-    expect(eng.getSLBuy()).toBeCloseTo(1.0980 - 100 * 0.00001, 5);
-    // TP = 1.0980 + 500 pts = 1.1030
-    expect(eng.getTPBuy()).toBeCloseTo(1.0980 + 500 * 0.00001, 5);
+    // SL = fill(1.1000) − 100 pts = 1.0990
+    expect(eng.getSLBuy()).toBeCloseTo(1.1000 - 100 * 0.00001, 5);
+    // TP = fill(1.1000) + 500 pts = 1.1050
+    expect(eng.getTPBuy()).toBeCloseTo(1.1000 + 500 * 0.00001, 5);
   });
 });
 
@@ -1677,5 +1680,86 @@ describe('T3.6 – Bars.lwma & smma', () => {
   it('smma returns 0 for empty bars', () => {
     const empty = new Bars([]);
     expect(empty.smma(5)).toBe(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// Trailing entry orders — side-based polymorphism
+// ─────────────────────────────────────────────────────────────
+
+describe('Trailing entry orders — side-based updateTrailingRef', () => {
+  it('TrailingLimitOrder updateTrailingRef trails HIGH for long (side-based, not type-based)', async () => {
+    const eng = new TradingEngine(EURUSD5, mockBroker());
+    eng.addBuyLimitTrail(TrailMode.Dst, 100);
+    const order = eng.getOrders()[0];
+    const bar = makeSingleCandle(1.0950, 1.1000, 1.0900, 1.0960);
+    await eng.onBar(bar, makeBars([bar.close]));
+    // BUY trailing limit: price = high - 100pts = 1.1000 - 0.00100 = 1.09900
+    expect(order.price).toBeCloseTo(1.09900, 4);
+  });
+
+  it('TrailingStopOrder updateTrailingRef trails LOW for long (side-based, not type-based)', async () => {
+    const eng = new TradingEngine(EURUSD5, mockBroker());
+    eng.addBuyStopTrail(TrailMode.Dst, 100);
+    const order = eng.getOrders()[0];
+    const bar = makeSingleCandle(1.1050, 1.1100, 1.1000, 1.1050);
+    await eng.onBar(bar, makeBars([bar.close]));
+    // BUY trailing stop: trails the low, price = low + 100pts = 1.1000 + 0.00100 = 1.10100
+    expect(order.price).toBeCloseTo(1.10100, 4);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// onTick — tick-driven fills
+// ─────────────────────────────────────────────────────────────
+
+describe('onTick — tick-driven fills', () => {
+  it('throws if called before any onBar (no bar context)', async () => {
+    const eng = new TradingEngine(EURUSD5, mockBroker());
+    await expect(eng.onTick(1.1000, new Date())).rejects.toThrow();
+  });
+
+  it('fills a BUY_LIMIT order when tick price crosses limit', async () => {
+    const eng = new TradingEngine(EURUSD5, mockBroker());
+    const bar = makeSingleCandle(1.1000, 1.1050, 1.0950, 1.1000);
+    const bars = makeBars([1.1000], [1.1050], [1.0950]);
+    await eng.onBar(bar, bars);
+
+    eng.addBuyLimit(1.0980, 1); // fills when price <= 1.0980
+    expect(eng.getOrders()).toHaveLength(1);
+
+    await eng.onTick(1.0975, new Date()); // crosses limit
+
+    expect(eng.getOrders()).toHaveLength(0);
+    expect(eng.getSizeBuy()).toBe(1);
+  });
+
+  it('does NOT fill when tick price does not cross limit', async () => {
+    const eng = new TradingEngine(EURUSD5, mockBroker());
+    const bar = makeSingleCandle(1.1000, 1.1050, 1.0950, 1.1000);
+    const bars = makeBars([1.1000], [1.1050], [1.0950]);
+    await eng.onBar(bar, bars);
+
+    eng.addBuyLimit(1.0960, 1);
+    await eng.onTick(1.1000, new Date()); // price above limit
+
+    expect(eng.getOrders()).toHaveLength(1);
+    expect(eng.getSizeBuy()).toBe(0);
+  });
+
+  it('triggers SL exit on tick for long position', async () => {
+    const broker = mockBroker(1.10000);
+    const eng = new TradingEngine(EURUSD5, broker);
+    const bar = makeSingleCandle(1.1000, 1.1050, 1.0950, 1.1000);
+    const bars = makeBars([1.1000], [1.1050], [1.0950]);
+    await eng.onBar(bar, bars);
+    eng.sl(500); // 500 points = 0.00500 → SL at 1.10000 - 0.00500 = 1.09500
+    await eng.buy(1);
+    eng.slActivateBuy(true);
+    expect(eng.getSLBuy()).toBeCloseTo(1.09500, 5);
+
+    await eng.onTick(1.0940, new Date()); // below SL
+
+    expect(eng.getSizeBuy()).toBe(0);
   });
 });

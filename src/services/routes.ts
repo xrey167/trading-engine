@@ -134,6 +134,10 @@ const serviceRoutes: FastifyPluginAsync = async (fastify) => {
     schema: {
       params: ServiceIdParamsSchema,
       response: {
+        200: Type.Object({
+          action: Type.Union([Type.Literal('BUY'), Type.Literal('SELL'), Type.Literal('HOLD')]),
+        }),
+        400: ErrorResponseSchema,
         404: ErrorResponseSchema,
       },
     },
@@ -166,6 +170,10 @@ const serviceRoutes: FastifyPluginAsync = async (fastify) => {
     schema: {
       params: ServiceIdParamsSchema,
       response: {
+        200: Type.Object({
+          matches: Type.Array(Type.Unknown()),
+        }),
+        400: ErrorResponseSchema,
         404: ErrorResponseSchema,
       },
     },

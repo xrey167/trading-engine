@@ -1658,14 +1658,14 @@ describe('R27 – Cache-Control headers', () => {
     expect(res.headers['cache-control']).toBe('public, max-age=60');
   });
 
-  it('/openapi.yaml has Cache-Control: public, max-age=3600', async () => {
+  it('/openapi.yaml has Cache-Control: no-cache', async () => {
     const res = await app.inject({ method: 'GET', url: '/openapi.yaml' });
-    expect(res.headers['cache-control']).toBe('public, max-age=3600');
+    expect(res.headers['cache-control']).toBe('no-cache');
   });
 
-  it('/docs has Cache-Control: public, max-age=3600', async () => {
+  it('/docs has Cache-Control: no-cache', async () => {
     const res = await app.inject({ method: 'GET', url: '/docs' });
-    expect(res.headers['cache-control']).toBe('public, max-age=3600');
+    expect(res.headers['cache-control']).toBe('no-cache');
   });
 });
 
@@ -1881,5 +1881,22 @@ describe('R30 – WebSocket /stream', () => {
       expect(evt.id).toBeGreaterThan(1);
     }
     ws2.close();
+  });
+});
+
+describe('TickIngestionService wiring', () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    const { buildApp } = await import('./app.js');
+    app = await buildApp({ logger: false });
+  });
+  afterEach(() => app.close());
+
+  it('includes tick-ingestion in /services list', async () => {
+    const res = await app.inject({ method: 'GET', url: '/services' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json<{ id: string }[]>();
+    expect(body.some(s => s.id === 'ingestion:tick')).toBe(true);
   });
 });

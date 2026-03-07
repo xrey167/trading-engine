@@ -1,4 +1,5 @@
 import { Type, type Static } from '@sinclair/typebox';
+import { OrderEntryType } from '../domain/enums.js';
 
 // ─────────────────────────────────────────────────────────────
 // Enum literal unions  (as const maps → TypeBox literals)
@@ -60,22 +61,22 @@ export const LimitConfirmSchema = Type.Union([
 ]);
 
 export const OrderEntryTypeSchema = Type.Union([
-  Type.Literal('BUY_MARKET'),
-  Type.Literal('SELL_MARKET'),
-  Type.Literal('BUY_LIMIT'),
-  Type.Literal('BUY_STOP'),
-  Type.Literal('SELL_LIMIT'),
-  Type.Literal('SELL_STOP'),
-  Type.Literal('BUY_MIT'),
-  Type.Literal('SELL_MIT'),
-  Type.Literal('BUY_STOP_LIMIT'),
-  Type.Literal('SELL_STOP_LIMIT'),
-  Type.Literal('BUY_MTO'),
-  Type.Literal('SELL_MTO'),
-  Type.Literal('BUY_LIMIT_TRAIL'),
-  Type.Literal('BUY_STOP_TRAIL'),
-  Type.Literal('SELL_LIMIT_TRAIL'),
-  Type.Literal('SELL_STOP_TRAIL'),
+  Type.Literal(OrderEntryType.BuyMarket),
+  Type.Literal(OrderEntryType.SellMarket),
+  Type.Literal(OrderEntryType.BuyLimit),
+  Type.Literal(OrderEntryType.BuyStop),
+  Type.Literal(OrderEntryType.SellLimit),
+  Type.Literal(OrderEntryType.SellStop),
+  Type.Literal(OrderEntryType.BuyMIT),
+  Type.Literal(OrderEntryType.SellMIT),
+  Type.Literal(OrderEntryType.BuyStopLimit),
+  Type.Literal(OrderEntryType.SellStopLimit),
+  Type.Literal(OrderEntryType.BuyMTO),
+  Type.Literal(OrderEntryType.SellMTO),
+  Type.Literal(OrderEntryType.BuyLimitTrail),
+  Type.Literal(OrderEntryType.BuyStopTrail),
+  Type.Literal(OrderEntryType.SellLimitTrail),
+  Type.Literal(OrderEntryType.SellStopTrail),
 ]);
 
 // ─────────────────────────────────────────────────────────────

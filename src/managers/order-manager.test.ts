@@ -20,7 +20,7 @@ describe('OrderManagerService', () => {
       { id: 'risk:test', name: 'test-risk', maxOpenPositions: 10, maxPositionsPerSymbol: 5, maxDailyLoss: 1000 },
       bus, nullLogger,
     );
-    const saga = new ExecutionSaga(riskManager, new ServiceRegistry(), bus, nullLogger);
+    const saga = new ExecutionSaga('saga:test', 'Test Saga', riskManager, new ServiceRegistry(), bus, nullLogger);
     const svc = new OrderManagerService({ id: 'order-mgr:test', name: 'test-order-mgr' }, saga, bus, nullLogger);
 
     expect(svc.id).toBe('order-mgr:test');
@@ -45,7 +45,7 @@ describe('OrderManagerService', () => {
     );
     await riskManager.start();
 
-    const saga = new ExecutionSaga(riskManager, registry, bus, nullLogger);
+    const saga = new ExecutionSaga('saga:test', 'Test Saga', riskManager, registry, bus, nullLogger);
     const orderMgr = new OrderManagerService({ id: 'order-mgr:test', name: 'test-order-mgr' }, saga, bus, nullLogger);
     await orderMgr.start();
 
@@ -91,7 +91,7 @@ describe('OrderManagerService', () => {
     );
     await riskManager.start();
 
-    const saga = new ExecutionSaga(riskManager, registry, bus, nullLogger);
+    const saga = new ExecutionSaga('saga:test', 'Test Saga', riskManager, registry, bus, nullLogger);
     const orderMgr = new OrderManagerService({ id: 'order-mgr:test', name: 'test-order-mgr' }, saga, bus, nullLogger);
     await orderMgr.start();
     await orderMgr.stop();

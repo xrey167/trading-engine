@@ -13,13 +13,18 @@ import { InternalProvider } from './market-data/internal-provider.js';
 import { toLogger } from './shared/lib/logger.js';
 import { createRedisClient } from './shared/lib/redis-client.js';
 import { RedisEventBridge } from './shared/lib/redis-event-bridge.js';
-import { createAmqpClient, closeAmqpClient, type AmqpClient } from './shared/lib/amqp-client.js';
+import type { BridgeableEvent } from './shared/lib/redis-event-bridge.js';
+import { createAmqpClient, closeAmqpClient } from './shared/lib/amqp-client.js';
 import { AmqpEventBridge } from './shared/lib/amqp-event-bridge.js';
 import { AuditConsumer } from './audit/audit-consumer.js';
 import { TypedEventBus } from './shared/event-bus.js';
 import type { AppEventMap } from './shared/services/event-map.js';
 import { ServiceRegistry } from './shared/services/service-registry.js';
 import { BrokerService } from './broker/broker-service.js';
+import { RiskManagerService } from './managers/risk-manager.js';
+import { ExecutionSaga } from './managers/execution-saga.js';
+import { OrderManagerService } from './managers/order-manager.js';
+import { TickIngestionService } from './market-data/tick-ingestion-service.js';
 import rateLimitPlugin from './shared/plugins/rate-limit.js';
 import corsPlugin from './shared/plugins/cors.js';
 import engineModule from './engine/index.js';
@@ -167,29 +172,33 @@ export async function buildApp(
   await internalProvider.start();
   serviceRegistry.register(internalProvider);
 
-  // 1c.3 Redis event bridge — cross-instance pub/sub
-  let eventBridge: RedisEventBridge | undefined;
+  // 1c.3 Event bridges — cross-instance pub/sub
+  // When both REDIS_URL and RABBITMQ_URL are set, split events to prevent duplicate delivery:
+  //   AMQP  → order, risk (persistent, durable — reliability matters)
+  //   Redis → signal, normalized_bar (ephemeral, high-frequency — speed matters)
+  // When only one bridge is configured, it handles all events.
+  const ALL_BRIDGE_EVENTS: readonly BridgeableEvent[] = ['signal', 'order', 'risk', 'normalized_bar'];
+  const AMQP_EVENTS: readonly BridgeableEvent[] = ['order', 'risk'];
+  const REDIS_EVENTS: readonly BridgeableEvent[] = ['signal', 'normalized_bar'];
+
+  let redisBridge: RedisEventBridge | undefined;
+  let amqpBridge: AmqpEventBridge | undefined;
+  const amqpClient = await createAmqpClient(logger);
+
   if (redis) {
     const pubClient = createRedisClient(logger, { url: process.env.REDIS_URL, lazyConnect: true });
     const subClient = createRedisClient(logger, { url: process.env.REDIS_URL, lazyConnect: true });
     if (pubClient && subClient) {
-      eventBridge = new RedisEventBridge(emitter, pubClient, subClient, ['signal', 'order', 'normalized_bar'], logger);
-      await eventBridge.start();
+      const redisEvents = amqpClient ? REDIS_EVENTS : ALL_BRIDGE_EVENTS;
+      redisBridge = new RedisEventBridge(emitter, pubClient, subClient, redisEvents, logger);
+      await redisBridge.start();
     }
   }
 
-  // 1e. AMQP — event bridge + audit consumer (conditional on RABBITMQ_URL)
-  let amqpClient: AmqpClient | null = null;
-  let amqpBridge: AmqpEventBridge | undefined;
   let auditConsumer: AuditConsumer | null = null;
-
-  amqpClient = await createAmqpClient(logger);
   if (amqpClient) {
-    amqpBridge = new AmqpEventBridge(
-      emitter, amqpClient.channel,
-      ['signal', 'order', 'risk', 'normalized_bar', 'screener', 'tick'],
-      logger,
-    );
+    const amqpEvents = redisBridge ? AMQP_EVENTS : ALL_BRIDGE_EVENTS;
+    amqpBridge = new AmqpEventBridge(emitter, amqpClient.channel, amqpEvents, logger);
     await amqpBridge.start();
 
     // Dedicated channel for audit consumer — channel failures are isolated per concern
@@ -199,14 +208,40 @@ export async function buildApp(
   }
   app.decorate('auditConsumer', auditConsumer);
 
-  // 1f. Graceful shutdown — bridges first (prevent cross-instance propagation during teardown)
+  // 1c.4 Manager services (risk → saga → order-manager)
+  const riskManager = new RiskManagerService(
+    { id: 'risk:primary', name: 'risk-primary', maxOpenPositions: 10, maxPositionsPerSymbol: 3, maxDailyLoss: 1000 },
+    emitter,
+    logger,
+  );
+  const executionSaga = new ExecutionSaga('saga:primary', 'execution-saga-primary', riskManager, serviceRegistry, emitter, logger);
+  const orderManager = new OrderManagerService({ id: 'order-mgr:primary', name: 'order-manager-primary' }, executionSaga, emitter, logger);
+  await riskManager.start();
+  await executionSaga.start();
+  await orderManager.start();
+  serviceRegistry.register(riskManager);
+  serviceRegistry.register(executionSaga);
+  serviceRegistry.register(orderManager);
+
+  // 1c.5 Tick ingestion (bridges tick events → engine.onTick via mutex)
+  const mutexAdapter = {
+    async runExclusive<T>(fn: () => Promise<T>): Promise<T> {
+      const release = await app.engineMutex.acquire();
+      try { return await fn(); } finally { release(); }
+    },
+  };
+  const tickIngestion = new TickIngestionService(app.engine, mutexAdapter, emitter, logger);
+  await tickIngestion.start();
+  serviceRegistry.register(tickIngestion);
+
+  // 1d. Graceful shutdown — bridges first (prevent cross-instance propagation during teardown)
   app.addHook('onClose', async () => {
-    if (eventBridge) await eventBridge.stop();
+    if (redisBridge) await redisBridge.stop();
     if (amqpBridge) await amqpBridge.stop();
     if (auditConsumer) await auditConsumer.stop();
     await serviceRegistry.stopAll();
-    if (redis) redis.disconnect();
     if (amqpClient) await closeAmqpClient(amqpClient, logger);
+    if (redis) redis.disconnect();
   });
 
   // 4. Global error handler
