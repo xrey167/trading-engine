@@ -1,17 +1,16 @@
 import { describe, it, expect } from 'vitest';
-import { Candle } from '../../../trading-engine.js';
+import { Bar } from '../../../trading-engine.js';
 
 // Unit 1 — Result
 import {
   ok, err, isOk, isErr, mapResult,
-  type Result, type Ok, type Err,
+  type Result, 
 } from './result.js';
 
 // Unit 1 — Errors
 import {
   invalidInput, notFound, businessRule,
   gatewayError, notImplemented, insufficientData,
-  type DomainError,
 } from './errors.js';
 
 // Unit 2 — Domain enums
@@ -27,8 +26,7 @@ import { calculateATR, calculateATRResult } from '../../analysis/atr.js';
 
 // Unit 12 — Factories + Mock Adapters
 import {
-  makeBar, makeAccount, makePosition, makeSymbol, makeDeal,
-  makeOHLC, makeBarsFromArrays,
+  makeBar, makeAccount, makePosition, makeSymbol, makeDeal,makeBarsFromArrays,
 } from '../testing/factories.js';
 import {
   MockBrokerAdapter, MockIndicatorAdapter,
@@ -202,12 +200,12 @@ describe('Domain enums', () => {
 });
 
 // ─────────────────────────────────────────────────────────────
-// Unit 3 — Candle analysis
+// Unit 3 — Bar analysis
 // ─────────────────────────────────────────────────────────────
 
-describe('Candle analysis', () => {
-  const bullish = new Candle(1.1000, 1.1050, 1.0950, 1.1040, new Date());
-  const bearish = new Candle(1.1040, 1.1050, 1.0950, 1.1000, new Date());
+describe('Bar analysis', () => {
+  const bullish = new Bar(1.1000, 1.1050, 1.0950, 1.1040, new Date());
+  const bearish = new Bar(1.1040, 1.1050, 1.0950, 1.1000, new Date());
 
   it('isBullish detects bullish candles', () => {
     expect(bullish.isBullish()).toBe(true);

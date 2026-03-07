@@ -159,6 +159,18 @@ tags:
       The `MoneyManagementConfig` schema encodes the full factory configuration —
       `stopLossType`, `takeProfitType`, and `lotsType` each select a calculation
       strategy, while the corresponding value fields parameterise it.
+  - name: Services
+    description: |
+      Service lifecycle management — list, inspect, start, and stop registered
+      services (brokers, data providers, strategies, etc.).
+
+      Services are typed by `kind` (`BROKER`, `DATA_PROVIDER`, `STRATEGY`,
+      `SCREENER`, `ORDER_MANAGER`, `RISK_MANAGER`) and expose a health check
+      that includes `status`, `lastCheckedAt`, and arbitrary `metadata`.
+
+      All service routes are **read-only or admin** — no `x-api-key` guard is
+      applied (services are internal infrastructure endpoints).
+
   - name: Skills
     description: |
       Agent SDK skills integration — run 56+ AI-powered financial analysis and
@@ -1020,14 +1032,25 @@ paths:
             schema:
               $ref: '#/components/schemas/PostOrderBody'
             examples:
+              buyMarket:
+                summary: Buy at market (immediate)
+                value: { type: "BUY_MARKET", size: 1.0 }
               buyLimit:
-                summary: Simple buy limit
+                summary: Buy limit
                 value: { type: "BUY_LIMIT", price: 1.0800, size: 1.0 }
+              buyStopLimit:
+                summary: Buy stop-limit (stop at 1.0850, limit fill ≤ 1.0845)
+                value: { type: "BUY_STOP_LIMIT", price: 1.0850, limitPrice: 1.0845, size: 1.0 }
+              buyMTO:
+                summary: Buy MTO — Market Trail Order (trailing stop, fills at market)
+                value:
+                  type: BUY_MTO
+                  size: 1.0
+                  trailEntry: { mode: 0, distancePts: 150 }
               buyLimitTrail:
                 summary: Trailing buy limit (ATR mode)
                 value:
                   type: BUY_LIMIT_TRAIL
-                  price: 1.0800
                   size: 1.0
                   trailEntry: { mode: 2, distancePts: 200, periods: 14 }
               bracket:
@@ -1390,10 +1413,22 @@ paths:
         | `trailBeginMultiplier` | ATR multiplier for trail activation threshold | 1.0     |
         | `trailDistMultiplier`  | ATR multiplier for trailing distance          | 0.8     |
         | `onlyWhenFlat`         | Only apply ATR offsets when opening new positions | false |
+        | `barsAtrMode`          | Filter which candles contribute to ATR: `0`=all, `1`=bullish only, `-1`=bearish only | 0 |
+        | `barBase`              | TR formula: `BASE_HILO`=standard (H-L + gaps), `BASE_OPENCLOSE`=body only | BASE_HILO |
+
+        ### Bar Filter Design — Collect N Qualifying Bars
+
+        When `barsAtrMode` is `1` or `-1`, the engine scans further back in history
+        to collect exactly `period` qualifying TRs before averaging. This keeps the
+        result properly normalized: "ATR of the 14 most recent bullish bars" is a
+        clean average of 14 TRs.
+
+        > Zero-padding would understate volatility proportionally to how rarely the
+        > filtered candle type appears — avoided by design.
 
         ### Code Examples
 
-        **curl:**
+        **curl — standard 14-bar ATR:**
         ```bash
         curl -X PUT http://localhost:3000/atr/config \
           -H 'Content-Type: application/json' \
@@ -1405,13 +1440,26 @@ paths:
           }'
         ```
 
-        **JavaScript:**
+        **curl — bullish-only body ATR for long-side sizing:**
+        ```bash
+        curl -X PUT http://localhost:3000/atr/config \
+          -H 'Content-Type: application/json' \
+          -d '{
+            "barsAtrMode": 1,
+            "barBase": "BASE_OPENCLOSE",
+            "slMultiplier": 1.5
+          }'
+        ```
+
+        **JavaScript — asymmetric volatility config:**
         ```javascript
         await fetch('http://localhost:3000/atr/config', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            period: 20, method: 1,  // 20-bar SMA-based ATR
+            period: 20, method: 1,        // 20-bar SMA-based ATR
+            barsAtrMode: 1,               // only bullish bars
+            barBase: 'BASE_OPENCLOSE',    // body range only
             slMultiplier: 2.0, tpMultiplier: 3.0,
           }),
         });
@@ -1434,6 +1482,8 @@ paths:
               trailBeginMultiplier: 1.0
               trailDistMultiplier: 0.8
               onlyWhenFlat: false
+              barsAtrMode: 0
+              barBase: BASE_HILO
       responses:
         '200':
           $ref: '#/components/responses/Ok'
@@ -2752,6 +2802,355 @@ paths:
                 error: "Rate limit exceeded, retry in 60 seconds"
 
 # ─────────────────────────────────────────────────────────────
+# Services
+# ─────────────────────────────────────────────────────────────
+
+  /services:
+    get:
+      tags: [Services]
+      summary: List all registered services
+      operationId: listServices
+      description: |
+        Returns a summary of every service registered in the service registry.
+        Each entry includes the service's `id`, `kind`, `name`, and current
+        lifecycle `status`.
+
+        ### Code Examples
+
+        **curl:**
+        ```bash
+        curl http://localhost:3000/services | jq
+        ```
+      security: []
+      responses:
+        '200':
+          description: Array of service summaries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ServiceSummary'
+              example:
+                - id: "broker:paper:primary"
+                  kind: BROKER
+                  name: paper-primary
+                  status: RUNNING
+                - id: "data:mt5"
+                  kind: DATA_PROVIDER
+                  name: MT5 Data Feed
+                  status: STOPPED
+
+  /services/health:
+    get:
+      tags: [Services]
+      summary: Aggregate health of all services
+      operationId: getServicesHealth
+      description: |
+        Returns a rolled-up health report across all registered services:
+        counters by status (`running`, `stopped`, `error`, `degraded`) plus a
+        per-service status list.
+
+        Use this as a single-call liveness check for the entire service layer.
+
+        ### Code Examples
+
+        **curl:**
+        ```bash
+        curl http://localhost:3000/services/health | jq
+        ```
+      security: []
+      responses:
+        '200':
+          description: Aggregate health report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AggregateHealth'
+              example:
+                total: 2
+                running: 1
+                stopped: 1
+                error: 0
+                degraded: 0
+                services:
+                  - id: "broker:paper:primary"
+                    status: RUNNING
+                    error: null
+                  - id: "data:mt5"
+                    status: STOPPED
+                    error: null
+
+  /services/{id}:
+    get:
+      tags: [Services]
+      summary: Get service detail
+      operationId: getService
+      description: |
+        Returns full detail for a single service including the embedded
+        `health` object with `status`, `lastCheckedAt`, `error`, and
+        arbitrary `metadata` populated by the service implementation.
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Service identifier (as returned by `GET /services`)
+          schema:
+            type: string
+          example: "broker:paper:primary"
+      responses:
+        '200':
+          description: Service detail with health
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceDetail'
+              example:
+                id: "broker:paper:primary"
+                kind: BROKER
+                name: paper-primary
+                health:
+                  status: RUNNING
+                  lastCheckedAt: "2026-03-07T12:00:00.000Z"
+                  error: null
+                  metadata:
+                    connectedSince: "2026-03-07T11:00:00.000Z"
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /services/{id}/start:
+    post:
+      tags: [Services]
+      summary: Start a service
+      operationId: startService
+      description: |
+        Calls `svc.start()` on the named service and returns the updated
+        `ServiceDetail`. If the service is already running the call is a
+        no-op (implementation-defined).
+
+        Returns `500` if `svc.start()` throws.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Service identifier
+          schema:
+            type: string
+          example: "data:mt5"
+      responses:
+        '200':
+          description: Service started — returns updated detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          description: Service start failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "Connection refused: mt5://localhost:18812"
+
+  /services/{id}/stop:
+    post:
+      tags: [Services]
+      summary: Stop a service
+      operationId: stopService
+      description: |
+        Calls `svc.stop()` on the named service and returns the updated
+        `ServiceDetail`. If the service is already stopped the call is a
+        no-op (implementation-defined).
+
+        Returns `500` if `svc.stop()` throws.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Service identifier
+          schema:
+            type: string
+          example: "data:mt5"
+      responses:
+        '200':
+          description: Service stopped — returns updated detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          description: Service stop failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "Timeout waiting for service to drain connections"
+
+  /services/strategies/{id}/evaluate:
+    post:
+      tags: [Services]
+      summary: On-demand strategy evaluation
+      operationId: evaluateStrategy
+      description: |
+        Invokes `svc.evaluate()` on the named strategy service with a minimal
+        context (empty bars, flat position). Returns the signal result
+        (`BUY`, `SELL`, or `HOLD`).
+
+        The strategy must be registered in the service registry with
+        `kind: STRATEGY`. Returns `400` if the service is not a strategy.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Strategy service identifier
+          schema:
+            type: string
+          example: strategy:candle-atr:eurusd-h1
+      responses:
+        '200':
+          description: Strategy evaluation result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  action:
+                    type: string
+                    enum: [BUY, SELL, HOLD]
+              example:
+                action: HOLD
+        '400':
+          description: Service is not a strategy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /services/screeners/{id}/scan:
+    post:
+      tags: [Services]
+      summary: On-demand screener scan
+      operationId: scanScreener
+      description: |
+        Invokes `svc.scan()` on the named screener service and returns all
+        matches. The screener must be registered with `kind: SCREENER`.
+
+        Returns `400` if the service is not a screener.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Screener service identifier
+          schema:
+            type: string
+          example: screener:volume-breakout:majors
+      responses:
+        '200':
+          description: Screener scan results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  matches:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        symbol:
+                          type: string
+                        matchType:
+                          type: string
+                        score:
+                          type: number
+                        metadata:
+                          type: object
+              example:
+                matches:
+                  - symbol: EURUSD
+                    matchType: volume-breakout
+                    score: 0.92
+                    metadata: {}
+        '400':
+          description: Service is not a screener
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /services/risk/validate:
+    post:
+      tags: [Services]
+      summary: On-demand risk validation
+      operationId: validateRisk
+      description: |
+        Validates an order request against the risk manager's current limits
+        (max open positions, max per symbol, max daily loss). Returns whether
+        the order would be approved or rejected, along with the reason.
+
+        Requires at least one `RISK_MANAGER` service to be registered.
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [symbol, direction, lots]
+              properties:
+                symbol:
+                  type: string
+                  example: EURUSD
+                direction:
+                  type: string
+                  enum: [BUY, SELL]
+                lots:
+                  type: number
+                  minimum: 0
+                  example: 1.0
+      responses:
+        '200':
+          description: Risk validation result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  approved:
+                    type: boolean
+                  reason:
+                    type: string
+              example:
+                approved: true
+                reason: All risk checks passed
+        '404':
+          description: No risk manager registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+# ─────────────────────────────────────────────────────────────
 # Components
 # ─────────────────────────────────────────────────────────────
 
@@ -2882,45 +3281,170 @@ components:
         RMA gives more weight to recent values and reacts faster to volatility changes.
         SMA is smoother and less sensitive to spikes.
 
-    LimitConfirm:
+    BarsAtrMode:
       type: integer
-      enum: [0, 1, 2, 3]
+      enum: [0, 1, -1]
       description: |
-        Candle confirmation mode for limit orders. Controls when a limit order
-        is allowed to fill:
+        Controls which candles are included when computing ATR.
 
-        - `0` — **None**: fill immediately when price reaches the level
-        - `1` — **Close**: only fill if the candle closes beyond the level
-        - `2` — **Break**: fill on the next bar after a close beyond the level
-        - `3` — **Retest**: fill only after price retests the level from the other side
+        | Value | Name      | Behaviour |
+        |-------|-----------|-----------|
+        | `0`   | Normal    | All bars contribute (default, standard ATR) |
+        | `1`   | Bullish   | Only bullish bars (close > open) contribute |
+        | `-1`  | Bearish   | Only bearish bars (close < open) contribute |
+
+        **Design note — collect N qualifying bars, not zero-pad:**
+        When a filter is active, the engine scans further back in history to collect
+        exactly `period` qualifying TRs before averaging. This keeps the ATR value
+        properly normalized: "ATR of the 14 most recent bullish bars" is a clean
+        average of 14 TRs. Zero-padding would dilute the average proportionally to
+        how rarely the filtered candle type appears, understating volatility.
+
+        **Use cases:**
+        - `Bullish` ATR for long-side SL sizing — measures only up-move volatility
+        - `Bearish` ATR for short-side SL sizing — measures only down-move volatility
+        - Asymmetric SL/TP when market shows directional volatility bias
+
+    BarBase:
+      type: string
+      enum: [BASE_HILO, BASE_OPENCLOSE]
+      description: |
+        Which price range forms the base of each True Range (TR) measurement.
+
+        | Value             | Formula                          | Use case |
+        |-------------------|----------------------------------|----------|
+        | `BASE_HILO`       | max(H-L, \|H-prevC\|, \|L-prevC\|) | Standard ATR — default, accounts for gaps |
+        | `BASE_OPENCLOSE`  | \|Open - Close\|                   | Body-only ATR — ignores wicks and gaps |
+
+        **When to use `BASE_OPENCLOSE`:**
+        Use body-only ATR when you care about *directional conviction* rather than
+        total candle range. A long-wick doji has a large H-L but a tiny body — in
+        standard ATR it inflates volatility even though no directional move occurred.
+        Body ATR filters that noise: only candles with real open→close displacement
+        contribute meaningful TR.
+
+    LimitConfirm:
+      type: string
+      enum: [LIMIT_CONFIRM_NONE, LIMIT_CONFIRM_WICK, LIMIT_CONFIRM_WICKBREAK, LIMIT_CONFIRM_WICKCOLOR]
+      description: |
+        Candle confirmation mode for limit orders. Controls whether a limit order
+        fills on the bar that triggers it. The order stays pending until the
+        selected condition is satisfied.
+
+        - `LIMIT_CONFIRM_NONE` — fill immediately when price reaches the level (default)
+        - `LIMIT_CONFIRM_WICK` — wick must cross level **and** candle must close back past it
+        - `LIMIT_CONFIRM_WICKBREAK` — wick crosses level **and** entire candle body (both open & close) must be past it
+        - `LIMIT_CONFIRM_WICKCOLOR` — same as `WICK` plus candle must be bullish (buy) / bearish (sell)
+
+    OrderAttr:
+      type: string
+      enum:
+        - ORDER_ATTR_OCO
+        - ORDER_ATTR_CO
+        - ORDER_ATTR_CS
+        - ORDER_ATTR_REV
+        - ORDER_ATTR_NET
+        - ORDER_ATTR_SLTP
+        - ORDER_ATTR_ROL
+        - ORDER_ATTR_ROP
+        - ORDER_ATTR_MIT
+        - ORDER_ATTR_FC
+      description: |
+        Named order attribute flags that modify fill behaviour. Multiple
+        attributes can be combined as an array on a single order.
+
+        | Value | Full Name | Behaviour |
+        |-------|-----------|-----------|
+        | `ORDER_ATTR_OCO` | One Cancels Other | When this order fills, cancel **all** other pending orders |
+        | `ORDER_ATTR_CO` | Cancel Others on Fill | When filled, cancel same-side pending orders |
+        | `ORDER_ATTR_CS` | Cancel on Side | Cancel all orders on the same side when filled |
+        | `ORDER_ATTR_REV` | Reverse | Close current position and open same size on the opposite side |
+        | `ORDER_ATTR_NET` | Net | Reduce the opposite open position by the fill size |
+        | `ORDER_ATTR_SLTP` | Transfer SL/TP | Copy SL/TP levels from the closing position to the new one |
+        | `ORDER_ATTR_ROL` | Reverse On Loss | Reverse position automatically if it is closed at a loss |
+        | `ORDER_ATTR_ROP` | Reverse On Profit | Reverse position automatically if it is closed at a profit |
+        | `ORDER_ATTR_MIT` | Market If Touched | Convert to a market order the moment price touches the level |
+        | `ORDER_ATTR_FC` | Fill or Cancel | Cancel the order immediately if it cannot be filled in full |
+
+    AccountTradeMode:
+      type: string
+      enum: [SINGLE_HEDGE, SINGLE_NOHEDGE, FUTURE, HEDGE]
+      description: |
+        Determines how positions are managed for a symbol on this account.
+
+        - `SINGLE_HEDGE` — one position slot per symbol; the engine can hedge by
+          flipping the slot (close + reopen opposite side)
+        - `SINGLE_NOHEDGE` — netting mode: opening a trade in the opposite direction
+          reduces or closes the existing position (no simultaneous long + short)
+        - `FUTURE` — both sides margined independently, futures-style
+        - `HEDGE` — full hedge mode: independent long and short tickets coexist per
+          symbol (equivalent to MT5 retail hedging accounts)
+
+        Maps to the engine's `hedging` constructor flag:
+        `SINGLE_NOHEDGE` → `hedging: false`; all others → `hedging: true`.
 
     OrderEntryType:
       type: string
       enum:
+        - BUY_MARKET
+        - SELL_MARKET
         - BUY_LIMIT
         - BUY_STOP
         - SELL_LIMIT
         - SELL_STOP
         - BUY_MIT
         - SELL_MIT
+        - BUY_STOP_LIMIT
+        - SELL_STOP_LIMIT
+        - BUY_MTO
+        - SELL_MTO
         - BUY_LIMIT_TRAIL
         - BUY_STOP_TRAIL
         - SELL_LIMIT_TRAIL
         - SELL_STOP_TRAIL
       description: |
-        Order entry type. Standard types:
+        Order entry type.
 
-        | Type           | Side | Trigger                            | Use Case            |
-        |----------------|------|------------------------------------|---------------------|
-        | `BUY_LIMIT`    | Buy  | Price drops to or below level      | Buy the dip         |
-        | `BUY_STOP`     | Buy  | Price rises to or above level      | Breakout long       |
-        | `SELL_LIMIT`   | Sell | Price rises to or above level      | Sell the rally      |
-        | `SELL_STOP`    | Sell | Price drops to or below level      | Breakout short      |
-        | `BUY_MIT`      | Buy  | Price drops to or below level      | Market If Touched   |
-        | `SELL_MIT`     | Sell | Price rises to or above level      | Market If Touched   |
+        **Market (immediate execution):**
 
-        Trailing types (`*_TRAIL`) adjust their entry price dynamically, following
-        the market and entering on a pullback from the extreme.
+        | Type           | Side | Behaviour                                              |
+        |----------------|------|--------------------------------------------------------|
+        | `BUY_MARKET`   | Buy  | Execute at market immediately; no pending order        |
+        | `SELL_MARKET`  | Sell | Execute at market immediately; no pending order        |
+
+        **Standard pending orders** (`price` required):
+
+        | Type              | Side | Trigger                              | Fill       |
+        |-------------------|------|--------------------------------------|------------|
+        | `BUY_LIMIT`       | Buy  | bar.low ≤ price                      | At price   |
+        | `BUY_STOP`        | Buy  | bar.high ≥ price                     | At price   |
+        | `SELL_LIMIT`      | Sell | bar.high ≥ price                     | At price   |
+        | `SELL_STOP`       | Sell | bar.low ≤ price                      | At price   |
+        | `BUY_MIT`         | Buy  | bar.low ≤ price                      | At market  |
+        | `SELL_MIT`        | Sell | bar.high ≥ price                     | At market  |
+
+        **Stop-limit orders** (`price` = stop trigger, `limitPrice` = fill ceiling/floor):
+
+        | Type              | Side | Trigger          | Fill                                         |
+        |-------------------|------|------------------|----------------------------------------------|
+        | `BUY_STOP_LIMIT`  | Buy  | bar.high ≥ price | At market if bar.low ≤ limitPrice, else defer|
+        | `SELL_STOP_LIMIT` | Sell | bar.low ≤ price  | At market if bar.high ≥ limitPrice, else defer|
+
+        **Market Trail Order** (`trailEntry` required — trailing stop, fills at market):
+
+        | Type       | Side | Trail behaviour                                            | Fill      |
+        |------------|------|------------------------------------------------------------|-----------|
+        | `BUY_MTO`  | Buy  | Stop trails below market; triggers when bar.high ≥ stop   | At market |
+        | `SELL_MTO` | Sell | Stop trails above market; triggers when bar.low ≤ stop    | At market |
+
+        **Trailing entry** (`trailEntry` required — limit/stop entry that follows the market):
+
+        | Type               | Side | Trail direction                                       | Fill     |
+        |--------------------|------|-------------------------------------------------------|----------|
+        | `BUY_LIMIT_TRAIL`  | Buy  | Limit anchors to highs; price = high − distance       | At price |
+        | `BUY_STOP_TRAIL`   | Buy  | Stop anchors to lows; price = low + distance          | At price |
+        | `SELL_LIMIT_TRAIL` | Sell | Limit anchors to lows; price = low + distance         | At price |
+        | `SELL_STOP_TRAIL`  | Sell | Stop anchors to highs; price = high − distance        | At price |
 
     OkResponse:
       type: object
@@ -3082,13 +3606,41 @@ components:
 
     PostOrderBody:
       type: object
-      required: [type, price]
+      required: [type]
       description: |
-        Request body for placing a pending order. The `type` and `price` are required;
-        `size` defaults to 1.0. Optional `attributes` and `trailEntry` modify order behaviour.
+        Request body for placing a pending order.
+
+        **Field requirements by type:**
+
+        | Type group           | `price` | `limitPrice` | `trailEntry` |
+        |----------------------|---------|--------------|--------------|
+        | `BUY_MARKET`, `SELL_MARKET` | — | — | — |
+        | Standard (`BUY_LIMIT` etc.) | ✓ | — | — |
+        | `BUY_STOP_LIMIT`, `SELL_STOP_LIMIT` | ✓ (stop) | ✓ (limit fill) | — |
+        | `BUY_MTO`, `SELL_MTO` | — | — | ✓ |
+        | `*_TRAIL` types | — | — | ✓ |
+
+        `size` defaults to 1.0 when omitted.
       properties:
         type:  { $ref: '#/components/schemas/OrderEntryType' }
-        price: { type: number, example: 1.0800, description: "Trigger price for the order" }
+        price:
+          type: number
+          example: 1.0800
+          description: |
+            Trigger price for the order.
+            - **Standard types**: the level at which the order triggers.
+            - **`BUY_STOP_LIMIT` / `SELL_STOP_LIMIT`**: the stop trigger price (not the fill price).
+            - **`BUY_MARKET` / `SELL_MARKET` / `*_TRAIL` / `BUY_MTO` / `SELL_MTO`**: omit (ignored).
+        limitPrice:
+          type: number
+          example: 1.0795
+          description: |
+            **`BUY_STOP_LIMIT` / `SELL_STOP_LIMIT` only.** The limit fill price applied
+            after the stop is triggered.
+            - `BUY_STOP_LIMIT`: must be ≤ `price` (fill ceiling below the stop)
+            - `SELL_STOP_LIMIT`: must be ≥ `price` (fill floor above the stop)
+            If the bar that triggers the stop does not reach `limitPrice`, the order
+            converts to a plain limit at `limitPrice` and waits for subsequent bars.
         size:  { type: number, example: 1.0, description: "Order size in lots (defaults to 1.0)" }
         attributes:
           type: object
@@ -3108,9 +3660,10 @@ components:
           type: object
           required: [mode, distancePts]
           description: |
-            **Required for `*_TRAIL` order types.** Configures how the entry price
-            trails behind the market. The order's trigger price adjusts on each bar,
-            following the price extreme and entering on a pullback.
+            **Required for `*_TRAIL` and `BUY_MTO` / `SELL_MTO` types.** Configures how
+            the entry price trails behind the market. The order's trigger price adjusts
+            on each bar, following the price extreme and entering on a pullback or
+            reversal.
           properties:
             mode:        { $ref: '#/components/schemas/TrailMode' }
             distancePts: { type: number, example: 200, description: "Trailing distance in points" }
@@ -3189,6 +3742,8 @@ components:
         trailBeginMultiplier: { type: number, minimum: 0, example: 1.0, description: "Trail activation threshold = ATR * trailBeginMultiplier" }
         trailDistMultiplier:  { type: number, minimum: 0, example: 0.8, description: "Trail distance = ATR * trailDistMultiplier" }
         onlyWhenFlat:         { type: boolean, description: "Only apply ATR-based offsets when opening new positions (not on existing)" }
+        barsAtrMode:          { $ref: '#/components/schemas/BarsAtrMode' }
+        barBase:              { $ref: '#/components/schemas/BarBase' }
 
     PostScaledOrdersBody:
       type: object
@@ -3435,6 +3990,121 @@ components:
         minLot:    { type: number, example: 0.01, description: "Minimum trade size in lots" }
         maxLot:    { type: number, example: 100, description: "Maximum trade size in lots" }
         lotStep:   { type: number, example: 0.01, description: "Lot size increment step" }
+
+    # ── Services ───────────────────────────────────────────────
+
+    ServiceStatus:
+      type: string
+      enum: [STOPPED, STARTING, RUNNING, DEGRADED, STOPPING, ERROR]
+      description: Current lifecycle state of a service
+      example: RUNNING
+
+    ServiceKind:
+      type: string
+      enum: [BROKER, DATA_PROVIDER, STRATEGY, SCREENER, ORDER_MANAGER, RISK_MANAGER]
+      description: Functional category of the service
+      example: BROKER
+
+    ServiceSummary:
+      type: object
+      required: [id, kind, name, status]
+      description: Lightweight service listing entry
+      properties:
+        id:
+          type: string
+          description: Unique service identifier
+          example: "broker:paper:primary"
+        kind:
+          $ref: '#/components/schemas/ServiceKind'
+        name:
+          type: string
+          description: Human-readable display name
+          example: Paper Broker
+        status:
+          $ref: '#/components/schemas/ServiceStatus'
+
+    ServiceHealth:
+      type: object
+      required: [status, lastCheckedAt, error, metadata]
+      description: Real-time health snapshot for a service instance
+      properties:
+        status:
+          $ref: '#/components/schemas/ServiceStatus'
+        lastCheckedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: ISO-8601 timestamp of the last successful heartbeat, or `null` if never started
+          example: "2026-03-07T12:00:00.000Z"
+        error:
+          type: string
+          nullable: true
+          description: Last error message if `status` is `ERROR`, otherwise `null`
+          example: null
+        metadata:
+          type: object
+          additionalProperties: true
+          description: Arbitrary key/value data provided by the service implementation (e.g. connection stats, queue depths)
+          example:
+            connectedSince: "2026-03-07T11:00:00.000Z"
+
+    ServiceDetail:
+      type: object
+      required: [id, kind, name, health]
+      description: Full service detail including embedded health snapshot
+      properties:
+        id:
+          type: string
+          example: "broker:paper:primary"
+        kind:
+          $ref: '#/components/schemas/ServiceKind'
+        name:
+          type: string
+          example: Paper Broker
+        health:
+          $ref: '#/components/schemas/ServiceHealth'
+
+    AggregateHealth:
+      type: object
+      required: [total, running, stopped, error, degraded, services]
+      description: Rolled-up health counters across all registered services
+      properties:
+        total:
+          type: integer
+          description: Total number of registered services
+          example: 3
+        running:
+          type: integer
+          description: Count of services in RUNNING state
+          example: 2
+        stopped:
+          type: integer
+          description: Count of services in STOPPED state
+          example: 1
+        error:
+          type: integer
+          description: Count of services in ERROR state
+          example: 0
+        degraded:
+          type: integer
+          description: Count of services in DEGRADED state
+          example: 0
+        services:
+          type: array
+          description: Per-service status summary
+          items:
+            type: object
+            required: [id, status, error]
+            properties:
+              id:
+                type: string
+                example: "broker:paper:primary"
+              status:
+                $ref: '#/components/schemas/ServiceStatus'
+              error:
+                type: string
+                nullable: true
+                example: null
 
     # ── Skills (Agent SDK) ─────────────────────────────────────
 

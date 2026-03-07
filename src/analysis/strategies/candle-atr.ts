@@ -29,8 +29,8 @@ export class CandleAtrStrategy implements ISignalStrategy {
     // Need at least 2 bars
     if (bars.length < 2) return SignalResult.HOLD;
 
-    const prevBar = bars.candle(1);
-    const currentBar = bars.candle(0);
+    const prevBar = bars.bar(1);
+    const currentBar = bars.bar(0);
 
     // ATR filter
     const atr = calculateATR(bars, this.config.atrPeriod, 1);

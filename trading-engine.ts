@@ -35,16 +35,45 @@ export type TrailMode = (typeof TrailMode)[keyof typeof TrailMode];
 export const AtrMethod = { Sma: 0, Ema: 1 } as const;
 export type AtrMethod = (typeof AtrMethod)[keyof typeof AtrMethod];
 
+/** Filter which candles contribute to ATR calculation */
+export const BarsAtrMode = {
+  Normal:  0,  // all bars (default)
+  Bullish: 1,  // only bullish bars (close > open)
+  Bearish: -1, // only bearish bars (close < open)
+} as const;
+export type BarsAtrMode = (typeof BarsAtrMode)[keyof typeof BarsAtrMode];
+
+/** Which price range forms the base of each TR measurement */
+export const BarBase = {
+  HiLo:       'BASE_HILO',       // High - Low  (standard True Range, default)
+  OpenClose:  'BASE_OPENCLOSE',  // |Open - Close|  (body range only)
+} as const;
+export type BarBase = (typeof BarBase)[keyof typeof BarBase];
+
+export const OrderAttr = {
+  OCO:  'ORDER_ATTR_OCO',   // One Cancels Other — fill cancels all other pending orders
+  CO:   'ORDER_ATTR_CO',    // Cancel Others on fill — cancel same-side pending orders
+  CS:   'ORDER_ATTR_CS',    // Cancel on Side — cancel all orders on same side when filled
+  REV:  'ORDER_ATTR_REV',   // Reverse — close current position and open opposite of same size
+  NET:  'ORDER_ATTR_NET',   // Net — reduce opposite position by the fill size
+  SLTP: 'ORDER_ATTR_SLTP',  // Transfer SL/TP — copy SL/TP levels to the filled position
+  ROL:  'ORDER_ATTR_ROL',   // Reverse On Loss — reverse position if closed at a loss
+  ROP:  'ORDER_ATTR_ROP',   // Reverse On Profit — reverse position if closed at a profit
+  MIT:  'ORDER_ATTR_MIT',   // Market If Touched — convert to market order when price is touched
+  FC:   'ORDER_ATTR_FC',    // Fill or Cancel — cancel order if not filled immediately
+} as const;
+export type OrderAttr = (typeof OrderAttr)[keyof typeof OrderAttr];
+
 export const LimitConfirm = {
-  None:      0,
-  Wick:      1,  // price must wick back from limit level
-  WickBreak: 2,  // wick + body must break back
-  WickColor: 3,  // wick + confirming candle color
+  None:      'LIMIT_CONFIRM_NONE',
+  Wick:      'LIMIT_CONFIRM_WICK',      // price must wick back from limit level
+  WickBreak: 'LIMIT_CONFIRM_WICKBREAK', // wick + body must break back
+  WickColor: 'LIMIT_CONFIRM_WICKCOLOR', // wick + confirming candle color
 } as const;
 export type LimitConfirm = (typeof LimitConfirm)[keyof typeof LimitConfirm];
 
 // ─────────────────────────────────────────────────────────────
-// OHLC / Candle
+// OHLC / Bar
 // ─────────────────────────────────────────────────────────────
 
 export interface OHLC {
@@ -52,7 +81,7 @@ export interface OHLC {
   time: Date; volume?: number | undefined;
 }
 
-export class Candle implements OHLC {
+export class Bar implements OHLC {
   constructor(
     public open:   number,
     public high:   number,
@@ -122,10 +151,10 @@ export class Bars {
 
   get length(): number { return this.data.length; }
 
-  candle(shift = 0): Candle {
+  bar(shift = 0): Bar {
     const b = this.data[shift];
     if (!b) throw new RangeError(`shift ${shift} out of range (len=${this.data.length})`);
-    return new Candle(b.open, b.high, b.low, b.close, b.time, b.volume);
+    return new Bar(b.open, b.high, b.low, b.close, b.time, b.volume);
   }
 
   high(shift = 0):  number { return this.data[shift].high;  }
@@ -158,11 +187,23 @@ export class Bars {
     return cnt === 0 ? 0 : sum / cnt;
   }
 
-  atr(periods: number, shift = 0, method: AtrMethod = AtrMethod.Sma): number {
+  atr(
+    periods: number,
+    shift = 0,
+    method: AtrMethod = AtrMethod.Sma,
+    barsMode: BarsAtrMode = BarsAtrMode.Normal,
+    barBase: BarBase = BarBase.HiLo,
+  ): number {
     const trs: number[] = [];
-    for (let i = shift; i < shift + periods && i + 1 < this.data.length; i++) {
-      const c = this.data[i], p = this.data[i + 1];
-      trs.push(Math.max(c.high - c.low, Math.abs(c.high - p.close), Math.abs(c.low - p.close)));
+    for (let i = shift; trs.length < periods && i + 1 < this.data.length; i++) {
+      const c = this.data[i];
+      if (barsMode === BarsAtrMode.Bullish && c.close <= c.open) continue;
+      if (barsMode === BarsAtrMode.Bearish && c.close >= c.open) continue;
+      const p = this.data[i + 1];
+      const tr = barBase === BarBase.OpenClose
+        ? Math.abs(c.close - c.open)
+        : Math.max(c.high - c.low, Math.abs(c.high - p.close), Math.abs(c.low - p.close));
+      trs.push(tr);
     }
     if (trs.length === 0) return 0;
     if (method === AtrMethod.Sma) return trs.reduce((a, b) => a + b, 0) / trs.length;
@@ -219,7 +260,7 @@ export class SymbolInfo {
   readonly pointSize: number;
 
   constructor(public readonly name: string, public readonly digits: number) {
-    this.pointSize = Math.pow(10, -digits);
+    this.pointSize = 10 ** -digits;
   }
 
   priceToPoints(price: number): number  { return price / this.pointSize; }
@@ -248,7 +289,7 @@ export interface TrailState {
  */
 export function calcTrailingSL(p: {
   side:          Side;
-  bar:           Candle;
+  bar:           Bar;
   bars:          Bars;
   posPrice:      number;
   currentSL:     number;   // -1 = not yet set
@@ -325,7 +366,7 @@ export interface HitResult {
 
 export function checkSLTP(p: {
   side:        Side;
-  bar:         Candle;
+  bar:         Bar;
   sl:          number;      // -1 = disabled
   tp:          number;      // -1 = disabled
   slActive:    boolean;
@@ -540,7 +581,7 @@ export class TradingEngine {
    * Call this on every new closed bar.
    * Sequence: fill pending orders → update trailing stops → check SL/TP exits.
    */
-  async onBar(bar: Candle, bars: Bars): Promise<void> {
+  async onBar(bar: Bar, bars: Bars): Promise<void> {
     this._spreadAbs = await this.broker.getSpread(this.symbol.name);
 
     await this._updateTrailingEntryOrders(bar, bars);
@@ -674,7 +715,7 @@ export class TradingEngine {
    */
   addBuyStopLimit(stopPrice: number, limitPrice: number, size?: number): string {
     const id = this._addOrder('BUY_STOP_LIMIT', Side.Long, stopPrice, size);
-    const o  = this._findOrder(id)!;
+    const o  = this._getOrder(id);
     o.attributes.limitPrice = limitPrice;
     return id;
   }
@@ -685,7 +726,7 @@ export class TradingEngine {
    */
   addSellStopLimit(stopPrice: number, limitPrice: number, size?: number): string {
     const id = this._addOrder('SELL_STOP_LIMIT', Side.Short, stopPrice, size);
-    const o  = this._findOrder(id)!;
+    const o  = this._getOrder(id);
     o.attributes.limitPrice = limitPrice;
     return id;
   }
@@ -702,7 +743,7 @@ export class TradingEngine {
    */
   addBuyMTO(mode: TrailMode, distancePts: number, periods = 0): string {
     const id = this._addOrder('BUY_MTO', Side.Long, Infinity, undefined);
-    const o  = this._findOrder(id)!;
+    const o  = this._getOrder(id);
     o.attributes.trailEntry = { mode, distPts: distancePts, periods };
     o._trailRef = Infinity;
     return id;
@@ -716,7 +757,7 @@ export class TradingEngine {
    */
   addSellMTO(mode: TrailMode, distancePts: number, periods = 0): string {
     const id = this._addOrder('SELL_MTO', Side.Short, -Infinity, undefined);
-    const o  = this._findOrder(id)!;
+    const o  = this._getOrder(id);
     o.attributes.trailEntry = { mode, distPts: distancePts, periods };
     o._trailRef = -Infinity;
     return id;
@@ -729,7 +770,7 @@ export class TradingEngine {
    */
   addBuyLimitTrail(mode: TrailMode, distancePts: number, periods = 0): string {
     const id = this._addOrder('BUY_LIMIT', Side.Long, 0, undefined);
-    const o = this._findOrder(id)!;
+    const o = this._getOrder(id);
     o.attributes.trailEntry = { mode, distPts: distancePts, periods };
     o._trailRef = -Infinity;
     return id;
@@ -737,7 +778,7 @@ export class TradingEngine {
 
   addSellLimitTrail(mode: TrailMode, distancePts: number, periods = 0): string {
     const id = this._addOrder('SELL_LIMIT', Side.Short, 0, undefined);
-    const o = this._findOrder(id)!;
+    const o = this._getOrder(id);
     o.attributes.trailEntry = { mode, distPts: distancePts, periods };
     o._trailRef = Infinity;
     return id;
@@ -746,7 +787,7 @@ export class TradingEngine {
   /** Trailing buy-stop — stop price trails above the market. */
   addBuyStopTrail(mode: TrailMode, distancePts: number, periods = 0): string {
     const id = this._addOrder('BUY_STOP', Side.Long, Infinity, undefined);
-    const o = this._findOrder(id)!;
+    const o = this._getOrder(id);
     o.attributes.trailEntry = { mode, distPts: distancePts, periods };
     o._trailRef = Infinity;
     return id;
@@ -754,7 +795,7 @@ export class TradingEngine {
 
   addSellStopTrail(mode: TrailMode, distancePts: number, periods = 0): string {
     const id = this._addOrder('SELL_STOP', Side.Short, 0, undefined);
-    const o = this._findOrder(id)!;
+    const o = this._getOrder(id);
     o.attributes.trailEntry = { mode, distPts: distancePts, periods };
     o._trailRef = -Infinity;
     return id;
@@ -773,7 +814,7 @@ export class TradingEngine {
   }): string {
     const side = opts.entryType.startsWith('BUY') ? Side.Long : Side.Short;
     const id = this._addOrder(opts.entryType, side, opts.entryPrice, opts.size);
-    const o  = this._findOrder(id)!;
+    const o  = this._getOrder(id);
     o.attributes.bracketSL = opts.slPts;
     o.attributes.bracketTP = opts.tpPts;
     return id;
@@ -1001,8 +1042,15 @@ export class TradingEngine {
     return this.orders.find(o => o.id === id);
   }
 
+  /** Like _findOrder but throws if not found — used right after _addOrder where existence is guaranteed. */
+  private _getOrder(id: string): PendingOrder {
+    const o = this._findOrder(id);
+    if (!o) throw new Error(`Order ${id} not found immediately after creation`);
+    return o;
+  }
+
   /** Per-bar: update trailing-entry order prices */
-  private async _updateTrailingEntryOrders(bar: Candle, bars: Bars): Promise<void> {
+  private async _updateTrailingEntryOrders(bar: Bar, _bars: Bars): Promise<void> {
     for (const o of this.orders) {
       // Limit-pullback: trailing pending limit that follows the market
       if (o.attributes.pullbackPts != null) {
@@ -1056,7 +1104,7 @@ export class TradingEngine {
   }
 
   /** Per-bar: check which pending orders were triggered */
-  private async _checkOrderFills(bar: Candle, bars: Bars): Promise<void> {
+  private async _checkOrderFills(bar: Bar, bars: Bars): Promise<void> {
     const toFill: PendingOrder[] = [];
 
     for (const o of this.orders) {
@@ -1085,7 +1133,7 @@ export class TradingEngine {
     }
   }
 
-  private async _fillOrder(o: PendingOrder, bar: Candle, bars: Bars): Promise<void> {
+  private async _fillOrder(o: PendingOrder, bar: Bar, _bars: Bars): Promise<void> {
     const attrs = o.attributes;
 
     // Limit-confirm check (require wick / color confirmation)
@@ -1158,7 +1206,7 @@ export class TradingEngine {
   }
 
   /** Check limit-confirmation candle logic */
-  private _checkLimitConfirm(o: PendingOrder, bar: Candle, confirm: LimitConfirm): boolean {
+  private _checkLimitConfirm(o: PendingOrder, bar: Bar, confirm: LimitConfirm): boolean {
     switch (confirm) {
       case LimitConfirm.Wick:
         // Price must have wicked through the limit but closed on the other side
@@ -1183,7 +1231,7 @@ export class TradingEngine {
   // Private — per-slot updates
   // ──────────────────────────────────────────────────────────
 
-  private async _updateTrailingSL(slot: PositionSlot, bar: Candle, bars: Bars): Promise<void> {
+  private async _updateTrailingSL(slot: PositionSlot, bar: Bar, bars: Bars): Promise<void> {
     if (slot.trailCfg.mode === TrailMode.None) return;
     const newSL = calcTrailingSL({
       side:          slot.side,
@@ -1203,7 +1251,7 @@ export class TradingEngine {
     }
   }
 
-  private async _updateBreakEven(slot: PositionSlot, bar: Candle): Promise<void> {
+  private async _updateBreakEven(slot: PositionSlot, bar: Bar): Promise<void> {
     if (!slot.beActive || slot.openPrice < 0) return;
     const triggerDist = this.symbol.pointsToPrice(slot.trailBeginPts);
     const beDist      = this.symbol.pointsToPrice(slot.beAddPts);
@@ -1219,7 +1267,7 @@ export class TradingEngine {
     }
   }
 
-  private async _checkExits(slot: PositionSlot, bar: Candle): Promise<void> {
+  private async _checkExits(slot: PositionSlot, bar: Bar): Promise<void> {
     const hit = checkSLTP({
       side:        slot.side,
       bar,
@@ -1330,7 +1378,7 @@ export class TradingEngine {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Strategy: CandleATR_03  (port of CandleATR_03.mq5)
+// Strategy: BarATR_03  (port of CandleATR_03.mq5)
 // ─────────────────────────────────────────────────────────────
 
 /**
@@ -1347,7 +1395,7 @@ export async function evaluateCandleATR03(
   engine: TradingEngine,
   symbol: SymbolInfo,
 ): Promise<void> {
-  const prev  = bars.candle(1);
+  const prev  = bars.bar(1);
   const atr14 = bars.atr(14, 1);
 
   if (prev.range() < atr14 * 2.0) return;
@@ -1402,6 +1450,17 @@ export interface AtrModuleConfig {
    * When false: update every bar regardless.
    */
   onlyWhenFlat: boolean;
+  /**
+   * Filter which bar types contribute to ATR calculation.
+   * Normal = all bars, Bullish = only up-bars, Bearish = only down-bars.
+   */
+  barsAtrMode: BarsAtrMode;
+  /**
+   * Which price range forms each TR measurement.
+   * HiLo = standard True Range (High-Low + prev-close gaps).
+   * OpenClose = body range only (|Open - Close|).
+   */
+  barBase: BarBase;
 }
 
 /**
@@ -1418,7 +1477,7 @@ export class AtrModule {
   ) {}
 
   onBar(bars: Bars): void {
-    const atrPrice = bars.atr(this.cfg.period, this.cfg.shift, this.cfg.method);
+    const atrPrice = bars.atr(this.cfg.period, this.cfg.shift, this.cfg.method, this.cfg.barsAtrMode, this.cfg.barBase);
     if (atrPrice === 0) return;
     const atrPts = this.symbol.priceToPoints(atrPrice);
 
@@ -1501,7 +1560,7 @@ function parseAtrMode(mode: AtrModeString): { period: number; daily: boolean } |
   if (mode === 'None') return null;
   const m = mode.match(/^ATR\s+(\d+)(d?)$/);
   if (!m) return null;
-  return { period: parseInt(m[1]), daily: m[2] === 'd' };
+  return { period: parseInt(m[1], 10), daily: m[2] === 'd' };
 }
 
 /**
@@ -1747,7 +1806,7 @@ engine.addBuyLimit(0);          // price set dynamically each bar
 // 6. On each bar
 async function onBar(allBars: OHLC[]) {
   const bars = new Bars(allBars);
-  await engine.onBar(bars.candle(0), bars);
+  await engine.onBar(bars.bar(0), bars);
   await evaluateCandleATR03(bars, engine, symbol);
 }
 */

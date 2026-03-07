@@ -1,5 +1,5 @@
 import { Type, type Static } from '@sinclair/typebox';
-import { AtrMethodSchema } from '../shared/schemas/common.js';
+import { AtrMethodSchema, BarsAtrModeSchema, BarBaseSchema } from '../shared/schemas/common.js';
 
 export const PutEngineConfigBodySchema = Type.Object({
   removeOrdersOnFlat: Type.Optional(Type.Boolean()),
@@ -15,5 +15,7 @@ export const PutAtrConfigBodySchema = Type.Object({
   trailBeginMultiplier: Type.Optional(Type.Number({ minimum: 0 })),
   trailDistMultiplier:  Type.Optional(Type.Number({ minimum: 0 })),
   onlyWhenFlat:         Type.Optional(Type.Boolean()),
+  barsAtrMode:          Type.Optional(BarsAtrModeSchema),
+  barBase:              Type.Optional(BarBaseSchema),
 });
 export type PutAtrConfigBody = Static<typeof PutAtrConfigBodySchema>;

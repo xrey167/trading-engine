@@ -1,6 +1,6 @@
 import fp from 'fastify-plugin';
 import type { FastifyPluginAsync } from 'fastify';
-import { AtrModule, AtrMethod, type AtrModuleConfig } from '../../trading-engine.js';
+import { AtrModule, AtrMethod, BarsAtrMode, BarBase, type AtrModuleConfig } from '../../trading-engine.js';
 
 /**
  * AtrModule plugin — decorates fastify.atrModule with a live AtrModule instance.
@@ -22,6 +22,8 @@ const atrPlugin: FastifyPluginAsync = fp(async (fastify) => {
     trailBeginMultiplier: 0,
     trailDistMultiplier:  0,
     onlyWhenFlat:         true,
+    barsAtrMode:          BarsAtrMode.Normal,
+    barBase:              BarBase.HiLo,
   };
 
   const atrModule = new AtrModule(cfg, fastify.engine, fastify.symbol);

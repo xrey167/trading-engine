@@ -4,7 +4,7 @@ import { FormatRegistry } from '@sinclair/typebox';
 
 // Register date-time format so Value.Check validates format: 'date-time' strings
 if (!FormatRegistry.Has('date-time')) {
-  FormatRegistry.Set('date-time', (v) => !isNaN(Date.parse(v)));
+  FormatRegistry.Set('date-time', (v) => !Number.isNaN(Date.parse(v)));
 }
 
 import {
@@ -154,7 +154,7 @@ describe('AccountInfoVOSchema', () => {
   it('validates a valid account object', () => {
     const valid = {
       login: 123,
-      tradeMode: 0,
+      tradeMode: 'HEDGE',
       leverage: 100,
       marginMode: 0,
       stopOutMode: 0,
@@ -185,7 +185,7 @@ describe('AccountInfoVOSchema', () => {
   it('rejects invalid tradeMode', () => {
     const invalid = {
       login: 1,
-      tradeMode: 99,
+      tradeMode: 'INVALID_MODE',
       leverage: 100,
       marginMode: 0,
       stopOutMode: 0,

@@ -55,6 +55,8 @@ const engineRoutes: FastifyPluginAsync = async (fastify) => {
       if (b.trailBeginMultiplier !== undefined) cfg.trailBeginMultiplier = b.trailBeginMultiplier;
       if (b.trailDistMultiplier  !== undefined) cfg.trailDistMultiplier  = b.trailDistMultiplier;
       if (b.onlyWhenFlat         !== undefined) cfg.onlyWhenFlat         = b.onlyWhenFlat;
+      if (b.barsAtrMode          !== undefined) cfg.barsAtrMode          = b.barsAtrMode;
+      if (b.barBase              !== undefined) cfg.barBase              = b.barBase;
       return reply.send({ ok: true });
     } finally {
       release();

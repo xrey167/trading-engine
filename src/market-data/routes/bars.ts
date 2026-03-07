@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { Candle, Bars } from '../../../trading-engine.js';
+import { Bar, Bars } from '../../../trading-engine.js';
 import { OkResponseSchema } from '../../shared/schemas/common.js';
 import {
   PostBarsBodySchema,
@@ -20,7 +20,7 @@ const barsRoute: FastifyPluginAsync = async (fastify) => {
     const { engine, emitter, broker } = fastify;
     const b = req.body.bar;
 
-    const bar = new Candle(b.open, b.high, b.low, b.close, new Date(b.time), b.volume);
+    const bar = new Bar(b.open, b.high, b.low, b.close, new Date(b.time), b.volume);
     const bars = new Bars(req.body.bars.map(raw => ({
       open:   raw.open,
       high:   raw.high,

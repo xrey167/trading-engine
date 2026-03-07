@@ -8,7 +8,7 @@ import { makeOHLC, makeBars } from '../../shared/testing/factories.js';
 
 const flatState: IPositionState = { isFlat: () => true, longCount: () => 0, shortCount: () => 0 };
 const longState: IPositionState = { isFlat: () => false, longCount: () => 1, shortCount: () => 0 };
-const shortState: IPositionState = { isFlat: () => false, longCount: () => 0, shortCount: () => 1 };
+const _shortState: IPositionState = { isFlat: () => false, longCount: () => 0, shortCount: () => 1 };
 
 describe('CandleAtrStrategy', () => {
   it('returns HOLD when insufficient bars', async () => {
