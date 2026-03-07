@@ -1682,3 +1682,29 @@ describe('T3.6 – Bars.lwma & smma', () => {
     expect(empty.smma(5)).toBe(0);
   });
 });
+
+// ─────────────────────────────────────────────────────────────
+// Trailing entry orders — side-based polymorphism
+// ─────────────────────────────────────────────────────────────
+
+describe('Trailing entry orders — side-based updateTrailingRef', () => {
+  it('TrailingLimitOrder updateTrailingRef trails HIGH for long (side-based, not type-based)', async () => {
+    const eng = new TradingEngine(EURUSD5, mockBroker());
+    eng.addBuyLimitTrail(TrailMode.Dst, 10);
+    const order = eng.orders[0];
+    const bar = makeSingleCandle(1.0950, 1.1000, 1.0900, 1.0960);
+    await eng.onBar(bar, makeBars([bar.close]));
+    // BUY trailing limit: price = high - 10pts = 1.1000 - 0.0010 = 1.0990
+    expect(order.price).toBeCloseTo(1.0990, 4);
+  });
+
+  it('TrailingStopOrder updateTrailingRef trails LOW for long (side-based, not type-based)', async () => {
+    const eng = new TradingEngine(EURUSD5, mockBroker());
+    eng.addBuyStopTrail(TrailMode.Dst, 10);
+    const order = eng.orders[0];
+    const bar = makeSingleCandle(1.1050, 1.1100, 1.1000, 1.1050);
+    await eng.onBar(bar, makeBars([bar.close]));
+    // BUY trailing stop: trails the low, price = low + 10pts = 1.1000 + 0.0010 = 1.1010
+    expect(order.price).toBeCloseTo(1.1010, 4);
+  });
+});

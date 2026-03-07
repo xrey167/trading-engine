@@ -5,8 +5,7 @@
 //
 // Usage:
 //   BrokerRegistry.register('paper', () => new PaperBroker(emitter));
-//   BrokerRegistry.register('mt5',   (url) => new MT5AccountGateway(url));
-//   const broker = BrokerRegistry.resolve<IAccountGateway>('mt5', bridgeUrl);
+//   const broker = BrokerAdapterFactory.create<IAccountGateway>('paper');
 
 import type { IFullBrokerAdapter } from './types.js';
 import type { Result } from '../shared/lib/result.js';
@@ -57,7 +56,7 @@ export const BrokerAdapterFactory = {
 /**
  * Instance registry: holds already-constructed adapter instances keyed by name.
  * Use this at runtime when adapters are long-lived singletons (e.g. the paper
- * broker and MT5 gateway wired up at startup).
+ * broker wired up at startup).
  *
  * For creating fresh instances on demand, use `BrokerAdapterFactory`.
  */
@@ -65,7 +64,7 @@ export class BrokerRegistry {
   private readonly adapters = new Map<string, IFullBrokerAdapter>();
 
   /**
-   * Register a live adapter instance under a logical name (e.g. 'paper', 'mt5').
+   * Register a live adapter instance under a logical name (e.g. 'paper').
    */
   register(name: string, adapter: IFullBrokerAdapter): void {
     this.adapters.set(name, adapter);
