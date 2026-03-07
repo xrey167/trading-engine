@@ -45,9 +45,20 @@ info:
     - **Lots**: standard FX lots (1.0 = 100 000 units)
 
     ## Authentication
-    Optional API-key guard on OpenBB routes only.
-    Set `OPENBB_API_KEY` env var and pass `?apiKey=<value>` on OpenBB endpoints.
-    Uses timing-safe comparison to prevent timing attacks.
+
+    **Write routes** (`POST /bars`, all position/order mutations, engine/ATR config,
+    `/skills/*`) require an `x-api-key` header when the `API_KEY` environment
+    variable is set on the server. When `API_KEY` is not set, the guard is a
+    no-op — useful for local development and tests.
+
+    **OpenBB routes** (`/openbb/*`) use a separate `?apiKey=<value>` query
+    parameter tied to `OPENBB_API_KEY`. The two API keys are independent.
+
+    **Read-only routes** (`GET /positions`, `GET /orders`, `GET /account`,
+    `/v1/*`, `/udf/*`, `/skills` list, signal/backtest) require no key.
+
+    Timing-safe comparison (`crypto.timingSafeEqual`) is used on both guards
+    to prevent timing-based key enumeration.
 
 servers:
   - url: http://localhost:3000
@@ -111,6 +122,22 @@ tags:
 
       Currently backed by `PaperBroker` — user is hardcoded to `default`.
       Replace with real auth (JWT/session) before production use.
+  - name: UDF
+    description: |
+      TradingView Universal Data Feed (UDF) endpoints. These implement the UDF
+      protocol so any TradingView charting widget can consume OHLCV data from
+      this server without an additional adapter.
+
+      **Setup:** Point the charting library's `datafeed` URL at
+      `http://localhost:3000` — it will call `/udf/config` on startup,
+      resolve symbols via `/udf/symbols`, and fetch bars via `/udf/history`.
+
+      **Data source:** `/udf/history` reads bars stored by `PaperBroker`
+      (`broker.getBars(symbol, timeframe)`). Only bars pushed via `POST /bars`
+      are available, so seed the engine first.
+
+      **Supported resolutions:** `1`, `5`, `15`, `30`, `60`, `240`, `1D`, `1W`, `1M`
+      (mapped to MT5 timeframe strings M1 … MN1 internally).
   - name: OpenBB
     description: |
       OpenBB Workspace integration endpoints. These follow the OpenBB backend
@@ -123,6 +150,15 @@ tags:
       3. The trading dashboard will appear with live position/order grids
 
       Optionally protect with an API key via `OPENBB_API_KEY` env var.
+  - name: Money Management
+    description: |
+      Money-management configuration validation. These endpoints let you verify
+      that a SL/TP/lot-sizing configuration is structurally valid before deploying
+      it in a live strategy.
+
+      The `MoneyManagementConfig` schema encodes the full factory configuration —
+      `stopLossType`, `takeProfitType`, and `lotsType` each select a calculation
+      strategy, while the corresponding value fields parameterise it.
   - name: Skills
     description: |
       Agent SDK skills integration — run 56+ AI-powered financial analysis and
@@ -223,6 +259,8 @@ paths:
         });
         ```
       operationId: postBars
+      security:
+        - ApiKeyHeader: []
       requestBody:
         required: true
         content:
@@ -235,6 +273,13 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/Ok'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          description: Rate limit exceeded (120 requests/second). Retry after the `Retry-After` header value.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
 
   /account:
     get:
@@ -305,6 +350,8 @@ paths:
         });
         ```
       operationId: putEngineConfig
+      security:
+        - ApiKeyHeader: []
       requestBody:
         required: true
         content:
@@ -315,6 +362,8 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/Ok'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   /stream:
     get:
@@ -374,6 +423,55 @@ paths:
         npx wscat -c ws://localhost:3000/stream
         ```
       operationId: getStream
+      parameters:
+        - name: v
+          in: query
+          description: |
+            Protocol version. `2` (default) wraps every message in a
+            `{ id, type, payload }` envelope for replay support.
+            `1` sends raw payloads without an envelope (legacy compatibility).
+          schema:
+            type: integer
+            enum: [1, 2]
+            default: 2
+        - name: lastEventId
+          in: query
+          description: |
+            Resume from a missed event. The server replays all buffered
+            events with `id > lastEventId` (up to the last 50 events).
+            Alternatively, pass the same value as the `Last-Event-ID`
+            request header.
+          schema:
+            type: integer
+      responses:
+        '101':
+          description: |
+            **WebSocket upgrade successful.**
+
+            After the upgrade the server pushes JSON messages.
+            All messages follow the **v2 envelope** format unless `?v=1`
+            is requested:
+
+            ```json
+            { "id": 42, "type": "<event>", "payload": { … } }
+            ```
+
+            | `type`      | Trigger | `payload` shape |
+            |-------------|---------|-----------------|
+            | `connected` | Immediately on connect | `{ "protocol": 2 }` |
+            | `bar`       | Each `POST /bars` call | OHLCV bar object (open, high, low, close, volume, time) |
+            | `fill`      | Order entry fill | `{ ticket, side, price, size, time }` |
+            | `close`     | Position close | `{ ticket, side, openPrice, closePrice, profit, time }` |
+            | `dropped`   | Per-client queue overflow (> 100 messages) | `{ "count": N }` |
+
+            **Heartbeat:** the server sends a WebSocket `ping` frame every
+            30 s. Clients that do not respond with `pong` are terminated.
+
+            **Flush interval:** messages are batched and flushed every 50 ms.
+
+            **Replay buffer:** the last 50 events are buffered server-side.
+            Pass `?lastEventId=<id>` (or `Last-Event-ID` header) to
+            receive missed events after a reconnect.
 
   # ─────────────────────────────────────────────────────────────
   # Positions (engine-level slots)
@@ -473,6 +571,8 @@ paths:
         });
         ```
       operationId: postPositionsLong
+      security:
+        - ApiKeyHeader: []
       requestBody:
         required: true
         content:
@@ -485,6 +585,8 @@ paths:
           $ref: '#/components/responses/Ok'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   /positions/short:
     post:
@@ -512,6 +614,8 @@ paths:
           -d '{"size": 1.0}'
         ```
       operationId: postPositionsShort
+      security:
+        - ApiKeyHeader: []
       requestBody:
         required: true
         content:
@@ -524,6 +628,8 @@ paths:
           $ref: '#/components/responses/Ok'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   /positions/hedge:
     post:
@@ -544,9 +650,13 @@ paths:
         curl -X POST http://localhost:3000/positions/hedge
         ```
       operationId: postPositionsHedge
+      security:
+        - ApiKeyHeader: []
       responses:
         '200':
           $ref: '#/components/responses/Ok'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   /positions/long/flat:
     post:
@@ -570,9 +680,13 @@ paths:
         curl -X POST http://localhost:3000/positions/long/flat
         ```
       operationId: postPositionsLongFlat
+      security:
+        - ApiKeyHeader: []
       responses:
         '200':
           $ref: '#/components/responses/Ok'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   /positions/short/flat:
     post:
@@ -591,9 +705,13 @@ paths:
         curl -X POST http://localhost:3000/positions/short/flat
         ```
       operationId: postPositionsShortFlat
+      security:
+        - ApiKeyHeader: []
       responses:
         '200':
           $ref: '#/components/responses/Ok'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   /positions/flat:
     post:
@@ -620,9 +738,13 @@ paths:
         await fetch('http://localhost:3000/positions/flat', { method: 'POST' });
         ```
       operationId: postPositionsFlat
+      security:
+        - ApiKeyHeader: []
       responses:
         '200':
           $ref: '#/components/responses/Ok'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   /positions/{side}:
     delete:
@@ -649,6 +771,8 @@ paths:
         curl -X DELETE http://localhost:3000/positions/all
         ```
       operationId: deletePosition
+      security:
+        - ApiKeyHeader: []
       parameters:
         - name: side
           in: path
@@ -662,6 +786,8 @@ paths:
           $ref: '#/components/responses/Ok'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   /positions/{side}/sl-tp:
     put:
@@ -731,6 +857,8 @@ paths:
         });
         ```
       operationId: putPositionSlTp
+      security:
+        - ApiKeyHeader: []
       parameters:
         - name: side
           in: path
@@ -755,6 +883,8 @@ paths:
           $ref: '#/components/responses/Ok'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   # ─────────────────────────────────────────────────────────────
   # Orders
@@ -881,6 +1011,8 @@ paths:
         console.log(`Buy order: ${buy.id}, Sell order: ${sell.id}`);
         ```
       operationId: postOrder
+      security:
+        - ApiKeyHeader: []
       requestBody:
         required: true
         content:
@@ -916,6 +1048,13 @@ paths:
                   id: { type: string, example: "ord_abc123", description: "Unique order identifier used for PATCH/DELETE operations" }
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          description: Rate limit exceeded (10 requests/second). Retry after the `Retry-After` header value.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
 
     delete:
       tags: [Orders]
@@ -940,6 +1079,8 @@ paths:
         curl -X DELETE 'http://localhost:3000/orders?side=all'
         ```
       operationId: deleteOrders
+      security:
+        - ApiKeyHeader: []
       parameters:
         - name: side
           in: query
@@ -953,6 +1094,8 @@ paths:
           $ref: '#/components/responses/Ok'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   /orders/bracket:
     post:
@@ -1003,6 +1146,8 @@ paths:
         }).then(r => r.json());
         ```
       operationId: postBracketOrder
+      security:
+        - ApiKeyHeader: []
       requestBody:
         required: true
         content:
@@ -1026,6 +1171,8 @@ paths:
                   id: { type: string, description: "Entry order ID" }
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   /orders/{id}:
     patch:
@@ -1050,6 +1197,8 @@ paths:
           -d '{"price": 1.0810}'
         ```
       operationId: patchOrder
+      security:
+        - ApiKeyHeader: []
       parameters:
         - name: id
           in: path
@@ -1068,6 +1217,8 @@ paths:
           $ref: '#/components/responses/Ok'
         '404':
           $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
     delete:
       tags: [Orders]
@@ -1090,6 +1241,8 @@ paths:
         if (res.ok) console.log('Order cancelled');
         ```
       operationId: deleteOrder
+      security:
+        - ApiKeyHeader: []
       parameters:
         - name: id
           in: path
@@ -1101,6 +1254,8 @@ paths:
           $ref: '#/components/responses/Ok'
         '404':
           $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   # ─────────────────────────────────────────────────────────────
   # Scaled Orders
@@ -1170,6 +1325,8 @@ paths:
         console.log(`Placed ${result.orderIds.length} orders, base dist: ${result.baseDist}`);
         ```
       operationId: postScaledOrders
+      security:
+        - ApiKeyHeader: []
       requestBody:
         required: true
         content:
@@ -1196,6 +1353,8 @@ paths:
                       short: { $ref: '#/components/schemas/ScaledOrderResult' }
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   # ─────────────────────────────────────────────────────────────
   # ATR
@@ -1258,6 +1417,8 @@ paths:
         });
         ```
       operationId: putAtrConfig
+      security:
+        - ApiKeyHeader: []
       requestBody:
         required: true
         content:
@@ -1276,6 +1437,8 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/Ok'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   # ─────────────────────────────────────────────────────────────
   # Signal / Quant
@@ -1454,7 +1617,7 @@ paths:
 
   /v1/money-management:
     post:
-      tags: [Signal]
+      tags: [Money Management]
       summary: Validate a money-management configuration
       description: |
         Validates that a money-management config is structurally correct and can
@@ -1467,11 +1630,44 @@ paths:
 
         ### Code Examples
 
-        **curl:**
+        **curl — fixed 0.1 lot, 30-pip SL, 2:1 risk-reward TP:**
         ```bash
         curl -X POST http://localhost:3000/v1/money-management \
           -H 'Content-Type: application/json' \
-          -d '{"type": "fixed", "lotSize": 0.1}'
+          -d '{
+            "userId": "default",
+            "symbol": "EURUSD",
+            "timeframe": "H1",
+            "direction": "BUY",
+            "stopLossType": "PIPS",
+            "stopLossValue": 30,
+            "takeProfitType": "RISK_REWARD",
+            "takeProfitValue": 0,
+            "riskRewardRatio": 2.0,
+            "lotsType": "FIXED",
+            "lotsValue": 0.1
+          }'
+        # → {"valid":true}
+        ```
+
+        **curl — ATR-based SL, risk 1% of balance:**
+        ```bash
+        curl -X POST http://localhost:3000/v1/money-management \
+          -H 'Content-Type: application/json' \
+          -d '{
+            "userId": "default",
+            "symbol": "EURUSD",
+            "timeframe": "H1",
+            "direction": "BUY",
+            "stopLossType": "ATR_DISTANCE",
+            "stopLossValue": 0,
+            "stopLossAtrMultiplier": 1.5,
+            "takeProfitType": "ATR_DISTANCE",
+            "takeProfitValue": 0,
+            "takeProfitAtrMultiplier": 2.5,
+            "lotsType": "POSITION_SIZE_RISK",
+            "lotsValue": 1.0
+          }'
         ```
       operationId: postMoneyManagement
       requestBody:
@@ -1480,6 +1676,36 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/MoneyManagementConfig'
+            examples:
+              fixedLot:
+                summary: Fixed 0.1 lot, 30-pip SL, 2:1 RR
+                value:
+                  userId: default
+                  symbol: EURUSD
+                  timeframe: H1
+                  direction: BUY
+                  stopLossType: PIPS
+                  stopLossValue: 30
+                  takeProfitType: RISK_REWARD
+                  takeProfitValue: 0
+                  riskRewardRatio: 2.0
+                  lotsType: FIXED
+                  lotsValue: 0.1
+              atrBased:
+                summary: ATR-based SL/TP, 1% balance risk
+                value:
+                  userId: default
+                  symbol: EURUSD
+                  timeframe: H1
+                  direction: BUY
+                  stopLossType: ATR_DISTANCE
+                  stopLossValue: 0
+                  stopLossAtrMultiplier: 1.5
+                  takeProfitType: ATR_DISTANCE
+                  takeProfitValue: 0
+                  takeProfitAtrMultiplier: 2.5
+                  lotsType: POSITION_SIZE_RISK
+                  lotsValue: 1.0
       responses:
         '200':
           description: Config is valid and can be instantiated
@@ -1642,6 +1868,312 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   # ─────────────────────────────────────────────────────────────
+  # TradingView UDF (Universal Data Feed)
+  # ─────────────────────────────────────────────────────────────
+
+  /udf/config:
+    get:
+      tags: [UDF]
+      summary: UDF server capabilities
+      description: |
+        Returns the server's capability flags and metadata required by the
+        TradingView charting library on startup. The charting library calls
+        this endpoint automatically to discover what features the data feed supports.
+
+        ### Declared capabilities
+        | Flag                       | Value | Meaning                                  |
+        |----------------------------|-------|------------------------------------------|
+        | `supports_search`          | true  | `/udf/symbols` accepts a `symbol` param  |
+        | `supports_group_request`   | false | No bulk symbol fetch endpoint            |
+        | `supports_marks`           | false | No study marks                           |
+        | `supports_timescale_marks` | false | No timescale marks                       |
+        | `supports_time`            | true  | `/udf/time` returns server time          |
+
+        **Supported resolutions:** `1`, `5`, `15`, `30`, `60`, `240`, `1D`, `1W`, `1M`
+
+        ### Code Examples
+
+        **curl:**
+        ```bash
+        curl http://localhost:3000/udf/config
+        ```
+      operationId: getUdfConfig
+      responses:
+        '200':
+          description: UDF server capability flags
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  supports_search:
+                    type: boolean
+                  supports_group_request:
+                    type: boolean
+                  supports_marks:
+                    type: boolean
+                  supports_timescale_marks:
+                    type: boolean
+                  supports_time:
+                    type: boolean
+                  exchanges:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        value: { type: string }
+                        name:  { type: string }
+                        desc:  { type: string }
+                  symbols_types:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:  { type: string }
+                        value: { type: string }
+                  supported_resolutions:
+                    type: array
+                    items: { type: string }
+              example:
+                supports_search: true
+                supports_group_request: false
+                supports_marks: false
+                supports_timescale_marks: false
+                supports_time: true
+                exchanges: [{ value: "", name: "All Exchanges", desc: "" }]
+                symbols_types: [{ name: "Forex", value: "forex" }]
+                supported_resolutions: ["1","5","15","30","60","240","1D","1W","1M"]
+
+  /udf/time:
+    get:
+      tags: [UDF]
+      summary: Current server time (Unix seconds)
+      description: |
+        Returns the server's current UTC time as a Unix timestamp (integer seconds).
+        The TradingView charting library uses this to detect clock drift between
+        the browser and the data server.
+
+        ### Code Examples
+
+        **curl:**
+        ```bash
+        curl http://localhost:3000/udf/time
+        # → 1705312800
+        ```
+      operationId: getUdfTime
+      responses:
+        '200':
+          description: Unix timestamp string (integer seconds)
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "1705312800"
+
+  /udf/symbols:
+    get:
+      tags: [UDF]
+      summary: Symbol metadata
+      description: |
+        Returns metadata for the requested symbol in UDF format. The TradingView
+        charting library calls this when the user selects a symbol to display.
+
+        The symbol name defaults to the engine's configured symbol (set at startup
+        via the `SYMBOL` environment variable or `EURUSD` by default) if the
+        `symbol` query param matches or is omitted.
+
+        `pricescale` is derived from `symbol.digits` — e.g. 5-digit EURUSD →
+        `pricescale: 100000`.
+
+        ### Code Examples
+
+        **curl:**
+        ```bash
+        curl 'http://localhost:3000/udf/symbols?symbol=EURUSD'
+        ```
+      operationId: getUdfSymbols
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          description: Symbol name to look up (e.g. `EURUSD`)
+          schema:
+            type: string
+            example: EURUSD
+      responses:
+        '200':
+          description: Symbol metadata in UDF format
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name:                  { type: string }
+                  full_name:             { type: string }
+                  description:           { type: string }
+                  type:                  { type: string }
+                  session:               { type: string }
+                  exchange:              { type: string }
+                  listed_exchange:       { type: string }
+                  timezone:              { type: string }
+                  has_intraday:          { type: boolean }
+                  has_daily:             { type: boolean }
+                  pricescale:            { type: number }
+                  minmov:                { type: number }
+                  supported_resolutions: { type: array, items: { type: string } }
+                  data_status:           { type: string }
+              example:
+                name: EURUSD
+                full_name: EURUSD
+                description: "Euro / US Dollar"
+                type: forex
+                session: 24x7
+                exchange: ""
+                listed_exchange: ""
+                timezone: Etc/UTC
+                has_intraday: true
+                has_daily: true
+                pricescale: 100000
+                minmov: 1
+                supported_resolutions: ["1","5","15","30","60","240","1D","1W","1M"]
+                data_status: streaming
+
+  /udf/history:
+    get:
+      tags: [UDF]
+      summary: OHLCV bar history
+      description: |
+        Returns OHLCV data for the requested symbol, resolution, and time range
+        in the UDF parallel-array format. The TradingView charting library calls
+        this endpoint to load historical bars when a chart is opened or scrolled back.
+
+        ### Response format
+        UDF uses **parallel arrays** (not an array of objects):
+
+        | Field | Type       | Description                               |
+        |-------|------------|-------------------------------------------|
+        | `s`   | string     | Status: `"ok"`, `"no_data"`, or `"error"` |
+        | `t`   | number[]   | Bar timestamps (Unix seconds, UTC)        |
+        | `o`   | number[]   | Open prices                               |
+        | `h`   | number[]   | High prices                               |
+        | `l`   | number[]   | Low prices                                |
+        | `c`   | number[]   | Close prices                              |
+        | `v`   | number[]   | Volume (0 if not provided on push)        |
+
+        Arrays are ordered chronologically (oldest bar first).
+
+        ### Resolution mapping
+        | Resolution | Timeframe |
+        |------------|-----------|
+        | `1`        | M1        |
+        | `5`        | M5        |
+        | `15`       | M15       |
+        | `30`       | M30       |
+        | `60`       | H1        |
+        | `240`      | H4        |
+        | `1D`       | D1        |
+        | `1W`       | W1        |
+        | `1M`       | MN1       |
+
+        Returns `{ s: "no_data" }` when no bars exist for the time range, or
+        `{ s: "error", errmsg: "..." }` for an unsupported resolution.
+
+        ### Code Examples
+
+        **curl:**
+        ```bash
+        curl 'http://localhost:3000/udf/history?symbol=EURUSD&resolution=60&from=1705276800&to=1705312800'
+        # → {"s":"ok","t":[1705276800,1705280400,...],"o":[...],"h":[...],"l":[...],"c":[...],"v":[...]}
+        ```
+
+        **JavaScript (TradingView datafeed getBars callback):**
+        ```javascript
+        const params = new URLSearchParams({ symbol, resolution, from, to });
+        const data = await fetch(`http://localhost:3000/udf/history?${params}`).then(r => r.json());
+        if (data.s === 'ok') {
+          onHistoryCallback(data.t.map((t, i) => ({
+            time: t * 1000,
+            open: data.o[i], high: data.h[i],
+            low: data.l[i], close: data.c[i], volume: data.v[i],
+          })), { noData: false });
+        } else if (data.s === 'no_data') {
+          onHistoryCallback([], { noData: true });
+        }
+        ```
+      operationId: getUdfHistory
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          description: Symbol name (e.g. `EURUSD`)
+          schema: { type: string, example: EURUSD }
+        - name: resolution
+          in: query
+          required: true
+          description: Bar resolution string
+          schema:
+            type: string
+            enum: ["1","5","15","30","60","240","1D","1W","1M"]
+            example: "60"
+        - name: from
+          in: query
+          required: true
+          description: Range start — Unix timestamp (seconds)
+          schema: { type: number, example: 1705276800 }
+        - name: to
+          in: query
+          required: true
+          description: Range end — Unix timestamp (seconds)
+          schema: { type: number, example: 1705312800 }
+      responses:
+        '200':
+          description: |
+            OHLCV data in UDF parallel-array format, or a no-data / error sentinel.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    description: Bars found
+                    properties:
+                      s: { type: string, enum: [ok] }
+                      t: { type: array, items: { type: number } }
+                      o: { type: array, items: { type: number } }
+                      h: { type: array, items: { type: number } }
+                      l: { type: array, items: { type: number } }
+                      c: { type: array, items: { type: number } }
+                      v: { type: array, items: { type: number } }
+                    required: [s, t, o, h, l, c, v]
+                  - type: object
+                    description: No data in the requested range
+                    properties:
+                      s: { type: string, enum: [no_data] }
+                    required: [s]
+                  - type: object
+                    description: Error (e.g. unsupported resolution)
+                    properties:
+                      s:      { type: string, enum: [error] }
+                      errmsg: { type: string }
+                    required: [s, errmsg]
+              examples:
+                ok:
+                  summary: Bars returned
+                  value:
+                    s: ok
+                    t: [1705276800, 1705280400]
+                    o: [1.0850, 1.0865]
+                    h: [1.0872, 1.0880]
+                    l: [1.0841, 1.0855]
+                    c: [1.0865, 1.0875]
+                    v: [1234, 987]
+                noData:
+                  summary: No bars in range
+                  value: { s: no_data }
+                error:
+                  summary: Unsupported resolution
+                  value: { s: error, errmsg: "Unsupported resolution: 2" }
+
+  # ─────────────────────────────────────────────────────────────
   # OpenBB Workspace
   # ─────────────────────────────────────────────────────────────
 
@@ -1705,23 +2237,47 @@ paths:
       operationId: getOpenBBPositions
       parameters:
         - $ref: '#/components/parameters/ApiKey'
+        - $ref: '#/components/parameters/SSRMStartRow'
+        - $ref: '#/components/parameters/SSRMEndRow'
+        - $ref: '#/components/parameters/SSRMSortModel'
+        - $ref: '#/components/parameters/SSRMFilterModel'
       responses:
         '200':
-          description: Array of LONG and SHORT position rows
+          description: |
+            LONG and SHORT position rows. Returns a plain array normally, or an
+            AG Grid SSRM envelope `{ rows, lastRow }` when pagination params are supplied.
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  type: object
-                  properties:
-                    side:      { type: string, enum: [LONG, SHORT], description: "Position direction" }
-                    size:      { type: number, description: "Position size in lots (0 when flat)" }
-                    openPrice: { type: ['number', 'null'], description: "Weighted average entry price (null when flat)" }
-                    sl:        { type: ['number', 'null'], description: "Current stop-loss level (null when flat)" }
-                    tp:        { type: ['number', 'null'], description: "Current take-profit level (null when flat)" }
-                    pl:        { type: number, description: "Unrealised P&L at current price" }
-                    status:    { type: string, enum: [OPEN, FLAT], description: "Whether the position slot has active exposure" }
+                oneOf:
+                  - type: array
+                    description: Plain array (no SSRM params)
+                    items:
+                      type: object
+                      properties:
+                        side:      { type: string, enum: [LONG, SHORT], description: "Position direction" }
+                        size:      { type: number, description: "Position size in lots (0 when flat)" }
+                        openPrice: { type: ['number', 'null'], description: "Weighted average entry price (null when flat)" }
+                        sl:        { type: ['number', 'null'], description: "Current stop-loss level (null when flat)" }
+                        tp:        { type: ['number', 'null'], description: "Current take-profit level (null when flat)" }
+                        pl:        { type: number, description: "Unrealised P&L at current price" }
+                        status:    { type: string, enum: [OPEN, FLAT], description: "Whether the position slot has active exposure" }
+                  - type: object
+                    description: SSRM paginated envelope
+                    properties:
+                      rows:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            side:      { type: string, enum: [LONG, SHORT] }
+                            size:      { type: number }
+                            openPrice: { type: ['number', 'null'] }
+                            sl:        { type: ['number', 'null'] }
+                            tp:        { type: ['number', 'null'] }
+                            pl:        { type: number }
+                            status:    { type: string, enum: [OPEN, FLAT] }
+                      lastRow: { type: integer, description: "Total row count for virtual scroll" }
         '401':
           $ref: '#/components/responses/Unauthorized'
 
@@ -1742,15 +2298,29 @@ paths:
       operationId: getOpenBBOrders
       parameters:
         - $ref: '#/components/parameters/ApiKey'
+        - $ref: '#/components/parameters/SSRMStartRow'
+        - $ref: '#/components/parameters/SSRMEndRow'
+        - $ref: '#/components/parameters/SSRMSortModel'
+        - $ref: '#/components/parameters/SSRMFilterModel'
       responses:
         '200':
-          description: Array of pending orders
+          description: |
+            Pending orders array, or AG Grid SSRM envelope when pagination params are supplied.
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/PendingOrder'
+                oneOf:
+                  - type: array
+                    description: Plain array (no SSRM params)
+                    items:
+                      $ref: '#/components/schemas/PendingOrder'
+                  - type: object
+                    description: SSRM paginated envelope
+                    properties:
+                      rows:
+                        type: array
+                        items: { $ref: '#/components/schemas/PendingOrder' }
+                      lastRow: { type: integer, description: "Total row count for virtual scroll" }
         '401':
           $ref: '#/components/responses/Unauthorized'
 
@@ -1851,15 +2421,30 @@ paths:
           schema: { type: string, format: date }
           example: "2024-01-31"
           description: End date for filtering (inclusive). Defaults to now.
+        - $ref: '#/components/parameters/SSRMStartRow'
+        - $ref: '#/components/parameters/SSRMEndRow'
+        - $ref: '#/components/parameters/SSRMSortModel'
+        - $ref: '#/components/parameters/SSRMFilterModel'
       responses:
         '200':
-          description: Deal history rows within the date range
+          description: |
+            Deal history rows within the date range, or AG Grid SSRM envelope when
+            pagination params are supplied.
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/DealRow'
+                oneOf:
+                  - type: array
+                    description: Plain array (no SSRM params)
+                    items:
+                      $ref: '#/components/schemas/DealRow'
+                  - type: object
+                    description: SSRM paginated envelope
+                    properties:
+                      rows:
+                        type: array
+                        items: { $ref: '#/components/schemas/DealRow' }
+                      lastRow: { type: integer, description: "Total row count for virtual scroll" }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2181,6 +2766,45 @@ components:
       description: |
         API key for OpenBB routes. Required only when `OPENBB_API_KEY` env var
         is set on the server. Uses timing-safe comparison to prevent timing attacks.
+
+    SSRMStartRow:
+      name: startRow
+      in: query
+      required: false
+      schema: { type: integer, minimum: 0 }
+      description: |
+        AG Grid Server-Side Row Model — zero-based index of the first row to return.
+        When supplied, the response changes shape to `{ rows: T[], lastRow: number }`.
+
+    SSRMEndRow:
+      name: endRow
+      in: query
+      required: false
+      schema: { type: integer, minimum: 0 }
+      description: |
+        AG Grid Server-Side Row Model — zero-based index of the last row to return
+        (exclusive). Used together with `startRow` for virtual scrolling pagination.
+
+    SSRMSortModel:
+      name: sortModel
+      in: query
+      required: false
+      schema: { type: string }
+      description: |
+        AG Grid sort specification — JSON-encoded array of `{ colId, sort }` objects.
+
+        Example: `[{"colId":"size","sort":"desc"}]`
+
+    SSRMFilterModel:
+      name: filterModel
+      in: query
+      required: false
+      schema: { type: string }
+      description: |
+        AG Grid filter specification — JSON-encoded map of column ID to filter entry.
+        Supported filter types: `contains`, `equals`, `greaterThan`, `lessThan`, `inRange`.
+
+        Example: `{"status":{"type":"equals","filter":"OPEN"}}`
 
   responses:
     Ok:
@@ -2662,13 +3286,110 @@ components:
       description: |
         Money-management factory configuration. Defines how lot sizes, SL/TP
         distances, and risk percentages are calculated for a strategy.
-
-        The exact field set depends on the money-management type. See
-        `MoneyManagementFactoryConfigSchema` in `src/money-management/types.ts`
-        for the complete definition.
+        Mirrors `MoneyManagementFactoryConfigSchema` in `src/money-management/types.ts`.
 
         Use `POST /v1/money-management` to validate a config before deploying it.
-      additionalProperties: true
+      required:
+        - userId
+        - symbol
+        - timeframe
+        - direction
+        - stopLossType
+        - stopLossValue
+        - takeProfitType
+        - takeProfitValue
+        - lotsType
+        - lotsValue
+      properties:
+        userId:
+          type: string
+          minLength: 1
+          description: Logical owner of the config (use any non-empty string in paper mode)
+          example: default
+        symbol:
+          type: string
+          minLength: 1
+          description: Trading instrument (e.g. EURUSD)
+          example: EURUSD
+        timeframe:
+          type: string
+          minLength: 1
+          description: Bar timeframe (e.g. H1, D1)
+          example: H1
+        direction:
+          type: string
+          enum: [BUY, SELL]
+          description: Trade direction
+          example: BUY
+        stopLossType:
+          type: string
+          enum: [DO_NOT_USE, PERCENT, PIPS, ABSOLUTE, DOLLAR, RISK_BALANCE, POSITION_SIZE_RISK, ATR_DISTANCE, HIGH_LOW]
+          description: |
+            SL calculation method:
+            - `DO_NOT_USE` — no stop loss
+            - `PIPS` — fixed distance in pips
+            - `ABSOLUTE` — absolute price level
+            - `DOLLAR` — fixed dollar loss amount
+            - `RISK_BALANCE` — percentage of account balance
+            - `POSITION_SIZE_RISK` — risk derived from lot size
+            - `ATR_DISTANCE` — ATR × multiplier from entry
+            - `HIGH_LOW` — recent swing high/low
+          example: PIPS
+        stopLossValue:
+          type: number
+          description: Numeric value for the chosen SL type (e.g. number of pips, dollar amount, ATR multiplier)
+          example: 30
+        stopLossAtrMultiplier:
+          type: number
+          minimum: 0
+          description: ATR multiplier — only used when `stopLossType` is `ATR_DISTANCE`
+          example: 1.5
+        stopLossPipBuffer:
+          type: number
+          minimum: 0
+          description: Extra pip buffer added beyond the calculated SL level
+          example: 2
+        takeProfitType:
+          type: string
+          enum: [DO_NOT_USE, PERCENT, PIPS, DOLLAR, RISK_REWARD, ABSOLUTE, ATR_DISTANCE]
+          description: |
+            TP calculation method:
+            - `DO_NOT_USE` — no take profit
+            - `PIPS` — fixed distance in pips
+            - `ABSOLUTE` — absolute price level
+            - `DOLLAR` — fixed dollar gain amount
+            - `RISK_REWARD` — TP = SL × `riskRewardRatio`
+            - `ATR_DISTANCE` — ATR × multiplier from entry
+          example: RISK_REWARD
+        takeProfitValue:
+          type: number
+          description: Numeric value for the chosen TP type
+          example: 0
+        takeProfitAtrMultiplier:
+          type: number
+          minimum: 0
+          description: ATR multiplier — only used when `takeProfitType` is `ATR_DISTANCE`
+          example: 2.5
+        riskRewardRatio:
+          type: number
+          minimum: 0
+          description: TP/SL ratio — only used when `takeProfitType` is `RISK_REWARD`
+          example: 2.0
+        lotsType:
+          type: string
+          enum: [FIXED, PERCENT, RISK, POSITION_SIZE_RISK]
+          description: |
+            Lot-size calculation method:
+            - `FIXED` — fixed lot size (`lotsValue` is the lot count)
+            - `PERCENT` — percentage of account balance converted to lots
+            - `RISK` — risk a fixed dollar amount per trade
+            - `POSITION_SIZE_RISK` — risk a percentage of balance per trade
+          example: FIXED
+        lotsValue:
+          type: number
+          minimum: 0
+          description: Numeric value for the chosen lots type (e.g. lot count, percent, dollar amount)
+          example: 0.1
 
     # ── Gateway domain types ────────────────────────────────────
 
@@ -2698,6 +3419,7 @@ components:
 
     SymbolInfoVO:
       type: object
+      required: [name, digits, pointSize, lotSize, minLot, maxLot, lotStep]
       description: |
         Trading instrument metadata. Defines the precision, lot specifications,
         and trading constraints for a symbol.
@@ -2792,6 +3514,7 @@ components:
 
     DealRow:
       type: object
+      required: [ticket, symbol, type, volume, price, profit, swap, commission, time]
       description: |
         A completed trade (deal) in the history. Represents a single fill event
         — either an entry or exit. Contains execution details and financial impact.
@@ -2812,6 +3535,19 @@ components:
       in: header
       name: x-api-key
       description: |
-        API key for skills routes. Set the `API_KEY` environment variable on the
-        server. When `API_KEY` is not set, the auth check is skipped (useful for
-        local development). Uses timing-safe comparison to prevent timing attacks.
+        API key guard applied to all state-mutating routes (bars, positions,
+        orders, scaled-orders, engine/ATR config) and skills routes.
+
+        Set the `API_KEY` environment variable on the server. When `API_KEY` is
+        **not set**, the pre-handler is a no-op — all endpoints are accessible
+        without a key (useful for local development and tests).
+
+        When `API_KEY` **is set**, every marked endpoint requires:
+        ```
+        x-api-key: <your-key>
+        ```
+        Missing or incorrect keys return `401 Unauthorized`.
+
+        Note: OpenBB data endpoints (`/openbb/*`) use a separate
+        `OPENBB_API_KEY` guard via the `?apiKey=` query parameter — they are
+        not covered by this scheme.
