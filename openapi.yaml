@@ -51,6 +51,13 @@ info:
     `order`, and `normalized_bar` events across process instances via Pub/Sub
     with echo prevention and type validation.
 
+    When `RABBITMQ_URL` is set, an **AMQP event bridge** (`AmqpEventBridge`)
+    provides durable cross-instance messaging via a RabbitMQ topic exchange
+    (`te.events`). Critical events (`order`, `risk`) use persistent delivery
+    (disk-backed). An **audit consumer** (`AuditConsumer`) subscribes to a
+    durable `te.audit` queue and stores the most recent 1000 events in a ring
+    buffer, queryable via `GET /audit/events`.
+
     Autonomous strategies subscribe to `normalized_bar` and receive full
     historical context from the cache. Additional data providers (external
     APIs, WebSocket feeds) can be registered via the service registry and feed
@@ -204,6 +211,15 @@ tags:
       GET /v1/events?search=non-farm
       GET /v1/events?search=Federal+Open+Market
       ```
+
+  - name: Audit
+    description: |
+      Event audit trail — query a ring buffer of all events bridged through RabbitMQ.
+      Requires `RABBITMQ_URL` to be set; returns 503 otherwise.
+
+      The `AuditConsumer` subscribes to the durable `te.audit` queue (wildcard
+      `event.#` binding) and stores the most recent 1000 events in memory.
+      Use query parameters to filter by event type, time range, and limit.
 
   - name: Services
     description: |
@@ -3308,6 +3324,92 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+
+  /audit/events:
+    get:
+      tags: [Audit]
+      summary: Query audit trail
+      operationId: getAuditEvents
+      description: |
+        Returns recent events from the AMQP audit ring buffer.
+        All query parameters are optional and ANDed.
+
+        Requires `RABBITMQ_URL` — returns 503 when the audit consumer is unavailable.
+      parameters:
+        - name: type
+          in: query
+          schema:
+            type: string
+          description: Filter by event type (e.g. signal, order, risk, normalized_bar)
+          example: signal
+        - name: since
+          in: query
+          schema:
+            type: string
+            format: date-time
+          description: ISO 8601 lower bound for event timestamp
+          example: '2026-01-01T00:00:00Z'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+          description: Max entries to return (from most recent)
+          example: 50
+      responses:
+        '200':
+          description: Filtered audit events
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                    description: Number of events in the response
+                  events:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: integer
+                        instanceId:
+                          type: string
+                        type:
+                          type: string
+                        payload:
+                          description: Original event payload
+                        timestamp:
+                          type: string
+                          format: date-time
+                        receivedAt:
+                          type: string
+                          format: date-time
+              example:
+                total: 1
+                events:
+                  - id: 42
+                    instanceId: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+                    type: signal
+                    payload:
+                      serviceId: 'strategy:candle-atr'
+                      symbol: EURUSD
+                      action: BUY
+                      confidence: 0.85
+                    timestamp: '2026-01-15T10:00:00.000Z'
+                    receivedAt: '2026-01-15T10:00:00.005Z'
+        '503':
+          description: Audit consumer unavailable (RABBITMQ_URL not set)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: Service Unavailable
+                message: Audit trail requires RABBITMQ_URL
+                statusCode: 503
 
 # ─────────────────────────────────────────────────────────────
 # Components
