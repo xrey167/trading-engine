@@ -1304,6 +1304,7 @@ export class TradingEngine {
 
   // Last bar timestamp — used for deterministic deal close-time in _closeSlot
   private _lastBarTime: Date = new Date(0);
+  private _lastBars: Bars | null = null;
 
   // Deal history and statistics — ported from CSEADeal / SDealStats
   private _deals: DealRecord[] = [];
@@ -1340,6 +1341,7 @@ export class TradingEngine {
    *   3. Fill pending orders (exits fire before new fills on the same bar)
    */
   async onBar(bar: Bar, bars: Bars): Promise<void> {
+    this._lastBars = bars;
     this._spreadAbs = await this.broker.getSpread(this.symbol.name);
     this._lastBarTime = bar.time;
 
@@ -1355,6 +1357,27 @@ export class TradingEngine {
     }
 
     await this._checkOrderFills(bar, bars);
+  }
+
+  /**
+   * Process a single price tick.
+   * Runs fill checks and SL/TP exits using a synthetic bar (all OHLC = price).
+   * Indicator updates (ATR, trailing entry) are bar-level — NOT run here.
+   * Requires at least one prior onBar call to establish bar context.
+   */
+  async onTick(price: number, time: Date): Promise<void> {
+    if (!this._lastBars) {
+      throw new Error('onTick requires at least one onBar call first');
+    }
+    this._spreadAbs = await this.broker.getSpread(this.symbol.name);
+
+    const tick = new Bar(price, price, price, price, time);
+
+    for (const slot of [this.longPos, this.shortPos]) {
+      if (slot.size === 0) continue;
+      await this._checkExits(slot, tick);
+    }
+    await this._checkOrderFills(tick, this._lastBars);
   }
 
   // ──────────────────────────────────────────────────────────

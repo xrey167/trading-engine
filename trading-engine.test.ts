@@ -1708,3 +1708,58 @@ describe('Trailing entry orders — side-based updateTrailingRef', () => {
     expect(order.price).toBeCloseTo(1.10100, 4);
   });
 });
+
+// ─────────────────────────────────────────────────────────────
+// onTick — tick-driven fills
+// ─────────────────────────────────────────────────────────────
+
+describe('onTick — tick-driven fills', () => {
+  it('throws if called before any onBar (no bar context)', async () => {
+    const eng = new TradingEngine(EURUSD5, mockBroker());
+    await expect(eng.onTick(1.1000, new Date())).rejects.toThrow();
+  });
+
+  it('fills a BUY_LIMIT order when tick price crosses limit', async () => {
+    const eng = new TradingEngine(EURUSD5, mockBroker());
+    const bar = makeSingleCandle(1.1000, 1.1050, 1.0950, 1.1000);
+    const bars = makeBars([1.1000], [1.1050], [1.0950]);
+    await eng.onBar(bar, bars);
+
+    eng.addBuyLimit(1.0980, 1); // fills when price <= 1.0980
+    expect(eng.getOrders()).toHaveLength(1);
+
+    await eng.onTick(1.0975, new Date()); // crosses limit
+
+    expect(eng.getOrders()).toHaveLength(0);
+    expect(eng.getSizeBuy()).toBe(1);
+  });
+
+  it('does NOT fill when tick price does not cross limit', async () => {
+    const eng = new TradingEngine(EURUSD5, mockBroker());
+    const bar = makeSingleCandle(1.1000, 1.1050, 1.0950, 1.1000);
+    const bars = makeBars([1.1000], [1.1050], [1.0950]);
+    await eng.onBar(bar, bars);
+
+    eng.addBuyLimit(1.0960, 1);
+    await eng.onTick(1.1000, new Date()); // price above limit
+
+    expect(eng.getOrders()).toHaveLength(1);
+    expect(eng.getSizeBuy()).toBe(0);
+  });
+
+  it('triggers SL exit on tick for long position', async () => {
+    const broker = mockBroker(1.10000);
+    const eng = new TradingEngine(EURUSD5, broker);
+    const bar = makeSingleCandle(1.1000, 1.1050, 1.0950, 1.1000);
+    const bars = makeBars([1.1000], [1.1050], [1.0950]);
+    await eng.onBar(bar, bars);
+    eng.sl(500); // 500 points = 0.00500 → SL at 1.10000 - 0.00500 = 1.09500
+    await eng.buy(1);
+    eng.slActivateBuy(true);
+    expect(eng.getSLBuy()).toBeCloseTo(1.09500, 5);
+
+    await eng.onTick(1.0940, new Date()); // below SL
+
+    expect(eng.getSizeBuy()).toBe(0);
+  });
+});
