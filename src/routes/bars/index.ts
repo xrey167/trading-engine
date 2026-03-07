@@ -5,9 +5,12 @@ import {
   type PostBarsBody,
   OkResponseSchema,
 } from '../../schemas/index.js';
+import { apiKeyPreHandler } from '../../lib/api-utils.js';
+
 const barsRoute: FastifyPluginAsync = async (fastify) => {
   // POST /bars — drives engine.onBar(); emits 'bar' event to WebSocket clients
   fastify.post<{ Body: PostBarsBody }>('/bars', {
+    preHandler: [apiKeyPreHandler],
     config: { rateLimit: { max: 120, timeWindow: '1 second' } },
     schema: {
       body: PostBarsBodySchema,

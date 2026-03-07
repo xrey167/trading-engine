@@ -10,6 +10,7 @@ import {
   type PutPositionSlTpBody,
   type PostMarketOrderBody,
 } from '../../schemas/index.js';
+import { apiKeyPreHandler } from '../../lib/api-utils.js';
 
 const positionsRoute: FastifyPluginAsync = async (fastify) => {
   // GET /positions — all 16 fields + pl (Unit 6)
@@ -56,6 +57,7 @@ const positionsRoute: FastifyPluginAsync = async (fastify) => {
 
   // DELETE /positions/:side  — side: "long" | "short" | "all"
   fastify.delete<{ Params: { side: string } }>('/positions/:side', {
+    preHandler: [apiKeyPreHandler],
     schema: {
       params: Type.Object({ side: Type.String() }),
       response: {

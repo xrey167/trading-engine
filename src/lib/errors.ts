@@ -2,6 +2,7 @@ export type DomainError =
   | { type: "INVALID_INPUT"; message: string; field?: string }
   | { type: "NOT_FOUND"; message: string; id?: string }
   | { type: "BUSINESS_RULE"; message: string; rule: string }
+  | { type: "UNAUTHORIZED"; message: string }
   | { type: "GATEWAY_ERROR"; message: string; cause?: unknown }
   | { type: "NOT_IMPLEMENTED"; feature: string; message: string }
   | {
@@ -25,6 +26,10 @@ export function notFound(message: string, id?: string): DomainError {
 
 export function businessRule(message: string, rule: string): DomainError {
   return { type: "BUSINESS_RULE", message, rule };
+}
+
+export function unauthorized(message?: string): DomainError {
+  return { type: "UNAUTHORIZED", message: message ?? "Unauthorized" };
 }
 
 export function gatewayError(message: string, cause?: unknown): DomainError {
