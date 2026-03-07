@@ -50,9 +50,10 @@ export const PendingOrderSchema = Type.Object({
 // ─────────────────────────────────────────────────────────────
 
 export const PostOrderBodySchema = Type.Object({
-  type:  OrderEntryTypeSchema,
-  price: Type.Number(),
-  size:  Type.Optional(Type.Number()),
+  type:       OrderEntryTypeSchema,
+  price:      Type.Optional(Type.Number()),  // not required for BUY_MARKET / SELL_MARKET / MTO trail types
+  limitPrice: Type.Optional(Type.Number()),  // BUY_STOP_LIMIT / SELL_STOP_LIMIT only
+  size:       Type.Optional(Type.Number()),
   attributes: Type.Optional(Type.Object({
     oco:          Type.Optional(Type.Boolean()),
     co:           Type.Optional(Type.Boolean()),

@@ -35,12 +35,18 @@ export const LimitConfirmSchema = Type.Union([
 ]);
 
 export const OrderEntryTypeSchema = Type.Union([
+  Type.Literal('BUY_MARKET'),
+  Type.Literal('SELL_MARKET'),
   Type.Literal('BUY_LIMIT'),
   Type.Literal('BUY_STOP'),
   Type.Literal('SELL_LIMIT'),
   Type.Literal('SELL_STOP'),
   Type.Literal('BUY_MIT'),
   Type.Literal('SELL_MIT'),
+  Type.Literal('BUY_STOP_LIMIT'),
+  Type.Literal('SELL_STOP_LIMIT'),
+  Type.Literal('BUY_MTO'),
+  Type.Literal('SELL_MTO'),
   Type.Literal('BUY_LIMIT_TRAIL'),
   Type.Literal('BUY_STOP_TRAIL'),
   Type.Literal('SELL_LIMIT_TRAIL'),

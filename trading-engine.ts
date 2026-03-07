@@ -371,12 +371,16 @@ export function checkSLTP(p: {
 // ─────────────────────────────────────────────────────────────
 
 export type OrderEntryType =
-  | 'BUY_LIMIT'    // filled when price drops to limit
-  | 'BUY_STOP'     // filled when price rises to stop
-  | 'SELL_LIMIT'   // filled when price rises to limit
-  | 'SELL_STOP'    // filled when price drops to stop
-  | 'BUY_MIT'      // Market-if-Touched — buy at market when price touches level
-  | 'SELL_MIT';    // Market-if-Touched — sell at market when price touches level
+  | 'BUY_LIMIT'       // filled when price drops to limit
+  | 'BUY_STOP'        // filled when price rises to stop
+  | 'SELL_LIMIT'      // filled when price rises to limit
+  | 'SELL_STOP'       // filled when price drops to stop
+  | 'BUY_MIT'         // Market-if-Touched — buy at market when price touches level
+  | 'SELL_MIT'        // Market-if-Touched — sell at market when price touches level
+  | 'BUY_STOP_LIMIT'  // stop-limit buy: stop at price, fill only at or below limitPrice
+  | 'SELL_STOP_LIMIT' // stop-limit sell: stop at price, fill only at or above limitPrice
+  | 'BUY_MTO'         // Market-To-Order buy: pending limit below market, fills as market when touched
+  | 'SELL_MTO';       // Market-To-Order sell: pending limit above market, fills as market when touched
 
 export interface PendingOrderAttributes {
   /** One-Cancels-Other: when filled, cancel all other pending orders */
@@ -387,6 +391,8 @@ export interface PendingOrderAttributes {
   cs?: boolean;
   /** Reverse: when filled, reverse the current position */
   rev?: boolean;
+  /** Stop-limit: the limit price used for BUY_STOP_LIMIT / SELL_STOP_LIMIT fills */
+  limitPrice?: number;
   /** Bracket: automatic SL/TP applied when filled */
   bracketSL?: number;  // points
   bracketTP?: number;  // points
@@ -658,6 +664,62 @@ export class TradingEngine {
 
   addSellMIT(price: number, size?: number): string {
     return this._addOrder('SELL_MIT', Side.Short, price, size);
+  }
+
+  /**
+   * Stop-limit buy: triggers when price rises to `stopPrice`, then fills as a
+   * limit buy only if the bar's low reaches `limitPrice` (must be ≤ stopPrice).
+   * If `limitPrice` is not reached on the trigger bar the order converts to a
+   * plain BUY_LIMIT at `limitPrice` for subsequent bars.
+   */
+  addBuyStopLimit(stopPrice: number, limitPrice: number, size?: number): string {
+    const id = this._addOrder('BUY_STOP_LIMIT', Side.Long, stopPrice, size);
+    const o  = this._findOrder(id)!;
+    o.attributes.limitPrice = limitPrice;
+    return id;
+  }
+
+  /**
+   * Stop-limit sell: triggers when price drops to `stopPrice`, then fills as a
+   * limit sell only if the bar's high reaches `limitPrice` (must be ≥ stopPrice).
+   */
+  addSellStopLimit(stopPrice: number, limitPrice: number, size?: number): string {
+    const id = this._addOrder('SELL_STOP_LIMIT', Side.Short, stopPrice, size);
+    const o  = this._findOrder(id)!;
+    o.attributes.limitPrice = limitPrice;
+    return id;
+  }
+
+  /**
+   * MTO (Market Trail Order) buy: a trailing stop order that fills as a market
+   * order when triggered. The stop price trails below the market by `distancePts`,
+   * anchoring lower each bar. When the bar's high crosses the stop price a
+   * market buy is executed.
+   *
+   * Pass `price = Infinity` (or any large value) to let the trailing logic set
+   * the first reference on the next bar. Pass a specific price to start
+   * immediately at that stop level.
+   */
+  addBuyMTO(mode: TrailMode, distancePts: number, periods = 0): string {
+    const id = this._addOrder('BUY_MTO', Side.Long, Infinity, undefined);
+    const o  = this._findOrder(id)!;
+    o.attributes.trailEntry = { mode, distPts: distancePts, periods };
+    o._trailRef = Infinity;
+    return id;
+  }
+
+  /**
+   * MTO (Market Trail Order) sell: a trailing stop order that fills as a market
+   * order when triggered. The stop price trails above the market by `distancePts`,
+   * anchoring higher each bar. When the bar's low crosses the stop price a
+   * market sell is executed.
+   */
+  addSellMTO(mode: TrailMode, distancePts: number, periods = 0): string {
+    const id = this._addOrder('SELL_MTO', Side.Short, -Infinity, undefined);
+    const o  = this._findOrder(id)!;
+    o.attributes.trailEntry = { mode, distPts: distancePts, periods };
+    o._trailRef = -Infinity;
+    return id;
   }
 
   /**
@@ -976,14 +1038,14 @@ export class TradingEngine {
             o._trailRef = bar.low;
             o.price = bar.low + dist;
           }
-        } else if (o.type === 'BUY_STOP') {
-          // Stop trails below, anchors down
+        } else if (o.type === 'BUY_STOP' || o.type === 'BUY_MTO') {
+          // Stop / MTO trails below, anchors down; triggers when price rises to stop level
           if (bar.low < (o._trailRef ?? Infinity)) {
             o._trailRef = bar.low;
             o.price = bar.low + dist;
           }
-        } else if (o.type === 'SELL_STOP') {
-          // Stop trails above, anchors up
+        } else if (o.type === 'SELL_STOP' || o.type === 'SELL_MTO') {
+          // Stop / MTO trails above, anchors up; triggers when price drops to stop level
           if (bar.high > (o._trailRef ?? -Infinity)) {
             o._trailRef = bar.high;
             o.price = bar.high - dist;
@@ -1000,12 +1062,18 @@ export class TradingEngine {
     for (const o of this.orders) {
       let triggered = false;
       switch (o.type) {
-        case 'BUY_LIMIT':  triggered = bar.low  <= o.price; break;
-        case 'BUY_STOP':   triggered = bar.high >= o.price; break;
-        case 'SELL_LIMIT': triggered = bar.high >= o.price; break;
-        case 'SELL_STOP':  triggered = bar.low  <= o.price; break;
-        case 'BUY_MIT':    triggered = bar.low  <= o.price; break;
-        case 'SELL_MIT':   triggered = bar.high >= o.price; break;
+        case 'BUY_LIMIT':       triggered = bar.low  <= o.price; break;
+        case 'BUY_STOP':        triggered = bar.high >= o.price; break;
+        case 'SELL_LIMIT':      triggered = bar.high >= o.price; break;
+        case 'SELL_STOP':       triggered = bar.low  <= o.price; break;
+        case 'BUY_MIT':         triggered = bar.low  <= o.price; break;
+        case 'SELL_MIT':        triggered = bar.high >= o.price; break;
+        // Stop-limit: triggered like a stop, but fill is constrained by limitPrice
+        case 'BUY_STOP_LIMIT':  triggered = bar.high >= o.price; break;
+        case 'SELL_STOP_LIMIT': triggered = bar.low  <= o.price; break;
+        // MTO (Market Trail Order): triggered like a stop, fills as market
+        case 'BUY_MTO':         triggered = bar.high >= o.price; break;
+        case 'SELL_MTO':        triggered = bar.low  <= o.price; break;
       }
       if (triggered) toFill.push(o);
     }
@@ -1060,10 +1128,23 @@ export class TradingEngine {
         this._applyFill(this.shortPos, fillPrice, o.size + curSize, bar.time);
       }
     } else {
-      if (o.type === 'BUY_MIT' || o.type === 'SELL_MIT') {
-        // MIT: execute as market order
+      if (o.type === 'BUY_MIT' || o.type === 'SELL_MIT' ||
+          o.type === 'BUY_MTO' || o.type === 'SELL_MTO') {
+        // MIT / MTO: execute as market order
         const r = await this.broker.marketOrder(o.side, o.size);
         this._applyFill(slot, r.price, o.size, r.time);
+      } else if (o.type === 'BUY_STOP_LIMIT' || o.type === 'SELL_STOP_LIMIT') {
+        // Stop-limit: only fill if bar's range covers the limit price
+        const lp = attrs.limitPrice ?? o.price;
+        const canFill = o.type === 'BUY_STOP_LIMIT'
+          ? bar.low  <= lp   // bar must have reached the buy limit ceiling
+          : bar.high >= lp;  // bar must have reached the sell limit floor
+        if (!canFill) {
+          // Re-queue the order as a plain limit at limitPrice for subsequent bars
+          this.orders.push({ ...o, type: o.type === 'BUY_STOP_LIMIT' ? 'BUY_LIMIT' : 'SELL_LIMIT', price: lp });
+          return;
+        }
+        this._applyFill(slot, lp, o.size, bar.time);
       } else {
         // Limit / stop fill
         this._applyFill(slot, fillPrice, o.size, bar.time);

@@ -46,7 +46,7 @@ const ordersRoute: FastifyPluginAsync = async (fastify) => {
     },
   }, async (req, reply) => {
     const { engine } = fastify;
-    const { type, price, size, attributes, trailEntry } = req.body;
+    const { type, price, size, limitPrice, attributes, trailEntry } = req.body;
 
     const release = await fastify.engineMutex.acquire();
     try {
@@ -63,13 +63,54 @@ const ordersRoute: FastifyPluginAsync = async (fastify) => {
       }
       let id: string | undefined;
       switch (type) {
+        // Market orders — execute immediately, no pending order created
+        case 'BUY_MARKET': {
+          if (fastify.broker.getPrice() === 0)
+            return reply.status(400).send({ error: 'No price reference — POST /bars first' });
+          await engine.buy(size);
+          return reply.send({ id: 'market' });
+        }
+        case 'SELL_MARKET': {
+          if (fastify.broker.getPrice() === 0)
+            return reply.status(400).send({ error: 'No price reference — POST /bars first' });
+          await engine.sell(size);
+          return reply.send({ id: 'market' });
+        }
         // Pass size directly — avoids mutating shared _nextOrderSize engine state
-        case 'BUY_LIMIT':  id = engine.addBuyLimit(price, size ?? 1);  break;
-        case 'BUY_STOP':   id = engine.addBuyStop(price, size ?? 1);   break;
-        case 'SELL_LIMIT': id = engine.addSellLimit(price, size ?? 1); break;
-        case 'SELL_STOP':  id = engine.addSellStop(price, size ?? 1);  break;
-        case 'BUY_MIT':    id = engine.addBuyMIT(price, size ?? 1);    break;
-        case 'SELL_MIT':   id = engine.addSellMIT(price, size ?? 1);   break;
+        case 'BUY_LIMIT':  id = engine.addBuyLimit(price!, size ?? 1);  break;
+        case 'BUY_STOP':   id = engine.addBuyStop(price!, size ?? 1);   break;
+        case 'SELL_LIMIT': id = engine.addSellLimit(price!, size ?? 1); break;
+        case 'SELL_STOP':  id = engine.addSellStop(price!, size ?? 1);  break;
+        case 'BUY_MIT':    id = engine.addBuyMIT(price!, size ?? 1);    break;
+        case 'SELL_MIT':   id = engine.addSellMIT(price!, size ?? 1);   break;
+        // Stop-limit orders — require both price (stop trigger) and limitPrice
+        case 'BUY_STOP_LIMIT': {
+          if (price === undefined) return reply.status(400).send({ error: 'price required for BUY_STOP_LIMIT' });
+          if (limitPrice === undefined) return reply.status(400).send({ error: 'limitPrice required for BUY_STOP_LIMIT' });
+          id = engine.addBuyStopLimit(price, limitPrice, size ?? 1);
+          break;
+        }
+        case 'SELL_STOP_LIMIT': {
+          if (price === undefined) return reply.status(400).send({ error: 'price required for SELL_STOP_LIMIT' });
+          if (limitPrice === undefined) return reply.status(400).send({ error: 'limitPrice required for SELL_STOP_LIMIT' });
+          id = engine.addSellStopLimit(price, limitPrice, size ?? 1);
+          break;
+        }
+        // MTO (Market Trail Order) — trailing stop, fills as market when triggered
+        case 'BUY_MTO': {
+          if (!trailEntry) return reply.status(400).send({ error: 'trailEntry required for BUY_MTO' });
+          if (size !== undefined) engine.orderSize(size);
+          try { id = engine.addBuyMTO(trailEntry.mode as TrailMode, trailEntry.distancePts, trailEntry.periods); }
+          finally { if (size !== undefined) engine.orderSize(1); }
+          break;
+        }
+        case 'SELL_MTO': {
+          if (!trailEntry) return reply.status(400).send({ error: 'trailEntry required for SELL_MTO' });
+          if (size !== undefined) engine.orderSize(size);
+          try { id = engine.addSellMTO(trailEntry.mode as TrailMode, trailEntry.distancePts, trailEntry.periods); }
+          finally { if (size !== undefined) engine.orderSize(1); }
+          break;
+        }
         // Unit 3 — trailing entry types (no size param; set+reset to avoid state leak)
         case 'BUY_LIMIT_TRAIL': {
           if (!trailEntry) return reply.status(400).send({ error: 'trailEntry required for BUY_LIMIT_TRAIL' });
