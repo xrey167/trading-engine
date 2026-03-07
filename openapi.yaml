@@ -4,17 +4,28 @@ info:
   title: Trading Engine API
   version: 1.0.0
   description: |
-    REST + WebSocket API for a live trading engine ported from MQL/StereoTrader.
+    Modular trading platform built on a bar-driven core engine (ported from
+    MQL/StereoTrader) with autonomous strategy execution, risk management,
+    cross-instance event streaming, and an audit trail.
 
     ## Architecture
-    The engine is **stateful** — all positions and orders live in a single in-memory
-    instance per server process. State resets on restart.
-    Calls are not isolated by user in the default paper-broker mode.
+
+    The system is organised in layers:
+
+    | Layer | What it does |
+    |-------|-------------|
+    | **Core engine** | In-memory order book, position management, trailing stops, ATR/SMA/RSI. Stateful — state resets on restart. |
+    | **Broker gateway** | Adapter interface (`IFullBrokerAdapter`). Default is `PaperBroker`; MT5 stubs available. |
+    | **Service registry** | Manages autonomous services: strategies, screeners, data providers, risk/order managers. `GET /services` to inspect. |
+    | **Event bus** | Typed pub/sub (`TypedEventBus<AppEventMap>`) — `signal`, `order`, `risk`, `normalized_bar`, `screener`, `tick`, `service:lifecycle`. |
+    | **Event bridges** | Optional cross-instance delivery via **Redis Pub/Sub** (`REDIS_URL`) and/or **RabbitMQ** (`RABBITMQ_URL`) with echo prevention. |
+    | **Audit trail** | Durable RabbitMQ queue (`te.audit`) stores the last 1000 bridged events. Query via `GET /audit/events`. |
+    | **HTTP + WebSocket** | Fastify REST API + `/stream` WebSocket for real-time events. |
+
+    The engine is **bar-driven**: nothing happens between bars. Call `POST /bars`
+    to advance state — orders fill, trailing stops adjust, strategies evaluate.
 
     ## Workflow — Getting Started
-
-    The engine is **bar-driven**: you must push price bars before placing trades.
-    A typical session looks like this:
 
     1. **Push bars** via `POST /bars` to establish a price reference
     2. **Open positions** via `POST /positions/long` or `POST /positions/short`
@@ -40,28 +51,43 @@ info:
     ```
 
     ## Data Pipeline
+
     Bars pushed via `POST /bars` flow through an internal data provider that
     normalizes them into `normalized_bar` events and caches them in a bar cache.
-    When `REDIS_URL` is set, the cache uses a **write-through** pattern
-    (`RedisBarCache`): synchronous reads from an in-memory mirror, async writes
-    to Redis Lists. On startup, `hydrate()` restores bars from the previous
-    session. Without Redis, falls back to a plain in-memory cache.
 
-    A **Redis event bridge** (`RedisEventBridge`) optionally bridges `signal`,
-    `order`, and `normalized_bar` events across process instances via Pub/Sub
-    with echo prevention and type validation.
+    **Bar cache** — When `REDIS_URL` is set, the cache uses a **write-through**
+    pattern (`RedisBarCache`): synchronous reads from an in-memory mirror, async
+    writes to Redis Lists. On startup, `hydrate()` restores bars from the
+    previous session. Without Redis, falls back to a plain in-memory cache.
 
-    When `RABBITMQ_URL` is set, an **AMQP event bridge** (`AmqpEventBridge`)
-    provides durable cross-instance messaging via a RabbitMQ topic exchange
-    (`te.events`). Critical events (`order`, `risk`) use persistent delivery
-    (disk-backed). An **audit consumer** (`AuditConsumer`) subscribes to a
-    durable `te.audit` queue and stores the most recent 1000 events in a ring
-    buffer, queryable via `GET /audit/events`.
+    **Cross-instance event bridges:**
+    - **Redis Pub/Sub** (`RedisEventBridge`) — fire-and-forget delivery of
+      `signal`, `order`, `normalized_bar` events with echo prevention and type
+      validation. Enabled when `REDIS_URL` is set.
+    - **RabbitMQ** (`AmqpEventBridge`) — durable delivery via topic exchange
+      `te.events`. Critical events (`order`, `risk`) use persistent messages
+      (disk-backed). Enabled when `RABBITMQ_URL` is set.
 
-    Autonomous strategies subscribe to `normalized_bar` and receive full
-    historical context from the cache. Additional data providers (external
-    APIs, WebSocket feeds) can be registered via the service registry and feed
-    the same pipeline. Use `GET /services` to inspect registered providers.
+    **Audit trail** — An `AuditConsumer` subscribes to the durable `te.audit`
+    queue (wildcard `event.#` binding) and stores the most recent 1000 events
+    in a ring buffer, queryable via `GET /audit/events`.
+
+    **Autonomous services** — Strategies subscribe to `normalized_bar` and
+    receive full historical context from the cache. A signal→risk→order
+    execution pipeline (`ExecutionSaga`) processes strategy signals through
+    risk validation before order placement. Additional data providers can be
+    registered via the service registry. Use `GET /services` to inspect.
+
+    ## Environment Variables
+
+    | Variable | Required | Purpose |
+    |----------|----------|---------|
+    | `API_KEY` | No | `x-api-key` header guard on write routes |
+    | `OPENBB_API_KEY` | No | Separate key for `/openbb/*` routes |
+    | `ANTHROPIC_API_KEY` | For `/skills` | Agent SDK key |
+    | `REDIS_URL` | No | Bar cache (write-through) + Redis event bridge |
+    | `RABBITMQ_URL` | No | AMQP event bridge + audit trail |
+    | `NODE_ENV` | No | `production` hides stack traces |
 
     ## Coordinate System
     - **Side** integers: `0` = None/flat, `1` = Long, `-1` = Short
