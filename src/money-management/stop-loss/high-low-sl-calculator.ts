@@ -1,9 +1,9 @@
 import { BaseCalculator } from '../base-calculator.js';
 import type { IStopLossCalculator, StopLossParams } from '../types.js';
-import type { Result } from '../../lib/result.js';
-import type { DomainError } from '../../lib/errors.js';
-import { ok, err } from '../../lib/result.js';
-import { insufficientData } from '../../lib/errors.js';
+import type { Result } from '../../shared/lib/result.js';
+import type { DomainError } from '../../shared/lib/errors.js';
+import { ok, err } from '../../shared/lib/result.js';
+import { insufficientData } from '../../shared/lib/errors.js';
 import type { Bars } from '../../../trading-engine.js';
 
 export interface IBarFetcher {

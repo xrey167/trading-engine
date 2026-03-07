@@ -1,8 +1,8 @@
 import { Bars } from '../../trading-engine.js';
-import type { Result } from '../lib/result.js';
-import type { DomainError } from '../lib/errors.js';
-import { ok, err } from '../lib/result.js';
-import { insufficientData } from '../lib/errors.js';
+import type { Result } from '../shared/lib/result.js';
+import type { DomainError } from '../shared/lib/errors.js';
+import { ok, err } from '../shared/lib/result.js';
+import { insufficientData } from '../shared/lib/errors.js';
 
 export function calculateATR(bars: Bars, period: number, shift: number): number | null {
   const required = period + shift + 1;

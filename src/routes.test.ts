@@ -29,7 +29,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from './app.js';
-import type { PaperBroker } from './plugins/broker.js';
+import type { PaperBroker } from './broker/paper/paper-broker.js';
 
 // ─────────────────────────────────────────────────────────────
 // Helpers
