@@ -4,8 +4,9 @@ info:
   title: Trading Engine API
   version: 1.0.0
   description: |
-    High-fidelity paper trading engine ported from MQL/StereoTrader. Combines a
-    bar-driven core engine, a polymorphic order hierarchy, autonomous strategy pipeline,
+    High-fidelity paper trading engine ported from MQL/StereoTrader. Features a
+    **configurable-ingestion core engine** — choose bar-driven, tick-driven, or mix both
+    at runtime. Combines a polymorphic order hierarchy, autonomous strategy pipeline,
     risk management, cross-instance event streaming (Redis + RabbitMQ), and an audit trail.
 
     ---
@@ -50,10 +51,12 @@ info:
 
     | Mode | Endpoint | What it triggers | Typical use |
     |------|----------|-----------------|-------------|
-    | **Bar-driven** | `POST /bars` | Full cycle: fills, SL/TP checks, trailing stop updates, ATR/SMA/RSI recalculation, WebSocket broadcast | Backtesting, candle-close feeds |
-    | **Tick-driven** | `POST /ticks` | Fills and SL/TP exits only — no indicator update | Live bid/ask feeds between candles |
+    | **Bar-driven** | `POST /bars` | Full cycle: fills, SL/TP checks, trailing stop updates, ATR/SMA/RSI recalculation, WebSocket broadcast | Candle-close feeds, backtesting, strategy evaluation |
+    | **Tick-driven** | `POST /ticks` | Fills and SL/TP exits only — no indicator update | Live bid/ask streams, intra-bar precision exits |
+    | **Mixed** | Both | Bars drive indicator state; ticks provide fill resolution between candles | Live trading with candle-based strategy + tick-level execution |
 
-    You can mix both: push candles at each close and ticks in between for intra-bar exit accuracy.
+    **You choose the mode at runtime** — there is no configuration switch. Simply call
+    whichever endpoint(s) fit your data feed. All three modes are supported simultaneously.
 
     ### Order Lifecycle
 
@@ -108,7 +111,7 @@ info:
 
     ## Quick Start
 
-    ### Bar-driven (recommended for backtesting)
+    ### Mode 1 — Bar-driven (full state machine: fills + indicators + trailing)
 
     ```bash
     # 1. Push a bar to establish price
@@ -127,7 +130,7 @@ info:
       -d '{"type":"BUY_LIMIT","price":1.084,"size":1.0}'
     ```
 
-    ### Tick-driven (for live feeds between candles)
+    ### Mode 2 — Tick-driven (fills only: no indicator update)
 
     ```bash
     # Push a bid/ask tick — triggers fills without updating indicators
@@ -197,7 +200,7 @@ tags:
       engine state machine, or push individual bid/ask ticks (`POST /ticks`) for intra-bar
       fill precision. Get account equity via `GET /account`, toggle engine flags via
       `PUT /engine/config`, and subscribe to real-time events via WebSocket (`GET /stream`).
-      Call `POST /bars` at least once before any position/order endpoint to establish a price reference.
+      At least one `POST /bars` or `POST /ticks` call is required before any position/order endpoint to establish a price reference.
   - name: Positions
     description: >
       Open/close market positions on LONG/SHORT slots. Multiple fills on the same
@@ -310,9 +313,10 @@ paths:
            if configured
         5. **WebSocket broadcast** — a `bar` event is emitted to all connected clients
 
-        **You must call this endpoint before any position/order endpoint** to establish
-        a price reference. Failing to do so will result in 400 errors on market order
-        endpoints.
+        **A price reference must be established before any position/order endpoint.**
+        Use `POST /bars` (full state machine) or `POST /ticks` (fills only) — either
+        satisfies the requirement. Failing to do so will result in 400 errors on market
+        order endpoints.
 
         ### Usage Pattern
         In a live trading setup, call this endpoint on every new candle close from your
