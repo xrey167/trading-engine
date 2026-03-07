@@ -2,9 +2,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { Type } from '@sinclair/typebox';
 import { ErrorResponseSchema } from '../../shared/schemas/common.js';
 import { PositionInfoVOSchema } from '../../shared/domain/position.js';
-import { GetPositionsUseCase } from '../use-cases/get-positions.js';
-import { ClosePositionUseCase } from '../use-cases/close-position.js';
-import { ModifyPositionUseCase } from '../use-cases/modify-position.js';
+import { createTradingUseCases } from '../use-cases/index.js';
 
 // TODO: dev-only stub — replace with real auth (JWT / session) before production
 const DEFAULT_USER_ID = 'default';
@@ -15,7 +13,7 @@ const ModifyBodySchema = Type.Object({
 });
 
 const v1PositionsRoute: FastifyPluginAsync = async (fastify) => {
-  const { broker, log } = fastify;
+  const useCases = createTradingUseCases(fastify.broker, fastify.log);
 
   // GET /v1/positions — list all open positions
   fastify.get('/v1/positions', {
@@ -26,8 +24,7 @@ const v1PositionsRoute: FastifyPluginAsync = async (fastify) => {
       },
     },
   }, async (_req, reply) => {
-    const useCase = new GetPositionsUseCase(broker, log);
-    const result = await useCase.execute(DEFAULT_USER_ID);
+    const result = await useCases.getPositions.execute(DEFAULT_USER_ID);
     if (!result.ok) {
       return reply.status(500).send({ error: result.error.message });
     }
@@ -54,8 +51,7 @@ const v1PositionsRoute: FastifyPluginAsync = async (fastify) => {
         return reply.status(400).send({ error: 'ticket must be a number' });
       }
       const deviation = req.query.deviation ?? 0;
-      const useCase  = new ClosePositionUseCase(broker, log);
-      const result   = await useCase.execute(ticket, deviation, DEFAULT_USER_ID);
+      const result = await useCases.closePosition.execute(ticket, deviation, DEFAULT_USER_ID);
       if (!result.ok) {
         const status = result.error.type === 'NOT_FOUND' ? 404 : 400;
         return reply.status(status).send({ error: result.error.message });
@@ -84,8 +80,7 @@ const v1PositionsRoute: FastifyPluginAsync = async (fastify) => {
         return reply.status(400).send({ error: 'ticket must be a number' });
       }
       const body    = req.body as { stopLoss: number; takeProfit: number };
-      const useCase = new ModifyPositionUseCase(broker, log);
-      const result  = await useCase.execute(ticket, body.stopLoss, body.takeProfit, DEFAULT_USER_ID);
+      const result = await useCases.modifyPosition.execute(ticket, body.stopLoss, body.takeProfit, DEFAULT_USER_ID);
       if (!result.ok) {
         const status = result.error.type === 'NOT_FOUND' ? 404 : 400;
         return reply.status(status).send({ error: result.error.message });

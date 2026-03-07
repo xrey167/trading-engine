@@ -11,12 +11,13 @@ export const ServiceStatus = {
 export type ServiceStatus = (typeof ServiceStatus)[keyof typeof ServiceStatus];
 
 export const ServiceKind = {
-  Broker:       'BROKER',
-  DataProvider: 'DATA_PROVIDER',
-  Strategy:     'STRATEGY',
-  Screener:     'SCREENER',
-  OrderManager: 'ORDER_MANAGER',
-  RiskManager:  'RISK_MANAGER',
+  Broker:        'BROKER',
+  DataProvider:  'DATA_PROVIDER',
+  Strategy:      'STRATEGY',
+  Screener:      'SCREENER',
+  OrderManager:  'ORDER_MANAGER',
+  RiskManager:   'RISK_MANAGER',
+  ExecutionSaga: 'EXECUTION_SAGA',
 } as const;
 export type ServiceKind = (typeof ServiceKind)[keyof typeof ServiceKind];
 

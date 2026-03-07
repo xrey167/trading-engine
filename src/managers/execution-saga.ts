@@ -4,21 +4,46 @@ import type { Logger } from '../shared/lib/logger.js';
 import type { ServiceRegistry } from '../shared/services/service-registry.js';
 import { Mutex } from '../shared/lib/mutex.js';
 import { ServiceKind } from '../shared/services/types.js';
+import { BaseService } from '../shared/services/base-service.js';
 import { BrokerService } from '../broker/broker-service.js';
 import type { RiskManagerService } from './risk-manager.js';
 
-export class ExecutionSaga {
+export class ExecutionSaga extends BaseService {
+  readonly id: string;
+  readonly kind = ServiceKind.ExecutionSaga;
+  readonly name: string;
   private readonly symbolMutexes = new Map<string, Mutex>();
+  private _signalsProcessed = 0;
+  private _ordersPlaced = 0;
+  private _ordersRejected = 0;
 
   constructor(
+    id: string,
+    name: string,
     private readonly riskManager: RiskManagerService,
     private readonly registry: ServiceRegistry,
-    private readonly eventBus: TypedEventBus<AppEventMap>,
-    private readonly logger: Logger,
-  ) {}
+    eventBus: TypedEventBus<AppEventMap>,
+    logger: Logger,
+  ) {
+    super(eventBus, logger);
+    this.id = id;
+    this.name = name;
+  }
+
+  protected async onStart(): Promise<void> {}
+  protected async onStop(): Promise<void> {}
+
+  protected getHealthMetadata(): Record<string, unknown> {
+    return {
+      signalsProcessed: this._signalsProcessed,
+      ordersPlaced: this._ordersPlaced,
+      ordersRejected: this._ordersRejected,
+    };
+  }
 
   async execute(signal: SignalEvent): Promise<void> {
     if (signal.action === 'HOLD') return;
+    this._signalsProcessed++;
 
     const mutex = this.getSymbolMutex(signal.symbol);
     const release = await mutex.acquire();
@@ -36,6 +61,7 @@ export class ExecutionSaga {
       }
 
       if (!riskResult.value.approved) {
+        this._ordersRejected++;
         this.logger.info(`ExecutionSaga signal rejected by risk: ${riskResult.value.reason}`);
         return;
       }
@@ -73,6 +99,7 @@ export class ExecutionSaga {
       });
 
       if (!orderResult.ok) {
+        this._ordersRejected++;
         this.riskManager.releaseCapacity(signal.symbol);
         this.eventBus.emit('order', {
           action: 'REJECTED',
@@ -89,6 +116,7 @@ export class ExecutionSaga {
       }
 
       // 4. Emit success
+      this._ordersPlaced++;
       this.eventBus.emit('order', {
         action: 'FILLED',
         brokerId,
@@ -101,6 +129,7 @@ export class ExecutionSaga {
       });
     } catch (e) {
       // Compensation: release risk capacity
+      this._ordersRejected++;
       this.riskManager.releaseCapacity(signal.symbol);
 
       this.eventBus.emit('order', {

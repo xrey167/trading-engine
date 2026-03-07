@@ -48,7 +48,7 @@ function setupSaga(riskOverrides: Partial<{ maxOpenPositions: number; maxPositio
     bus, nullLogger,
   );
 
-  const saga = new ExecutionSaga(riskManager, registry, bus, nullLogger);
+  const saga = new ExecutionSaga('saga:test', 'Test Saga', riskManager, registry, bus, nullLogger);
 
   return { bus, registry, broker, paperBroker, riskManager, saga };
 }
