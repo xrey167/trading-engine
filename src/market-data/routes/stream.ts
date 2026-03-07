@@ -1,6 +1,8 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { WebSocket } from '@fastify/websocket';
 import { BoundedQueue } from '../../shared/lib/bounded-queue.js';
+
+// ws readyState constants — avoids runtime dependency on @fastify/websocket's re-export
+const WS_OPEN = 1;
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
 const FLUSH_INTERVAL_MS = 50;
@@ -76,7 +78,7 @@ const streamRoute: FastifyPluginAsync = async (fastify) => {
 
     // ── Flush queue to socket ──
     const flushInterval = setInterval(() => {
-      if (socket.readyState !== WebSocket.OPEN) return;
+      if (socket.readyState !== WS_OPEN) return;
 
       if (useEnvelope) {
         const dropped = queue.droppedCount - lastDroppedSnapshot;
@@ -88,7 +90,7 @@ const streamRoute: FastifyPluginAsync = async (fastify) => {
 
       const messages = queue.drain();
       for (const msg of messages) {
-        if (socket.readyState !== WebSocket.OPEN) break;
+        if (socket.readyState !== WS_OPEN) break;
         if (useEnvelope) {
           socket.send(msg);
         } else {

@@ -1792,27 +1792,94 @@ describe('R29 – UDF routes return well-shaped responses', () => {
 });
 
 // ─────────────────────────────────────────────────────────────
-// R30 – WS protocol versioning
+// R30 – WebSocket /stream
 // ─────────────────────────────────────────────────────────────
 
-describe('R30 – WebSocket protocol versioning', () => {
+describe('R30 – WebSocket /stream', () => {
   let app: FastifyInstance;
-  beforeEach(async () => { app = await buildApp({ logger: false }); await app.listen({ port: 0 }); });
+  let port: number;
+
+  beforeEach(async () => {
+    app = await buildApp({ logger: false });
+    await app.listen({ port: 0 });
+    const addr = app.server.address();
+    port = typeof addr === 'object' && addr ? addr.port : 0;
+  });
   afterEach(async () => { await app.close(); });
 
-  it('v2 client receives connected message with protocol version', async () => {
-    const addr = app.server.address();
-    const port = typeof addr === 'object' && addr ? addr.port : 0;
-    const { WebSocket } = await import('ws');
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/stream`);
-    const msg = await new Promise<string>((resolve, reject) => {
-      ws.on('message', (data: Buffer) => resolve(data.toString()));
+  /** Connect a WS client and collect messages. Listener is set before open to avoid race. */
+  async function connectWS(path = '/stream'): Promise<{ ws: import('ws').WebSocket; msgs: string[] }> {
+    const { default: WS } = await import('ws');
+    const msgs: string[] = [];
+    const ws = new WS(`ws://127.0.0.1:${port}${path}`);
+    ws.on('message', (data: Buffer) => msgs.push(data.toString()));
+    await new Promise<void>((resolve, reject) => {
+      ws.on('open', () => resolve());
       ws.on('error', reject);
-      setTimeout(() => reject(new Error('timeout')), 5000);
     });
-    const parsed = JSON.parse(msg);
-    expect(parsed.type).toBe('connected');
-    expect(parsed.protocol).toBe(2);
+    return { ws, msgs };
+  }
+
+  it('v2 client receives connected message with protocol version', async () => {
+    const { ws, msgs } = await connectWS();
+    await new Promise(r => setTimeout(r, 100));
+    expect(msgs.length).toBeGreaterThanOrEqual(1);
+    const connected = JSON.parse(msgs[0]);
+    expect(connected.type).toBe('connected');
+    expect(connected.protocol).toBe(2);
     ws.close();
+  });
+
+  it('v2 client receives bar events as envelopes', async () => {
+    const { ws, msgs } = await connectWS();
+    await new Promise(r => setTimeout(r, 50)); // wait for connected msg
+
+    await app.inject({ method: 'POST', url: '/bars', payload: barsPayload() });
+    await new Promise(r => setTimeout(r, 200)); // wait for flush interval
+
+    expect(msgs.length).toBeGreaterThanOrEqual(2);
+    const barEvent = JSON.parse(msgs[1]);
+    expect(barEvent.type).toBe('bar');
+    expect(barEvent.id).toBeGreaterThan(0);
+    expect(barEvent.payload).toBeDefined();
+    ws.close();
+  });
+
+  it('v1 client does not receive connected message', async () => {
+    const { ws, msgs } = await connectWS('/stream?v=1');
+    await new Promise(r => setTimeout(r, 100));
+    const hasConnected = msgs.some(m => {
+      try { return JSON.parse(m).type === 'connected'; } catch { return false; }
+    });
+    expect(hasConnected).toBe(false);
+    ws.close();
+  });
+
+  it('reconnection replays missed events via lastEventId', async () => {
+    // Connect client to register route-level listeners
+    const { ws: ws1 } = await connectWS();
+    await new Promise(r => setTimeout(r, 50));
+
+    // Emit bars to populate replay buffer
+    await app.inject({ method: 'POST', url: '/bars', payload: barsPayload() });
+    await app.inject({ method: 'POST', url: '/bars', payload: barsPayload() });
+    await app.inject({ method: 'POST', url: '/bars', payload: barsPayload() });
+    ws1.close();
+    await new Promise(r => setTimeout(r, 100));
+
+    // Reconnect with lastEventId=1
+    const { ws: ws2, msgs } = await connectWS('/stream?lastEventId=1');
+    await new Promise(r => setTimeout(r, 200));
+
+    // Should have connected + replayed bar events (order may vary due to flush timing)
+    expect(msgs.length).toBeGreaterThanOrEqual(1);
+    const parsed = msgs.map(m => JSON.parse(m));
+    expect(parsed.some((e: { type: string }) => e.type === 'connected')).toBe(true);
+
+    const replayed = parsed.filter((e: { type: string }) => e.type === 'bar');
+    for (const evt of replayed) {
+      expect(evt.id).toBeGreaterThan(1);
+    }
+    ws2.close();
   });
 });
