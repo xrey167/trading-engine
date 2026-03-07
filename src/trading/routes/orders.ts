@@ -59,7 +59,7 @@ const ordersRoute: FastifyPluginAsync = async (fastify) => {
         if (attributes.bracketSL !== undefined) engine.bracketSL(attributes.bracketSL);
         if (attributes.bracketTP !== undefined) engine.bracketTP(attributes.bracketTP);
         if (attributes.pullbackPts !== undefined) engine.orderLimitPullback(attributes.pullbackPts);
-        if (attributes.limitConfirm !== undefined) engine.orderLimitConfirm(attributes.limitConfirm as 0 | 1 | 2 | 3);
+        if (attributes.limitConfirm !== undefined) engine.orderLimitConfirm(attributes.limitConfirm);
       }
       let id: string | undefined;
       switch (type) {

@@ -36,10 +36,10 @@ export const AtrMethod = { Sma: 0, Ema: 1 } as const;
 export type AtrMethod = (typeof AtrMethod)[keyof typeof AtrMethod];
 
 export const LimitConfirm = {
-  None:      0,
-  Wick:      1,  // price must wick back from limit level
-  WickBreak: 2,  // wick + body must break back
-  WickColor: 3,  // wick + confirming candle color
+  None:      'LIMIT_CONFIRM_NONE',
+  Wick:      'LIMIT_CONFIRM_WICK',      // price must wick back from limit level
+  WickBreak: 'LIMIT_CONFIRM_WICKBREAK', // wick + body must break back
+  WickColor: 'LIMIT_CONFIRM_WICKCOLOR', // wick + confirming candle color
 } as const;
 export type LimitConfirm = (typeof LimitConfirm)[keyof typeof LimitConfirm];
 

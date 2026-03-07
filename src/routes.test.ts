@@ -163,7 +163,7 @@ describe('R2 – POST /orders', () => {
   it('accepts limitConfirm attribute', async () => {
     const res = await app.inject({
       method: 'POST', url: '/orders',
-      payload: { type: 'BUY_LIMIT', price: 1.09500, attributes: { limitConfirm: 1 } },
+      payload: { type: 'BUY_LIMIT', price: 1.09500, attributes: { limitConfirm: 'LIMIT_CONFIRM_WICK' } },
     });
     expect(res.statusCode).toBe(200);
   });

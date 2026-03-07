@@ -28,10 +28,10 @@ export const AtrMethodSchema = Type.Union([
 ]);
 
 export const LimitConfirmSchema = Type.Union([
-  Type.Literal(0),
-  Type.Literal(1),
-  Type.Literal(2),
-  Type.Literal(3),
+  Type.Literal('LIMIT_CONFIRM_NONE'),
+  Type.Literal('LIMIT_CONFIRM_WICK'),
+  Type.Literal('LIMIT_CONFIRM_WICKBREAK'),
+  Type.Literal('LIMIT_CONFIRM_WICKCOLOR'),
 ]);
 
 export const OrderEntryTypeSchema = Type.Union([
