@@ -29,6 +29,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from './app.js';
+import type { PaperBroker } from './plugins/broker.js';
 
 // ─────────────────────────────────────────────────────────────
 // Helpers
@@ -1109,7 +1110,7 @@ describe('R22 – POST /v1/signal', () => {
 // R23 – GET / DELETE / PATCH /v1/positions
 // ─────────────────────────────────────────────────────────────
 
-type SeedPosition = Parameters<FastifyInstance['broker']['seedPosition']>[0];
+type SeedPosition = Parameters<PaperBroker['seedPosition']>[0];
 
 function makeSeedPosition(ticket: number): SeedPosition {
   return {
@@ -1135,7 +1136,7 @@ describe('R23 – GET /v1/positions', () => {
   });
 
   it('returns seeded positions', async () => {
-    app.broker.seedPosition(makeSeedPosition(1001));
+    (app.broker as PaperBroker).seedPosition(makeSeedPosition(1001));
     const res = await app.inject({ method: 'GET', url: '/v1/positions' });
     expect(res.statusCode).toBe(200);
     const positions = res.json();
@@ -1150,7 +1151,7 @@ describe('R23 – DELETE /v1/positions/:ticket', () => {
   afterEach(() => app.close());
 
   it('returns 204 for an existing position', async () => {
-    app.broker.seedPosition(makeSeedPosition(2001));
+    (app.broker as PaperBroker).seedPosition(makeSeedPosition(2001));
     const res = await app.inject({ method: 'DELETE', url: '/v1/positions/2001' });
     expect(res.statusCode).toBe(204);
   });
@@ -1167,7 +1168,7 @@ describe('R23 – PATCH /v1/positions/:ticket', () => {
   afterEach(() => app.close());
 
   it('returns 204 when modifying an existing position', async () => {
-    app.broker.seedPosition(makeSeedPosition(3001));
+    (app.broker as PaperBroker).seedPosition(makeSeedPosition(3001));
     const res = await app.inject({
       method: 'PATCH', url: '/v1/positions/3001',
       payload: { stopLoss: 1.0950, takeProfit: 1.1100 },
@@ -1192,7 +1193,7 @@ describe('R23 – PATCH /v1/positions/:ticket', () => {
   });
 
   it('returns 400 for an empty body (missing SL/TP)', async () => {
-    app.broker.seedPosition(makeSeedPosition(3002));
+    (app.broker as PaperBroker).seedPosition(makeSeedPosition(3002));
     const res = await app.inject({
       method: 'PATCH', url: '/v1/positions/3002',
       payload: {},

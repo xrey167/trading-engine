@@ -2,6 +2,15 @@ import { timingSafeEqual } from 'node:crypto';
 import type { FastifyPluginAsync } from 'fastify';
 import { Type } from '@sinclair/typebox';
 import { Side } from '../../../trading-engine.js';
+import {
+  OpenBBPositionRowSchema,
+  OpenBBMetricSchema,
+  OpenBBDealRowSchema,
+  OpenBBOmniContentSchema,
+  PendingOrderSchema,
+  ErrorResponseSchema,
+} from '../../schemas/index.js';
+import { SymbolInfoVOSchema } from '../../domain/account.js';
 
 // ─── Discovery configs ───────────────────────────────────────────────────────
 
@@ -128,17 +137,23 @@ const openbbRoute: FastifyPluginAsync = async (fastify) => {
 
   // ── Discovery ──────────────────────────────────────────────────────────────
 
-  fastify.get('/widgets.json', async (_req, reply) => {
+  fastify.get('/widgets.json', {
+    schema: { response: { 200: Type.Object({}, { additionalProperties: true }) } },
+  }, async (_req, reply) => {
     return reply.send(WIDGETS_CONFIG);
   });
 
-  fastify.get('/apps.json', async (_req, reply) => {
+  fastify.get('/apps.json', {
+    schema: { response: { 200: Type.Object({}, { additionalProperties: true }) } },
+  }, async (_req, reply) => {
     return reply.send(APPS_CONFIG);
   });
 
   // ── Positions ──────────────────────────────────────────────────────────────
 
-  fastify.get('/openbb/positions', async (_req, reply) => {
+  fastify.get('/openbb/positions', {
+    schema: { response: { 200: Type.Array(OpenBBPositionRowSchema) } },
+  }, async (_req, reply) => {
     const { engine, broker } = fastify;
     const price = broker.getPrice();
     const rows = [Side.Long, Side.Short].map(side => {
@@ -161,18 +176,24 @@ const openbbRoute: FastifyPluginAsync = async (fastify) => {
 
   // ── Orders ─────────────────────────────────────────────────────────────────
 
-  fastify.get('/openbb/orders', async (_req, reply) => {
+  fastify.get('/openbb/orders', {
+    schema: { response: { 200: Type.Array(PendingOrderSchema) } },
+  }, async (_req, reply) => {
     return reply.send(fastify.engine.getOrders());
   });
 
   // ── Account ────────────────────────────────────────────────────────────────
 
-  fastify.get('/openbb/account/equity', async (_req, reply) => {
+  fastify.get('/openbb/account/equity', {
+    schema: { response: { 200: OpenBBMetricSchema } },
+  }, async (_req, reply) => {
     const { equity, balance } = await fastify.broker.getAccount();
     return reply.send({ value: equity, label: 'Equity', delta: equity - balance });
   });
 
-  fastify.get('/openbb/account/balance', async (_req, reply) => {
+  fastify.get('/openbb/account/balance', {
+    schema: { response: { 200: OpenBBMetricSchema } },
+  }, async (_req, reply) => {
     const { balance } = await fastify.broker.getAccount();
     return reply.send({ value: balance, label: 'Balance', delta: 0 });
   });
@@ -180,7 +201,14 @@ const openbbRoute: FastifyPluginAsync = async (fastify) => {
   // ── History ────────────────────────────────────────────────────────────────
 
   fastify.get('/openbb/deals', {
-    schema: { querystring: DealsQuerySchema },
+    schema: {
+      querystring: DealsQuerySchema,
+      response: {
+        200: Type.Array(OpenBBDealRowSchema),
+        400: ErrorResponseSchema,
+        500: ErrorResponseSchema,
+      },
+    },
   }, async (req, reply) => {
     const { from, to } = req.query as { from?: string; to?: string };
     const fromDate = from ? new Date(from) : new Date(0);
@@ -209,7 +237,14 @@ const openbbRoute: FastifyPluginAsync = async (fastify) => {
   // ── Market data ────────────────────────────────────────────────────────────
 
   fastify.get('/openbb/symbol', {
-    schema: { querystring: SymbolQuerySchema },
+    schema: {
+      querystring: SymbolQuerySchema,
+      response: {
+        200: Type.Array(SymbolInfoVOSchema),
+        400: ErrorResponseSchema,
+        404: ErrorResponseSchema,
+      },
+    },
   }, async (req, reply) => {
     const { symbol } = req.query as { symbol?: string };
     if (!symbol) return reply.status(400).send({ error: 'symbol query param required' });
@@ -220,7 +255,9 @@ const openbbRoute: FastifyPluginAsync = async (fastify) => {
 
   // ── Engine config ──────────────────────────────────────────────────────────
 
-  fastify.get('/openbb/engine-config', async (_req, reply) => {
+  fastify.get('/openbb/engine-config', {
+    schema: { response: { 200: Type.Array(OpenBBOmniContentSchema) } },
+  }, async (_req, reply) => {
     const cfg = fastify.atrConfig;
     const md = [
       '## ATR Config',

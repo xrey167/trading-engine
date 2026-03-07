@@ -15,6 +15,7 @@ import type {
 } from '../gateways/types.js';
 import { ok, err, type Result } from '../lib/result.js';
 import { notFound, gatewayError, type DomainError } from '../lib/errors.js';
+import { consoleLogger, type Logger } from '../lib/logger.js';
 
 /**
  * Paper broker — simulates fills in memory.
@@ -48,7 +49,7 @@ export class PaperBroker implements IBrokerAdapter, IOrderGateway, IPositionGate
   private barsStore: Map<string, OHLC[]> = new Map();
   private accountInfoStore: AccountInfoVO | null = null;
 
-  constructor(private readonly emitter: EventEmitter) {}
+  constructor(private readonly emitter: EventEmitter, private readonly log: Logger = consoleLogger) {}
 
   // ───── IBrokerAdapter methods ─────
 
@@ -68,14 +69,14 @@ export class PaperBroker implements IBrokerAdapter, IOrderGateway, IPositionGate
       time:  new Date(),
       id:    `fill-${++this.seq}`,
     };
-    console.log(`[PaperBroker] fill  side=${side} size=${size} price=${report.price} ${info ?? ''}`);
+    this.log.info(`[PaperBroker] fill  side=${side} size=${size} price=${report.price} ${info ?? ''}`);
     this.emitter.emit('fill', { side, size, price: report.price, time: report.time, id: report.id });
     return report;
   }
 
   async closePosition(side: Side, size: number, info?: string): Promise<{ price: number }> {
     const price = this.priceRef;
-    console.log(`[PaperBroker] close side=${side} size=${size} price=${price} ${info ?? ''}`);
+    this.log.info(`[PaperBroker] close side=${side} size=${size} price=${price} ${info ?? ''}`);
     this.emitter.emit('close', { side, size, price, time: new Date() });
     return { price };
   }
