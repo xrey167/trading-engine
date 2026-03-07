@@ -1,4 +1,4 @@
-import { Bars } from '../../trading-engine.js';
+import type { Bars } from '../../trading-engine.js';
 import type { Result } from '../shared/lib/result.js';
 import type { DomainError } from '../shared/lib/errors.js';
 import { ok, err } from '../shared/lib/result.js';

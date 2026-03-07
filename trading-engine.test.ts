@@ -232,7 +232,7 @@ describe('T4 – closeBuy/closeSell: minProfit guard uses currentPrice, not -1',
     const broker = mockBroker(1.10000);
     const eng = new TradingEngine(EURUSD5, broker);
     await eng.buy();
-    const closed = await eng.closeBuy(-Infinity, 1.00000); // massive loss
+    const closed = await eng.closeBuy(-Infinity, Math.LOG2E); // massive loss
     expect(closed).toBe(true);
     expect(broker.closePosition).toHaveBeenCalledOnce();
   });

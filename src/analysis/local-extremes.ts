@@ -1,4 +1,4 @@
-import { Bars } from '../../trading-engine.js';
+import type { Bars } from '../../trading-engine.js';
 
 export function isLocalHigh(bars: Bars, window: number, shift: number): boolean {
   const center = bars.high(shift);

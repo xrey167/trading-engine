@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { Type } from '@sinclair/typebox';
-import { TrailMode } from '../../../trading-engine.js';
+import type { TrailMode } from '../../../trading-engine.js';
 import { ErrorResponseSchema, OkResponseSchema } from '../../shared/schemas/common.js';
 import {
   PendingOrderSchema,
@@ -76,13 +76,24 @@ const ordersRoute: FastifyPluginAsync = async (fastify) => {
           await engine.sell(size);
           return reply.send({ id: 'market' });
         }
-        // Pass size directly — avoids mutating shared _nextOrderSize engine state
-        case 'BUY_LIMIT':  id = engine.addBuyLimit(price!, size ?? 1);  break;
-        case 'BUY_STOP':   id = engine.addBuyStop(price!, size ?? 1);   break;
-        case 'SELL_LIMIT': id = engine.addSellLimit(price!, size ?? 1); break;
-        case 'SELL_STOP':  id = engine.addSellStop(price!, size ?? 1);  break;
-        case 'BUY_MIT':    id = engine.addBuyMIT(price!, size ?? 1);    break;
-        case 'SELL_MIT':   id = engine.addSellMIT(price!, size ?? 1);   break;
+        // Limit/stop/MIT orders — price is required
+        case 'BUY_LIMIT':
+        case 'BUY_STOP':
+        case 'SELL_LIMIT':
+        case 'SELL_STOP':
+        case 'BUY_MIT':
+        case 'SELL_MIT': {
+          if (price === undefined) return reply.status(400).send({ error: `price required for ${type}` });
+          switch (type) {
+            case 'BUY_LIMIT':  id = engine.addBuyLimit(price, size ?? 1);  break;
+            case 'BUY_STOP':   id = engine.addBuyStop(price, size ?? 1);   break;
+            case 'SELL_LIMIT': id = engine.addSellLimit(price, size ?? 1); break;
+            case 'SELL_STOP':  id = engine.addSellStop(price, size ?? 1);  break;
+            case 'BUY_MIT':    id = engine.addBuyMIT(price, size ?? 1);    break;
+            case 'SELL_MIT':   id = engine.addSellMIT(price, size ?? 1);   break;
+          }
+          break;
+        }
         // Stop-limit orders — require both price (stop trigger) and limitPrice
         case 'BUY_STOP_LIMIT': {
           if (price === undefined) return reply.status(400).send({ error: 'price required for BUY_STOP_LIMIT' });

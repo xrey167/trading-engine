@@ -6,6 +6,10 @@ import websocket from '@fastify/websocket';
 import { SymbolInfo } from '../trading-engine.js';
 import { PaperBroker } from './broker/paper/paper-broker.js';
 import { TypedEventBus } from './shared/event-bus.js';
+import type { AppEventMap } from './shared/services/event-map.js';
+import { ServiceRegistry } from './shared/services/service-registry.js';
+import { ServiceStatus } from './shared/services/types.js';
+import { BrokerService } from './broker/broker-service.js';
 import rateLimitPlugin from './shared/plugins/rate-limit.js';
 import corsPlugin from './shared/plugins/cors.js';
 import engineModule from './engine/index.js';
@@ -15,6 +19,7 @@ import analysisModule from './analysis/index.js';
 import mmModule from './money-management/module.js';
 import openbbModule from './integrations/openbb/index.js';
 import skillsModule from './integrations/skills/index.js';
+import servicesModule from './services/index.js';
 import './shared/types/index.js';
 
 const SWAGGER_UI_HTML = `<!DOCTYPE html>
@@ -104,12 +109,16 @@ export async function buildApp(
   const app = Fastify(opts);
 
   // 1. Shared infrastructure
-  const emitter = new TypedEventBus();
+  const emitter = new TypedEventBus<AppEventMap>();
   const { pair = 'EURUSD', digits = 5 } = cfg.symbol ?? {};
   const symbol  = new SymbolInfo(pair, digits);
   const broker  = new PaperBroker(emitter, app.log);
 
   app.decorate('emitter', emitter);
+
+  // 1b. Service registry
+  const serviceRegistry = new ServiceRegistry();
+  app.decorate('serviceRegistry', serviceRegistry);
 
   // 2. Infrastructure plugins
   await app.register(rateLimitPlugin);
@@ -118,6 +127,16 @@ export async function buildApp(
 
   // 3. Engine module (engine + atr plugins + engine/atr/account routes)
   await app.register(engineModule, { symbol, broker, hedging: cfg.hedging ?? true });
+
+  // 3b. Wrap primary broker+engine as a BrokerService (reuses engine-plugin instances)
+  const primaryBrokerService = new BrokerService(
+    { id: 'broker:paper:primary', name: 'paper-primary', broker, symbol, hedging: cfg.hedging ?? true, engine: app.engine, engineMutex: app.engineMutex },
+    emitter,
+    app.log as never,
+  );
+  // Mark as running since engine-plugin already called connect()
+  (primaryBrokerService as unknown as { status: string }).status = ServiceStatus.Running;
+  serviceRegistry.register(primaryBrokerService);
 
   // 4. Global error handler
   app.setErrorHandler((err: Error & { statusCode?: number }, _request, reply) => {
@@ -143,6 +162,9 @@ export async function buildApp(
   // 6. Integration modules
   await app.register(openbbModule);
   await app.register(skillsModule);
+
+  // 6b. Services module (health routes, service management)
+  await app.register(servicesModule);
 
   // 7. API docs
   const __dirname = dirname(fileURLToPath(import.meta.url));

@@ -4,14 +4,13 @@ import { Candle } from '../../../trading-engine.js';
 // Unit 1 — Result
 import {
   ok, err, isOk, isErr, mapResult,
-  type Result, type Ok, type Err,
+  type Result, 
 } from './result.js';
 
 // Unit 1 — Errors
 import {
   invalidInput, notFound, businessRule,
   gatewayError, notImplemented, insufficientData,
-  type DomainError,
 } from './errors.js';
 
 // Unit 2 — Domain enums
@@ -27,8 +26,7 @@ import { calculateATR, calculateATRResult } from '../../analysis/atr.js';
 
 // Unit 12 — Factories + Mock Adapters
 import {
-  makeBar, makeAccount, makePosition, makeSymbol, makeDeal,
-  makeOHLC, makeBarsFromArrays,
+  makeBar, makeAccount, makePosition, makeSymbol, makeDeal,makeBarsFromArrays,
 } from '../testing/factories.js';
 import {
   MockBrokerAdapter, MockIndicatorAdapter,

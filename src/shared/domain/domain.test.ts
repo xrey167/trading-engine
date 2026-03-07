@@ -4,7 +4,7 @@ import { FormatRegistry } from '@sinclair/typebox';
 
 // Register date-time format so Value.Check validates format: 'date-time' strings
 if (!FormatRegistry.Has('date-time')) {
-  FormatRegistry.Set('date-time', (v) => !isNaN(Date.parse(v)));
+  FormatRegistry.Set('date-time', (v) => !Number.isNaN(Date.parse(v)));
 }
 
 import {

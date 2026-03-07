@@ -28,7 +28,7 @@ export class VolumeBreakoutStrategy implements ISignalStrategy {
   private readonly config: VolumeBreakoutConfig;
   private cachedAverageVolume = 0;
 
-  constructor(config: Partial<VolumeBreakoutConfig> = {}, private readonly logger: Logger) {
+  constructor(config: Partial<VolumeBreakoutConfig> = {}, readonly _logger: Logger) {
     this.config = { ...DEFAULT_CONFIG, ...config };
   }
 

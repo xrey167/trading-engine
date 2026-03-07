@@ -233,7 +233,7 @@ export class SymbolInfo {
   readonly pointSize: number;
 
   constructor(public readonly name: string, public readonly digits: number) {
-    this.pointSize = Math.pow(10, -digits);
+    this.pointSize = 10 ** -digits;
   }
 
   priceToPoints(price: number): number  { return price / this.pointSize; }
@@ -688,7 +688,7 @@ export class TradingEngine {
    */
   addBuyStopLimit(stopPrice: number, limitPrice: number, size?: number): string {
     const id = this._addOrder('BUY_STOP_LIMIT', Side.Long, stopPrice, size);
-    const o  = this._findOrder(id)!;
+    const o  = this._getOrder(id);
     o.attributes.limitPrice = limitPrice;
     return id;
   }
@@ -699,7 +699,7 @@ export class TradingEngine {
    */
   addSellStopLimit(stopPrice: number, limitPrice: number, size?: number): string {
     const id = this._addOrder('SELL_STOP_LIMIT', Side.Short, stopPrice, size);
-    const o  = this._findOrder(id)!;
+    const o  = this._getOrder(id);
     o.attributes.limitPrice = limitPrice;
     return id;
   }
@@ -716,7 +716,7 @@ export class TradingEngine {
    */
   addBuyMTO(mode: TrailMode, distancePts: number, periods = 0): string {
     const id = this._addOrder('BUY_MTO', Side.Long, Infinity, undefined);
-    const o  = this._findOrder(id)!;
+    const o  = this._getOrder(id);
     o.attributes.trailEntry = { mode, distPts: distancePts, periods };
     o._trailRef = Infinity;
     return id;
@@ -730,7 +730,7 @@ export class TradingEngine {
    */
   addSellMTO(mode: TrailMode, distancePts: number, periods = 0): string {
     const id = this._addOrder('SELL_MTO', Side.Short, -Infinity, undefined);
-    const o  = this._findOrder(id)!;
+    const o  = this._getOrder(id);
     o.attributes.trailEntry = { mode, distPts: distancePts, periods };
     o._trailRef = -Infinity;
     return id;
@@ -743,7 +743,7 @@ export class TradingEngine {
    */
   addBuyLimitTrail(mode: TrailMode, distancePts: number, periods = 0): string {
     const id = this._addOrder('BUY_LIMIT', Side.Long, 0, undefined);
-    const o = this._findOrder(id)!;
+    const o = this._getOrder(id);
     o.attributes.trailEntry = { mode, distPts: distancePts, periods };
     o._trailRef = -Infinity;
     return id;
@@ -751,7 +751,7 @@ export class TradingEngine {
 
   addSellLimitTrail(mode: TrailMode, distancePts: number, periods = 0): string {
     const id = this._addOrder('SELL_LIMIT', Side.Short, 0, undefined);
-    const o = this._findOrder(id)!;
+    const o = this._getOrder(id);
     o.attributes.trailEntry = { mode, distPts: distancePts, periods };
     o._trailRef = Infinity;
     return id;
@@ -760,7 +760,7 @@ export class TradingEngine {
   /** Trailing buy-stop — stop price trails above the market. */
   addBuyStopTrail(mode: TrailMode, distancePts: number, periods = 0): string {
     const id = this._addOrder('BUY_STOP', Side.Long, Infinity, undefined);
-    const o = this._findOrder(id)!;
+    const o = this._getOrder(id);
     o.attributes.trailEntry = { mode, distPts: distancePts, periods };
     o._trailRef = Infinity;
     return id;
@@ -768,7 +768,7 @@ export class TradingEngine {
 
   addSellStopTrail(mode: TrailMode, distancePts: number, periods = 0): string {
     const id = this._addOrder('SELL_STOP', Side.Short, 0, undefined);
-    const o = this._findOrder(id)!;
+    const o = this._getOrder(id);
     o.attributes.trailEntry = { mode, distPts: distancePts, periods };
     o._trailRef = -Infinity;
     return id;
@@ -787,7 +787,7 @@ export class TradingEngine {
   }): string {
     const side = opts.entryType.startsWith('BUY') ? Side.Long : Side.Short;
     const id = this._addOrder(opts.entryType, side, opts.entryPrice, opts.size);
-    const o  = this._findOrder(id)!;
+    const o  = this._getOrder(id);
     o.attributes.bracketSL = opts.slPts;
     o.attributes.bracketTP = opts.tpPts;
     return id;
@@ -1015,8 +1015,15 @@ export class TradingEngine {
     return this.orders.find(o => o.id === id);
   }
 
+  /** Like _findOrder but throws if not found — used right after _addOrder where existence is guaranteed. */
+  private _getOrder(id: string): PendingOrder {
+    const o = this._findOrder(id);
+    if (!o) throw new Error(`Order ${id} not found immediately after creation`);
+    return o;
+  }
+
   /** Per-bar: update trailing-entry order prices */
-  private async _updateTrailingEntryOrders(bar: Candle, bars: Bars): Promise<void> {
+  private async _updateTrailingEntryOrders(bar: Candle, _bars: Bars): Promise<void> {
     for (const o of this.orders) {
       // Limit-pullback: trailing pending limit that follows the market
       if (o.attributes.pullbackPts != null) {
@@ -1099,7 +1106,7 @@ export class TradingEngine {
     }
   }
 
-  private async _fillOrder(o: PendingOrder, bar: Candle, bars: Bars): Promise<void> {
+  private async _fillOrder(o: PendingOrder, bar: Candle, _bars: Bars): Promise<void> {
     const attrs = o.attributes;
 
     // Limit-confirm check (require wick / color confirmation)
@@ -1515,7 +1522,7 @@ function parseAtrMode(mode: AtrModeString): { period: number; daily: boolean } |
   if (mode === 'None') return null;
   const m = mode.match(/^ATR\s+(\d+)(d?)$/);
   if (!m) return null;
-  return { period: parseInt(m[1]), daily: m[2] === 'd' };
+  return { period: parseInt(m[1], 10), daily: m[2] === 'd' };
 }
 
 /**

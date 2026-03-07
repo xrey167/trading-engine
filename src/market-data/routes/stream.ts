@@ -48,7 +48,7 @@ const streamRoute: FastifyPluginAsync = async (fastify) => {
   // Clients can request v1 (raw payloads) via ?v=1 query param
   fastify.get('/stream', { websocket: true }, (socket, request) => {
     const query = request.query as Record<string, string>;
-    const clientVersion = Number(query['v']) || PROTOCOL_VERSION;
+    const clientVersion = Number(query.v) || PROTOCOL_VERSION;
     const useEnvelope = clientVersion >= 2;
     const queue = new BoundedQueue<string>(QUEUE_MAX_SIZE);
     let lastDroppedSnapshot = 0;
@@ -63,7 +63,7 @@ const streamRoute: FastifyPluginAsync = async (fastify) => {
     // ── Reconnection: replay missed events ──
     const lastEventId =
       (request.headers['last-event-id'] as string | undefined) ??
-      query['lastEventId'];
+      query.lastEventId;
 
     if (lastEventId != null) {
       const id = Number(lastEventId);
