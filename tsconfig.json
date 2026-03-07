@@ -16,7 +16,8 @@
     "noUnusedParameters": false,
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
-    "verbatimModuleSyntax": false
+    "verbatimModuleSyntax": false,
+    "skipLibCheck": true
   },
   "include": ["trading-engine.ts", "trading-engine.test.ts", "src/**/*.ts"],
   "exclude": ["node_modules", "dist"]
