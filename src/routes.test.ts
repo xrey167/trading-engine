@@ -1254,12 +1254,13 @@ describe('R25 – GET /widgets.json', () => {
   beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
   afterEach(() => app.close());
 
-  it('returns all 7 widget keys', async () => {
+  it('returns all 11 widget keys', async () => {
     const res = await app.inject({ method: 'GET', url: '/widgets.json' });
     expect(res.statusCode).toBe(200);
     expect(Object.keys(res.json()).sort()).toEqual([
-      'account_balance', 'account_equity', 'deal_history',
-      'engine_config', 'engine_positions', 'pending_orders', 'symbol_info',
+      'account_balance', 'account_equity', 'audit_events', 'deal_history',
+      'engine_config', 'engine_positions', 'equity_curve', 'pending_orders',
+      'signal_feed', 'symbol_info', 'tradingview_chart',
     ]);
   });
 
@@ -1277,12 +1278,51 @@ describe('R25 – GET /apps.json', () => {
   beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
   afterEach(() => app.close());
 
-  it('returns trading_dashboard with Overview and History tabs', async () => {
+  it('returns trading_dashboard with Overview, History, and Signals tabs', async () => {
     const res = await app.inject({ method: 'GET', url: '/apps.json' });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body).toHaveProperty('trading_dashboard');
-    expect(Object.keys(body.trading_dashboard.tabs).sort()).toEqual(['History', 'Overview']);
+    expect(Object.keys(body.trading_dashboard.tabs).sort()).toEqual(['History', 'Overview', 'Signals']);
+  });
+});
+
+describe('R25 – GET /openbb/equity-curve', () => {
+  let app: FastifyInstance;
+  beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
+  afterEach(() => app.close());
+
+  it('returns empty Highcharts config when DATABASE_URL is unset', async () => {
+    const res = await app.inject({ method: 'GET', url: '/openbb/equity-curve' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.chart).toEqual({ type: 'area' });
+    expect(body.series).toEqual([]);
+    expect(body.title.text).toContain('no DATABASE_URL');
+  });
+});
+
+describe('R25 – GET /openbb/signals', () => {
+  let app: FastifyInstance;
+  beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
+  afterEach(() => app.close());
+
+  it('returns empty array when no signals have been emitted', async () => {
+    const res = await app.inject({ method: 'GET', url: '/openbb/signals' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual([]);
+  });
+});
+
+describe('R25 – GET /openbb/audit', () => {
+  let app: FastifyInstance;
+  beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
+  afterEach(() => app.close());
+
+  it('returns empty array when no audit consumer is available', async () => {
+    const res = await app.inject({ method: 'GET', url: '/openbb/audit' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual([]);
   });
 });
 

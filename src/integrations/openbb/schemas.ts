@@ -70,3 +70,31 @@ export const SSRMResponseSchema = <T extends TSchema>(itemSchema: T) =>
     rows:    Type.Array(itemSchema),
     lastRow: Type.Integer(),
   });
+
+// ─────────────────────────────────────────────────────────────
+// New widget schemas
+// ─────────────────────────────────────────────────────────────
+
+export const OpenBBSignalRowSchema = Type.Object({
+  strategy:   Type.String(),
+  symbol:     Type.String(),
+  action:     Type.Union([Type.Literal('BUY'), Type.Literal('SELL'), Type.Literal('HOLD')]),
+  confidence: Type.Number(),
+  timestamp:  Type.String({ format: 'date-time' }),
+});
+
+export const OpenBBAuditRowSchema = Type.Object({
+  type:      Type.String(),
+  payload:   Type.Record(Type.String(), Type.Unknown()),
+  timestamp: Type.String({ format: 'date-time' }),
+});
+
+export const HighchartsConfigSchema = Type.Object({
+  chart:  Type.Object({ type: Type.String() }),
+  title:  Type.Object({ text: Type.String() }),
+  xAxis:  Type.Object({ type: Type.String() }),
+  series: Type.Array(Type.Object({
+    name: Type.String(),
+    data: Type.Array(Type.Array(Type.Number())),
+  })),
+});

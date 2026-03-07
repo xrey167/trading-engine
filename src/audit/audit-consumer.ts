@@ -1,5 +1,7 @@
 import type amqplib from 'amqplib';
 import type { Logger } from '../shared/lib/logger.js';
+import type { DrizzleDB } from '../shared/db/client.js';
+import { auditEvents } from '../shared/db/schema.js';
 
 export interface AuditEntry {
   readonly id: number;
@@ -25,12 +27,23 @@ export class AuditConsumer {
   private consumerTag: string | null = null;
   private started = false;
 
+  private readonly db: DrizzleDB | null;
+
+  constructor(
+    channel: amqplib.ConfirmChannel,
+    logger: Logger,
+    opts?: { bufferSize?: number; db?: DrizzleDB },
+  );
+  /** @deprecated Use options object instead */
+  constructor(channel: amqplib.ConfirmChannel, logger: Logger, bufferSize?: number);
   constructor(
     private readonly channel: amqplib.ConfirmChannel,
     private readonly logger: Logger,
-    bufferSize = DEFAULT_BUFFER_SIZE,
+    optsOrSize?: number | { bufferSize?: number; db?: DrizzleDB },
   ) {
-    this.maxSize = bufferSize;
+    const opts = typeof optsOrSize === 'object' ? optsOrSize : { bufferSize: optsOrSize };
+    this.maxSize = opts?.bufferSize ?? DEFAULT_BUFFER_SIZE;
+    this.db = opts?.db ?? null;
   }
 
   async start(): Promise<void> {
@@ -65,6 +78,19 @@ export class AuditConsumer {
             this.buffer.shift();
           }
           this.buffer.push(entry);
+
+          // Write-through to Postgres (fire-and-forget)
+          if (this.db) {
+            this.db.insert(auditEvents).values({
+              instanceId: entry.instanceId,
+              type: entry.type,
+              payload: entry.payload as Record<string, unknown>,
+              timestamp: new Date(entry.timestamp),
+              receivedAt: new Date(entry.receivedAt),
+            }).then(() => {})
+              .catch((err) => this.logger.error(`Audit PG write error: ${(err as Error).message}`));
+          }
+
           this.channel.ack(msg);
         } catch (err) {
           this.channel.ack(msg); // ack bad messages to prevent redelivery loops

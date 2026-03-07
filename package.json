@@ -16,7 +16,10 @@
     "dev": "node --watch dist/src/server.js",
     "validate": "npx tsx scripts/validate-backend.ts",
     "docs:api": "typedoc",
-    "docs:api:watch": "typedoc --watch"
+    "docs:api:watch": "typedoc --watch",
+    "db:push": "drizzle-kit push",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate"
   },
   "devDependencies": {
     "@types/amqplib": "^0.10.7",
@@ -27,7 +30,9 @@
     "@types/ws": "^8.18.1",
     "typedoc": "^0.28.17",
     "typescript": "^5.8.3",
-    "vitest": "^4.0.18"
+    "vitest": "^4.0.18",
+    "drizzle-kit": "^0.30.6",
+    "@types/pg": "^8.15.4"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.71",
@@ -40,6 +45,8 @@
     "fastify-plugin": "^5.1.0",
     "amqplib": "^0.10.8",
     "ioredis": "^5.10.0",
-    "luxon": "^3.7.2"
+    "luxon": "^3.7.2",
+    "drizzle-orm": "^0.44.2",
+    "pg": "^8.16.0"
   }
 }

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { AuditConsumer } from './audit-consumer.js';
 import { nullLogger } from '../shared/lib/logger.js';
@@ -32,7 +32,7 @@ describe('AuditConsumer', () => {
 
   beforeEach(() => {
     channel = new MockAmqpChannel();
-    consumer = new AuditConsumer(channel as any, nullLogger, 5);
+    consumer = new AuditConsumer(channel as any, nullLogger, { bufferSize: 5 });
   });
 
   it('start() asserts exchange, queue, binding, prefetch', async () => {
@@ -125,5 +125,44 @@ describe('AuditConsumer', () => {
 
     expect(channel.cancelled).toContain('tag-te.audit');
     expect(consumer.isStarted).toBe(false);
+  });
+
+  it('writes to Postgres when db is provided', async () => {
+    const mockValues = vi.fn().mockResolvedValue(undefined);
+    const mockInsert = vi.fn().mockReturnValue({ values: mockValues });
+    const mockDb = { insert: mockInsert } as any;
+
+    const dbConsumer = new AuditConsumer(channel as any, nullLogger, { bufferSize: 5, db: mockDb });
+    await dbConsumer.start();
+
+    channel.simulateMessage({
+      instanceId: 'inst-1',
+      type: 'order',
+      payload: { symbol: 'EURUSD' },
+      timestamp: '2026-01-01T00:00:00.000Z',
+    });
+
+    // Ring buffer still works
+    expect(dbConsumer.size).toBe(1);
+
+    // Postgres write was called
+    expect(mockInsert).toHaveBeenCalledTimes(1);
+    expect(mockValues).toHaveBeenCalledWith(
+      expect.objectContaining({ instanceId: 'inst-1', type: 'order' }),
+    );
+  });
+
+  it('works without db (no Postgres write)', async () => {
+    const noPgConsumer = new AuditConsumer(channel as any, nullLogger, { bufferSize: 5 });
+    await noPgConsumer.start();
+
+    channel.simulateMessage({
+      type: 'signal',
+      payload: {},
+      timestamp: '2026-01-01T00:00:00.000Z',
+    });
+
+    expect(noPgConsumer.size).toBe(1);
+    // No error, no crash — just ring buffer
   });
 });

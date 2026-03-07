@@ -7,6 +7,7 @@ import type { AppEventMap } from '../services/event-map.js';
 import type { ServiceRegistry } from '../services/service-registry.js';
 import type { IBarCache } from '../../market-data/data-provider-types.js';
 import type { AuditConsumer } from '../../audit/audit-consumer.js';
+import type { SnapshotWriter } from '../db/snapshot-writer.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -20,5 +21,6 @@ declare module 'fastify' {
     serviceRegistry: ServiceRegistry;
     barCache:        IBarCache;
     auditConsumer:   AuditConsumer | null;
+    snapshotWriter:  SnapshotWriter | null;
   }
 }
