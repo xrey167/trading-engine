@@ -24,6 +24,7 @@ import v1PositionsRoute from './routes/v1-positions/index.js';
 import moneyManagementRoute from './routes/money-management/index.js';
 import openbbRoute from './routes/openbb/index.js';
 import skillsRoute from './routes/skills/index.js';
+import udfRoute from './routes/udf/index.js';
 import './types/index.js';
 
 const SWAGGER_UI_HTML = `<!DOCTYPE html>
@@ -178,7 +179,10 @@ export async function buildApp(
   // 9. Agent SDK skills (SSE streaming, auth-gated)
   await app.register(skillsRoute);
 
-  // 10. API docs — /openapi.yaml (raw spec) + /docs (Swagger UI via CDN)
+  // 10. TradingView UDF-compatible charting data
+  await app.register(udfRoute);
+
+  // 11. API docs — /openapi.yaml (raw spec) + /docs (Swagger UI via CDN)
   const __dirname = dirname(fileURLToPath(import.meta.url));
   const specPath = join(__dirname, '../../openapi.yaml');
   let specContent = '';
@@ -186,11 +190,13 @@ export async function buildApp(
 
   app.get('/openapi.yaml', async (_req, reply) => {
     reply.header('Content-Type', 'text/yaml; charset=utf-8');
+    reply.header('Cache-Control', 'public, max-age=3600');
     return reply.send(specContent);
   });
 
   app.get('/docs', async (_req, reply) => {
     reply.header('Content-Type', 'text/html; charset=utf-8');
+    reply.header('Cache-Control', 'public, max-age=3600');
     return reply.send(SWAGGER_UI_HTML);
   });
 
