@@ -3,3 +3,8 @@ export * from './trade-params.js';
 export * from './position.js';
 export * from './account.js';
 export * from './enums.js';
+export * from './ea-enums.js';
+export * from './tick.js';
+export * from './trade-state.js';
+export * from './history.js';
+export * from './session.js';

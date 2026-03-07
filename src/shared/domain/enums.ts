@@ -105,3 +105,24 @@ export const OrderFilling = {
   Return: 'RETURN',
 } as const;
 export type OrderFilling = (typeof OrderFilling)[keyof typeof OrderFilling];
+
+/** All order entry types accepted by the HTTP API (superset of engine's pending-only OrderEntryType). */
+export const OrderEntryType = {
+  BuyMarket:      'BUY_MARKET',
+  SellMarket:     'SELL_MARKET',
+  BuyLimit:       'BUY_LIMIT',
+  BuyStop:        'BUY_STOP',
+  SellLimit:      'SELL_LIMIT',
+  SellStop:       'SELL_STOP',
+  BuyMIT:         'BUY_MIT',
+  SellMIT:        'SELL_MIT',
+  BuyStopLimit:   'BUY_STOP_LIMIT',
+  SellStopLimit:  'SELL_STOP_LIMIT',
+  BuyMTO:         'BUY_MTO',
+  SellMTO:        'SELL_MTO',
+  BuyLimitTrail:  'BUY_LIMIT_TRAIL',
+  BuyStopTrail:   'BUY_STOP_TRAIL',
+  SellLimitTrail: 'SELL_LIMIT_TRAIL',
+  SellStopTrail:  'SELL_STOP_TRAIL',
+} as const;
+export type OrderEntryType = (typeof OrderEntryType)[keyof typeof OrderEntryType];
