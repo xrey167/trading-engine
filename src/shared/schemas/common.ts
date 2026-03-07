@@ -27,6 +27,20 @@ export const AtrMethodSchema = Type.Union([
   Type.Literal(1),
 ]);
 
+// Named order attributes — combinable flags that modify fill behaviour.
+export const OrderAttrSchema = Type.Union([
+  Type.Literal('ORDER_ATTR_OCO'),   // One Cancels Other — fill cancels all other pending orders
+  Type.Literal('ORDER_ATTR_CO'),    // Cancel Others on fill — cancel same-side pending orders
+  Type.Literal('ORDER_ATTR_CS'),    // Cancel on Side — cancel all orders on same side when filled
+  Type.Literal('ORDER_ATTR_REV'),   // Reverse — close current position and open opposite of same size
+  Type.Literal('ORDER_ATTR_NET'),   // Net — reduce opposite position by the fill size
+  Type.Literal('ORDER_ATTR_SLTP'),  // Transfer SL/TP — copy SL/TP levels to the filled position
+  Type.Literal('ORDER_ATTR_ROL'),   // Reverse On Loss — reverse position if closed at a loss
+  Type.Literal('ORDER_ATTR_ROP'),   // Reverse On Profit — reverse position if closed at a profit
+  Type.Literal('ORDER_ATTR_MIT'),   // Market If Touched — convert to market order when price is touched
+  Type.Literal('ORDER_ATTR_FC'),    // Fill or Cancel — cancel order if not filled immediately
+]);
+
 export const LimitConfirmSchema = Type.Union([
   Type.Literal('LIMIT_CONFIRM_NONE'),
   Type.Literal('LIMIT_CONFIRM_WICK'),

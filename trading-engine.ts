@@ -35,6 +35,20 @@ export type TrailMode = (typeof TrailMode)[keyof typeof TrailMode];
 export const AtrMethod = { Sma: 0, Ema: 1 } as const;
 export type AtrMethod = (typeof AtrMethod)[keyof typeof AtrMethod];
 
+export const OrderAttr = {
+  OCO:  'ORDER_ATTR_OCO',   // One Cancels Other — fill cancels all other pending orders
+  CO:   'ORDER_ATTR_CO',    // Cancel Others on fill — cancel same-side pending orders
+  CS:   'ORDER_ATTR_CS',    // Cancel on Side — cancel all orders on same side when filled
+  REV:  'ORDER_ATTR_REV',   // Reverse — close current position and open opposite of same size
+  NET:  'ORDER_ATTR_NET',   // Net — reduce opposite position by the fill size
+  SLTP: 'ORDER_ATTR_SLTP',  // Transfer SL/TP — copy SL/TP levels to the filled position
+  ROL:  'ORDER_ATTR_ROL',   // Reverse On Loss — reverse position if closed at a loss
+  ROP:  'ORDER_ATTR_ROP',   // Reverse On Profit — reverse position if closed at a profit
+  MIT:  'ORDER_ATTR_MIT',   // Market If Touched — convert to market order when price is touched
+  FC:   'ORDER_ATTR_FC',    // Fill or Cancel — cancel order if not filled immediately
+} as const;
+export type OrderAttr = (typeof OrderAttr)[keyof typeof OrderAttr];
+
 export const LimitConfirm = {
   None:      'LIMIT_CONFIRM_NONE',
   Wick:      'LIMIT_CONFIRM_WICK',      // price must wick back from limit level

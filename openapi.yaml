@@ -2968,6 +2968,156 @@ paths:
               example:
                 error: "Timeout waiting for service to drain connections"
 
+  /services/strategies/{id}/evaluate:
+    post:
+      tags: [Services]
+      summary: On-demand strategy evaluation
+      operationId: evaluateStrategy
+      description: |
+        Invokes `svc.evaluate()` on the named strategy service with a minimal
+        context (empty bars, flat position). Returns the signal result
+        (`BUY`, `SELL`, or `HOLD`).
+
+        The strategy must be registered in the service registry with
+        `kind: STRATEGY`. Returns `400` if the service is not a strategy.
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Strategy service identifier
+          schema:
+            type: string
+          example: strategy:candle-atr:eurusd-h1
+      responses:
+        '200':
+          description: Strategy evaluation result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  action:
+                    type: string
+                    enum: [BUY, SELL, HOLD]
+              example:
+                action: HOLD
+        '400':
+          description: Service is not a strategy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /services/screeners/{id}/scan:
+    post:
+      tags: [Services]
+      summary: On-demand screener scan
+      operationId: scanScreener
+      description: |
+        Invokes `svc.scan()` on the named screener service and returns all
+        matches. The screener must be registered with `kind: SCREENER`.
+
+        Returns `400` if the service is not a screener.
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Screener service identifier
+          schema:
+            type: string
+          example: screener:volume-breakout:majors
+      responses:
+        '200':
+          description: Screener scan results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  matches:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        symbol:
+                          type: string
+                        matchType:
+                          type: string
+                        score:
+                          type: number
+                        metadata:
+                          type: object
+              example:
+                matches:
+                  - symbol: EURUSD
+                    matchType: volume-breakout
+                    score: 0.92
+                    metadata: {}
+        '400':
+          description: Service is not a screener
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /services/risk/validate:
+    post:
+      tags: [Services]
+      summary: On-demand risk validation
+      operationId: validateRisk
+      description: |
+        Validates an order request against the risk manager's current limits
+        (max open positions, max per symbol, max daily loss). Returns whether
+        the order would be approved or rejected, along with the reason.
+
+        Requires at least one `RISK_MANAGER` service to be registered.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [symbol, direction, lots]
+              properties:
+                symbol:
+                  type: string
+                  example: EURUSD
+                direction:
+                  type: string
+                  enum: [BUY, SELL]
+                lots:
+                  type: number
+                  minimum: 0
+                  example: 1.0
+      responses:
+        '200':
+          description: Risk validation result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  approved:
+                    type: boolean
+                  reason:
+                    type: string
+              example:
+                approved: true
+                reason: All risk checks passed
+        '404':
+          description: No risk manager registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
 # ─────────────────────────────────────────────────────────────
 # Components
 # ─────────────────────────────────────────────────────────────
@@ -3111,6 +3261,53 @@ components:
         - `LIMIT_CONFIRM_WICK` — wick must cross level **and** candle must close back past it
         - `LIMIT_CONFIRM_WICKBREAK` — wick crosses level **and** entire candle body (both open & close) must be past it
         - `LIMIT_CONFIRM_WICKCOLOR` — same as `WICK` plus candle must be bullish (buy) / bearish (sell)
+
+    OrderAttr:
+      type: string
+      enum:
+        - ORDER_ATTR_OCO
+        - ORDER_ATTR_CO
+        - ORDER_ATTR_CS
+        - ORDER_ATTR_REV
+        - ORDER_ATTR_NET
+        - ORDER_ATTR_SLTP
+        - ORDER_ATTR_ROL
+        - ORDER_ATTR_ROP
+        - ORDER_ATTR_MIT
+        - ORDER_ATTR_FC
+      description: |
+        Named order attribute flags that modify fill behaviour. Multiple
+        attributes can be combined as an array on a single order.
+
+        | Value | Full Name | Behaviour |
+        |-------|-----------|-----------|
+        | `ORDER_ATTR_OCO` | One Cancels Other | When this order fills, cancel **all** other pending orders |
+        | `ORDER_ATTR_CO` | Cancel Others on Fill | When filled, cancel same-side pending orders |
+        | `ORDER_ATTR_CS` | Cancel on Side | Cancel all orders on the same side when filled |
+        | `ORDER_ATTR_REV` | Reverse | Close current position and open same size on the opposite side |
+        | `ORDER_ATTR_NET` | Net | Reduce the opposite open position by the fill size |
+        | `ORDER_ATTR_SLTP` | Transfer SL/TP | Copy SL/TP levels from the closing position to the new one |
+        | `ORDER_ATTR_ROL` | Reverse On Loss | Reverse position automatically if it is closed at a loss |
+        | `ORDER_ATTR_ROP` | Reverse On Profit | Reverse position automatically if it is closed at a profit |
+        | `ORDER_ATTR_MIT` | Market If Touched | Convert to a market order the moment price touches the level |
+        | `ORDER_ATTR_FC` | Fill or Cancel | Cancel the order immediately if it cannot be filled in full |
+
+    AccountTradeMode:
+      type: string
+      enum: [SINGLE_HEDGE, SINGLE_NOHEDGE, FUTURE, HEDGE]
+      description: |
+        Determines how positions are managed for a symbol on this account.
+
+        - `SINGLE_HEDGE` — one position slot per symbol; the engine can hedge by
+          flipping the slot (close + reopen opposite side)
+        - `SINGLE_NOHEDGE` — netting mode: opening a trade in the opposite direction
+          reduces or closes the existing position (no simultaneous long + short)
+        - `FUTURE` — both sides margined independently, futures-style
+        - `HEDGE` — full hedge mode: independent long and short tickets coexist per
+          symbol (equivalent to MT5 retail hedging accounts)
+
+        Maps to the engine's `hedging` constructor flag:
+        `SINGLE_NOHEDGE` → `hedging: false`; all others → `hedging: true`.
 
     OrderEntryType:
       type: string
