@@ -13,16 +13,27 @@ export async function createAmqpClient(
   const url = opts?.url ?? process.env.RABBITMQ_URL;
   if (!url) return null;
 
-  const connection = await amqplib.connect(url, {
-    heartbeat: opts?.heartbeat ?? 30,
-  });
+  let connection: amqplib.ChannelModel;
+  try {
+    connection = await amqplib.connect(url, { heartbeat: opts?.heartbeat ?? 30 });
+  } catch (err) {
+    logger.error('AMQP connection failed — starting without AMQP', err);
+    return null;
+  }
 
-  connection.on('error', (err) => logger.error(`AMQP connection error: ${err.message}`));
+  connection.on('error', (err) => logger.error('AMQP connection error', err));
   connection.on('close', () => logger.warn('AMQP connection closed'));
 
-  const channel = await connection.createConfirmChannel();
-  logger.info('AMQP connected (confirm channel ready)');
+  let channel: amqplib.ConfirmChannel;
+  try {
+    channel = await connection.createConfirmChannel();
+  } catch (err) {
+    logger.error('AMQP confirm channel creation failed', err);
+    try { await connection.close(); } catch { /* ignore */ }
+    return null;
+  }
 
+  logger.info('AMQP connected (confirm channel ready)');
   return { connection, channel };
 }
 

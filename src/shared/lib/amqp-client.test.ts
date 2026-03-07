@@ -53,6 +53,12 @@ describe('createAmqpClient', () => {
     expect(result).not.toBeNull();
   });
 
+  it('returns null and logs when connect() rejects', async () => {
+    vi.mocked(amqplib.connect).mockRejectedValueOnce(new Error('ECONNREFUSED'));
+    const result = await createAmqpClient(nullLogger, { url: 'amqp://bad-host' });
+    expect(result).toBeNull();
+  });
+
   it('closeAmqpClient closes channel then connection', async () => {
     const client = { connection: mockConnection as any, channel: mockChannel as any };
     await closeAmqpClient(client, nullLogger);

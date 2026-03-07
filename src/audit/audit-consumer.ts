@@ -92,14 +92,15 @@ export class AuditConsumer {
   }
 
   query(opts?: { type?: string; since?: string; limit?: number }): AuditEntry[] {
+    // Filter order: type → since → limit (most-recent N). Changing order alters results.
     let result = this.buffer;
 
     if (opts?.type) {
       result = result.filter((e) => e.type === opts.type);
     }
     if (opts?.since) {
-      const sinceDate = opts.since;
-      result = result.filter((e) => e.timestamp >= sinceDate);
+      const sinceMs = new Date(opts.since).getTime();
+      result = result.filter((e) => new Date(e.timestamp).getTime() >= sinceMs);
     }
     if (opts?.limit && opts.limit > 0) {
       result = result.slice(-opts.limit);

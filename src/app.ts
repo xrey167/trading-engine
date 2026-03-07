@@ -192,7 +192,9 @@ export async function buildApp(
     );
     await amqpBridge.start();
 
-    auditConsumer = new AuditConsumer(amqpClient.channel, logger);
+    // Dedicated channel for audit consumer — channel failures are isolated per concern
+    const auditChannel = await amqpClient.connection.createConfirmChannel();
+    auditConsumer = new AuditConsumer(auditChannel, logger);
     await auditConsumer.start();
   }
   app.decorate('auditConsumer', auditConsumer);
