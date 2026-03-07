@@ -23,21 +23,31 @@ npm run dev                       # same with --watch
 
 2. **Fastify HTTP layer** (`src/`) — REST + WebSocket API wrapping the core engine.
 
-### Hexagonal / ports-and-adapters structure in `src/`
+### Module-based structure in `src/`
 
 ```
-domain/           — value objects, enums, trade-signal/trade-params types
-gateways/         — port interfaces + in-memory/mt5 adapters, broker registry
-use-cases/        — application services (9 use-cases, see list below)
-strategies/       — ISignalStrategy implementations (CandleAtr, VolumeBreakout)
-money-management/ — SL/TP calculators, lot sizing (composite pattern)
-analysis/         — ATR, local-extremes modules
-plugins/          — Fastify plugins (engine, broker, rate-limit, cors, atr)
-routes/           — 15 route groups (see below)
-lib/              — Result<T,E> type, DomainError, logger
-testing/          — factories (makeBar, makePosition) and mock adapters
-schemas/          — TypeBox schemas for request/response validation
-types/            — FastifyInstance declaration merging (app.engine, app.broker, etc.)
+shared/
+  lib/              — Result<T,E>, DomainError, logger, mutex, circuit-breaker,
+                      redis-client, redis-event-bridge
+  domain/           — value objects, enums, trade-signal/trade-params, trading-calendar
+  schemas/          — common TypeBox schemas (OHLC, enums, errors)
+  services/         — IService, BaseService, ServiceRegistry, event-map (AppEventMap)
+  plugins/          — rate-limit, cors
+  testing/          — factories, mock adapters, mock services
+  types/            — FastifyInstance declaration merging
+  event-bus.ts      — TypedEventBus<TMap> (typed pub/sub)
+broker/             — gateway interfaces, PaperBroker, BrokerService, in-memory/mt5 adapters
+engine/             — core engine Fastify wrapping (engine-plugin, atr-plugin, routes)
+trading/            — positions, orders, scaled-orders, v1-positions
+market-data/        — bars ingestion, WebSocket stream, bar-cache, redis-bar-cache,
+                      data-provider-types, internal-provider
+analysis/           — ATR, strategies, signals, backtest, strategy-service, screener-service
+managers/           — execution-saga, order-manager, risk-manager
+money-management/   — SL/TP calculators, lot sizing (composite pattern)
+services/           — /services/* health + management routes
+integrations/
+  openbb/           — OpenBB widget routes
+  skills/           — Agent SDK skill execution via SSE
 ```
 
 ### Route groups
@@ -72,6 +82,8 @@ types/            — FastifyInstance declaration merging (app.engine, app.broke
 - `app.atrModule` / `app.atrConfig` — ATR indicator with runtime-mutable config
 - `app.emitter.setMaxListeners(0)` — unbounded; each WS client adds 3 listeners
 - Skills routes use `@anthropic-ai/claude-agent-sdk` — `query()` streams via SSE to clients
+- `app.barCache` — `IBarCache` (in-memory or Redis write-through when `REDIS_URL` set)
+- `RedisEventBridge` — optional cross-instance pub/sub for `signal`, `order`, `normalized_bar` events
 
 ### Result type pattern
 
@@ -97,6 +109,7 @@ All gateway and use-case methods return `Result<T, DomainError>` (discriminated 
 | `OPENBB_API_KEY` | No | `/openbb/*` routes (timing-safe compare) |
 | `ANTHROPIC_API_KEY` | For `/skills` | Agent SDK key (or use `CLAUDE_CODE_OAUTH_TOKEN`) |
 | `CLAUDE_CODE_OAUTH_TOKEN` | For `/skills` | OAuth alternative to `ANTHROPIC_API_KEY` |
+| `REDIS_URL` | No | Redis bar cache (write-through) + cross-instance pub/sub event bridge; falls back to in-memory when unset |
 | `NODE_ENV` | No | `production` hides stack traces in error responses |
 
 No `.env` file is committed. Node 18+ required (ES2022 target).
@@ -116,5 +129,5 @@ Use these skills **when the task involves their domain**:
 - **openbb-app-builder** — OpenBB widget/app integrations (`/openbb/*` routes)
 - **fastify-typescript** — Fastify plugin patterns, route schemas, lifecycle hooks
 - **microservices-patterns** — if adding inter-service communication
-- **redis-development** — if adding caching or pub/sub (not currently used)
+- **redis-development** — Redis bar cache (`RedisBarCache`) and pub/sub event bridge (`RedisEventBridge`)
 - **rabbitmq-expert** — if adding message queues (not currently used)

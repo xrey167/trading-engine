@@ -41,9 +41,18 @@ info:
 
     ## Data Pipeline
     Bars pushed via `POST /bars` flow through an internal data provider that
-    normalizes them into `normalized_bar` events and caches them in an in-memory
-    bar cache. Autonomous strategies subscribe to `normalized_bar` and receive
-    full historical context from the cache. Additional data providers (external
+    normalizes them into `normalized_bar` events and caches them in a bar cache.
+    When `REDIS_URL` is set, the cache uses a **write-through** pattern
+    (`RedisBarCache`): synchronous reads from an in-memory mirror, async writes
+    to Redis Lists. On startup, `hydrate()` restores bars from the previous
+    session. Without Redis, falls back to a plain in-memory cache.
+
+    A **Redis event bridge** (`RedisEventBridge`) optionally bridges `signal`,
+    `order`, and `normalized_bar` events across process instances via Pub/Sub
+    with echo prevention and type validation.
+
+    Autonomous strategies subscribe to `normalized_bar` and receive full
+    historical context from the cache. Additional data providers (external
     APIs, WebSocket feeds) can be registered via the service registry and feed
     the same pipeline. Use `GET /services` to inspect registered providers.
 
