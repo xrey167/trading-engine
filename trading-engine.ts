@@ -1052,6 +1052,83 @@ export function isTrailingOrder(o: Order): o is TrailingOrder   { return o insta
 export function isStopLimitOrder(o: Order): o is StopLimitOrder { return o instanceof StopLimitOrder; }
 
 // ─────────────────────────────────────────────────────────────
+// OrderFactory — discriminated-union parameter type
+// ─────────────────────────────────────────────────────────────
+
+type CreateOrderBase = Omit<OrderParams, 'type'>;
+
+interface CreateLimitParams extends CreateOrderBase {
+  type: 'BUY_LIMIT' | 'SELL_LIMIT';
+}
+
+interface CreateStopParams extends CreateOrderBase {
+  type: 'BUY_STOP' | 'SELL_STOP';
+}
+
+interface CreateMITParams extends CreateOrderBase {
+  type: 'BUY_MIT' | 'SELL_MIT';
+}
+
+interface CreateStopLimitParams extends CreateOrderBase {
+  type: 'BUY_STOP_LIMIT' | 'SELL_STOP_LIMIT';
+  limitPrice: number;
+}
+
+interface CreateTrailingLimitParams extends CreateOrderBase {
+  type: 'BUY_LIMIT' | 'SELL_LIMIT';
+  trailEntry: { mode: TrailMode; distPts: number; periods: number };
+  _trailRef:  number;
+}
+
+interface CreateTrailingStopParams extends CreateOrderBase {
+  type: 'BUY_STOP' | 'SELL_STOP';
+  trailEntry: { mode: TrailMode; distPts: number; periods: number };
+  _trailRef:  number;
+}
+
+interface CreateMTOParams extends CreateOrderBase {
+  type: 'BUY_MTO' | 'SELL_MTO';
+  trailEntry: { mode: TrailMode; distPts: number; periods: number };
+  _trailRef:  number;
+}
+
+export type CreateOrderParams =
+  | CreateLimitParams
+  | CreateStopParams
+  | CreateMITParams
+  | CreateStopLimitParams
+  | CreateTrailingLimitParams
+  | CreateTrailingStopParams
+  | CreateMTOParams;
+
+export function createOrder(params: CreateOrderParams): Order {
+  // MTO — always trailing
+  if (params.type === 'BUY_MTO' || params.type === 'SELL_MTO') {
+    return new MTOOrder(params as CreateMTOParams);
+  }
+
+  // Stop-limit — needs limitPrice
+  if (params.type === 'BUY_STOP_LIMIT' || params.type === 'SELL_STOP_LIMIT') {
+    return new StopLimitOrder(params as CreateStopLimitParams);
+  }
+
+  // Trailing variants (limit or stop with trailEntry)
+  if ('trailEntry' in params) {
+    if (params.type === 'BUY_LIMIT' || params.type === 'SELL_LIMIT') {
+      return new TrailingLimitOrder(params as CreateTrailingLimitParams);
+    }
+    return new TrailingStopOrder(params as CreateTrailingStopParams);
+  }
+
+  // Simple types
+  switch (params.type) {
+    case 'BUY_LIMIT':  case 'SELL_LIMIT': return new LimitOrder(params);
+    case 'BUY_STOP':   case 'SELL_STOP':  return new StopOrder(params);
+    case 'BUY_MIT':    case 'SELL_MIT':   return new MITOrder(params);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
 // Individual position slot
 // Hedging mode allows one Long and one Short simultaneously.
 // ─────────────────────────────────────────────────────────────
@@ -1398,7 +1475,7 @@ export class TradingEngine {
     const id = `ord_${++this._orderSeq}`;
     const p  = this._consumeNextParams(id, 'BUY_STOP_LIMIT', Side.Long, stopPrice, size);
     this._resetNextAttrs();
-    const o = new StopLimitOrder({ ...p, limitPrice });
+    const o = createOrder({ ...p, limitPrice });
     this.orders.push(o);
     return o.id;
   }
@@ -1411,7 +1488,7 @@ export class TradingEngine {
     const id = `ord_${++this._orderSeq}`;
     const p  = this._consumeNextParams(id, 'SELL_STOP_LIMIT', Side.Short, stopPrice, size);
     this._resetNextAttrs();
-    const o = new StopLimitOrder({ ...p, limitPrice });
+    const o = createOrder({ ...p, limitPrice });
     this.orders.push(o);
     return o.id;
   }
@@ -1426,7 +1503,7 @@ export class TradingEngine {
     const id = `ord_${++this._orderSeq}`;
     const p  = this._consumeNextParams(id, 'BUY_MTO', Side.Long, Infinity);
     this._resetNextAttrs();
-    const o = new MTOOrder({ ...p, trailEntry: { mode, distPts: distancePts, periods }, _trailRef: Infinity });
+    const o = createOrder({ ...p, trailEntry: { mode, distPts: distancePts, periods }, _trailRef: Infinity });
     this.orders.push(o);
     return o.id;
   }
@@ -1441,7 +1518,7 @@ export class TradingEngine {
     const id = `ord_${++this._orderSeq}`;
     const p  = this._consumeNextParams(id, 'SELL_MTO', Side.Short, -Infinity);
     this._resetNextAttrs();
-    const o = new MTOOrder({ ...p, trailEntry: { mode, distPts: distancePts, periods }, _trailRef: -Infinity });
+    const o = createOrder({ ...p, trailEntry: { mode, distPts: distancePts, periods }, _trailRef: -Infinity });
     this.orders.push(o);
     return o.id;
   }
@@ -1455,7 +1532,7 @@ export class TradingEngine {
     const id = `ord_${++this._orderSeq}`;
     const p  = this._consumeNextParams(id, 'BUY_LIMIT', Side.Long, 0);
     this._resetNextAttrs();
-    const o = new TrailingLimitOrder({ ...p, trailEntry: { mode, distPts: distancePts, periods }, _trailRef: -Infinity });
+    const o = createOrder({ ...p, trailEntry: { mode, distPts: distancePts, periods }, _trailRef: -Infinity });
     this.orders.push(o);
     return o.id;
   }
@@ -1464,7 +1541,7 @@ export class TradingEngine {
     const id = `ord_${++this._orderSeq}`;
     const p  = this._consumeNextParams(id, 'SELL_LIMIT', Side.Short, 0);
     this._resetNextAttrs();
-    const o = new TrailingLimitOrder({ ...p, trailEntry: { mode, distPts: distancePts, periods }, _trailRef: Infinity });
+    const o = createOrder({ ...p, trailEntry: { mode, distPts: distancePts, periods }, _trailRef: Infinity });
     this.orders.push(o);
     return o.id;
   }
@@ -1474,7 +1551,7 @@ export class TradingEngine {
     const id = `ord_${++this._orderSeq}`;
     const p  = this._consumeNextParams(id, 'BUY_STOP', Side.Long, Infinity);
     this._resetNextAttrs();
-    const o = new TrailingStopOrder({ ...p, trailEntry: { mode, distPts: distancePts, periods }, _trailRef: Infinity });
+    const o = createOrder({ ...p, trailEntry: { mode, distPts: distancePts, periods }, _trailRef: Infinity });
     this.orders.push(o);
     return o.id;
   }
@@ -1483,7 +1560,7 @@ export class TradingEngine {
     const id = `ord_${++this._orderSeq}`;
     const p  = this._consumeNextParams(id, 'SELL_STOP', Side.Short, 0);
     this._resetNextAttrs();
-    const o = new TrailingStopOrder({ ...p, trailEntry: { mode, distPts: distancePts, periods }, _trailRef: -Infinity });
+    const o = createOrder({ ...p, trailEntry: { mode, distPts: distancePts, periods }, _trailRef: -Infinity });
     this.orders.push(o);
     return o.id;
   }
@@ -1691,7 +1768,7 @@ export class TradingEngine {
   // ──────────────────────────────────────────────────────────
 
   /** Build OrderParams from current next-attributes and reset them. */
-  private _consumeNextParams(id: string, type: OrderEntryType, side: Side, price: number, size?: number): OrderParams {
+  private _consumeNextParams<T extends OrderEntryType>(id: string, type: T, side: Side, price: number, size?: number): OrderParams & { type: T } {
     return {
       id, type, side, price,
       size: size ?? this._nextOrderSize,
@@ -1716,17 +1793,13 @@ export class TradingEngine {
   }
 
   /** Factory for simple (non-trailing, non-stop-limit) order types. */
-  private _addOrder(type: OrderEntryType, side: Side, price: number, size?: number): Order {
+  private _addOrder(type: 'BUY_LIMIT' | 'SELL_LIMIT' | 'BUY_STOP' | 'SELL_STOP' | 'BUY_MIT' | 'SELL_MIT',
+    side: Side, price: number, size?: number,
+  ): Order {
     const id = `ord_${++this._orderSeq}`;
     const p  = this._consumeNextParams(id, type, side, price, size);
     this._resetNextAttrs();
-    let o: Order;
-    switch (type) {
-      case 'BUY_LIMIT':  case 'SELL_LIMIT': o = new LimitOrder(p); break;
-      case 'BUY_STOP':   case 'SELL_STOP':  o = new StopOrder(p);  break;
-      case 'BUY_MIT':    case 'SELL_MIT':   o = new MITOrder(p);   break;
-      default: throw new Error(`_addOrder: use specific factory for type ${type}`);
-    }
+    const o = createOrder(p as CreateOrderParams);
     this.orders.push(o);
     return o;
   }
