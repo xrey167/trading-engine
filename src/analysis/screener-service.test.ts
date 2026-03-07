@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { TypedEventBus } from '../shared/event-bus.js';
 import type { AppEventMap, ScreenerEvent } from '../shared/services/event-map.js';
 import { ServiceStatus, ServiceKind } from '../shared/services/types.js';
@@ -44,6 +44,7 @@ describe('ScreenerService', () => {
   });
 
   it('emits screener event when matches found on interval', async () => {
+    vi.useFakeTimers();
     const bus = new TypedEventBus<AppEventMap>();
     const events: ScreenerEvent[] = [];
     bus.on('screener', (e) => events.push(e));
@@ -57,17 +58,18 @@ describe('ScreenerService', () => {
     );
     await svc.start();
 
-    // Wait for at least one interval tick
-    await new Promise(r => setTimeout(r, 80));
+    await vi.advanceTimersByTimeAsync(80);
 
     expect(events.length).toBeGreaterThanOrEqual(1);
     expect(events[0].matchedSymbols).toContain('EURUSD');
     expect(events[0].serviceId).toBe('screener:test');
 
     await svc.stop();
+    vi.useRealTimers();
   });
 
   it('does not emit when no matches found', async () => {
+    vi.useFakeTimers();
     const bus = new TypedEventBus<AppEventMap>();
     const events: ScreenerEvent[] = [];
     bus.on('screener', (e) => events.push(e));
@@ -79,10 +81,11 @@ describe('ScreenerService', () => {
     );
     await svc.start();
 
-    await new Promise(r => setTimeout(r, 80));
+    await vi.advanceTimersByTimeAsync(80);
     expect(events).toHaveLength(0);
 
     await svc.stop();
+    vi.useRealTimers();
   });
 
   it('on-demand scan returns matches', async () => {

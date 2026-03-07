@@ -91,7 +91,7 @@ describe('BaseService', () => {
     await svc.start();
     expect(svc.health().status).toBe(ServiceStatus.Running);
     expect(svc.onStartCalled).toBe(true);
-    expect(svc.health().lastHeartbeat).not.toBeNull();
+    expect(svc.health().lastCheckedAt).not.toBeNull();
     expect(svc.health().metadata).toEqual({ custom: true });
   });
 

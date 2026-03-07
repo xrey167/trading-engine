@@ -166,7 +166,7 @@ tags:
 
       Services are typed by `kind` (`BROKER`, `DATA_PROVIDER`, `STRATEGY`,
       `SCREENER`, `ORDER_MANAGER`, `RISK_MANAGER`) and expose a health check
-      that includes `status`, `lastHeartbeat`, and arbitrary `metadata`.
+      that includes `status`, `lastCheckedAt`, and arbitrary `metadata`.
 
       All service routes are **read-only or admin** — no `x-api-key` guard is
       applied (services are internal infrastructure endpoints).
@@ -2888,7 +2888,7 @@ paths:
       operationId: getService
       description: |
         Returns full detail for a single service including the embedded
-        `health` object with `status`, `lastHeartbeat`, `error`, and
+        `health` object with `status`, `lastCheckedAt`, `error`, and
         arbitrary `metadata` populated by the service implementation.
       security: []
       parameters:
@@ -2912,7 +2912,7 @@ paths:
                 name: paper-primary
                 health:
                   status: RUNNING
-                  lastHeartbeat: "2026-03-07T12:00:00.000Z"
+                  lastCheckedAt: "2026-03-07T12:00:00.000Z"
                   error: null
                   metadata:
                     connectedSince: "2026-03-07T11:00:00.000Z"
@@ -4025,12 +4025,12 @@ components:
 
     ServiceHealth:
       type: object
-      required: [status, lastHeartbeat, error, metadata]
+      required: [status, lastCheckedAt, error, metadata]
       description: Real-time health snapshot for a service instance
       properties:
         status:
           $ref: '#/components/schemas/ServiceStatus'
-        lastHeartbeat:
+        lastCheckedAt:
           type: string
           format: date-time
           nullable: true

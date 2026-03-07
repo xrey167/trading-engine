@@ -28,7 +28,7 @@ export type ServiceSummary = Static<typeof ServiceSummarySchema>;
 
 export const ServiceHealthSchema = Type.Object({
   status:        ServiceStatusSchema,
-  lastHeartbeat: Type.Union([Type.String({ format: 'date-time' }), Type.Null()]),
+  lastCheckedAt: Type.Union([Type.String({ format: 'date-time' }), Type.Null()]),
   error:         Type.Union([Type.String(), Type.Null()]),
   metadata:      Type.Record(Type.String(), Type.Unknown()),
 });

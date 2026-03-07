@@ -69,7 +69,7 @@ describe('BrokerService', () => {
     const h = svc.health();
     expect(h.metadata.connected).toBe(true);
     expect(h.metadata.circuitBreaker).toBe('CLOSED');
-    expect(h.lastHeartbeat).not.toBeNull();
+    expect(h.lastCheckedAt).not.toBeNull();
     expect(h.error).toBeNull();
   });
 

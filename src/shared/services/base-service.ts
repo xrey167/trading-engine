@@ -39,7 +39,7 @@ export abstract class BaseService implements IService {
   health(): ServiceHealth {
     return {
       status: this.status,
-      lastHeartbeat: this.status === ServiceStatus.Running ? new Date().toISOString() : null,
+      lastCheckedAt: this.status === ServiceStatus.Running ? new Date().toISOString() : null,
       error: this.lastError,
       metadata: this.getHealthMetadata(),
     };

@@ -25,7 +25,7 @@ export class MockService implements IService {
   health(): ServiceHealth {
     return {
       status: this._status,
-      lastHeartbeat: this._status === ServiceStatus.Running ? new Date().toISOString() : null,
+      lastCheckedAt: this._status === ServiceStatus.Running ? new Date().toISOString() : null,
       error: null,
       metadata: {},
     };

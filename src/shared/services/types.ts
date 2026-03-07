@@ -22,7 +22,7 @@ export type ServiceKind = (typeof ServiceKind)[keyof typeof ServiceKind];
 
 export interface ServiceHealth {
   readonly status: ServiceStatus;
-  readonly lastHeartbeat: string | null;
+  readonly lastCheckedAt: string | null;
   readonly error: string | null;
   readonly metadata: Record<string, unknown>;
 }
