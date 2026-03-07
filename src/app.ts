@@ -216,7 +216,7 @@ export async function buildApp(
 
     // Dedicated channel for audit consumer — channel failures are isolated per concern
     const auditChannel = await amqpClient.connection.createConfirmChannel();
-    auditConsumer = new AuditConsumer(auditChannel, logger);
+    auditConsumer = new AuditConsumer(auditChannel, logger, { db: database?.db });
     await auditConsumer.start();
   }
   app.decorate('auditConsumer', auditConsumer);
