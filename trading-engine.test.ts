@@ -1132,3 +1132,155 @@ describe('P22 – OCO same-bar regression: second order must not fill after OCO 
     expect(eng.getCntOrders()).toBe(0);  // no leftover orders
   });
 });
+
+// ─────────────────────────────────────────────────────────────
+// T1.1 – Bar: BarBase-aware range, proportions, patterns
+// ─────────────────────────────────────────────────────────────
+
+describe('T1.1 – Bar BarBase support', () => {
+  // bar: open=1.1000, high=1.1050, low=1.0950, close=1.1030
+  // hi-lo range = 0.0100, body range = 0.0030
+  const bar = new Bar(1.1000, 1.1050, 1.0950, 1.1030, new Date());
+
+  it('effectiveHigh/Low with HiLo returns high/low', () => {
+    expect(bar.effectiveHigh()).toBe(1.1050);
+    expect(bar.effectiveLow()).toBe(1.0950);
+  });
+
+  it('effectiveHigh/Low with OpenClose returns max/min of open,close', () => {
+    expect(bar.effectiveHigh(BarBase.OpenClose)).toBe(1.1030); // max(1.1000, 1.1030)
+    expect(bar.effectiveLow(BarBase.OpenClose)).toBe(1.1000);  // min(1.1000, 1.1030)
+  });
+
+  it('range(HiLo) returns high-low', () => {
+    expect(bar.range()).toBeCloseTo(0.0100, 5);
+  });
+
+  it('range(OpenClose) returns body range', () => {
+    expect(bar.range(BarBase.OpenClose)).toBeCloseTo(0.0030, 5);
+  });
+
+  it('bodyPart with OpenClose base = 1.0 (body is the entire range)', () => {
+    expect(bar.bodyPart(BarBase.OpenClose)).toBeCloseTo(1.0, 5);
+  });
+
+  it('bodyPart with HiLo base < 1.0', () => {
+    expect(bar.bodyPart()).toBeCloseTo(0.003 / 0.01, 5); // 0.3
+  });
+
+  it('pattern methods accept base parameter', () => {
+    // Hammer with large tail relative to body-only range
+    const hammerBar = new Bar(1.1000, 1.1010, 1.0900, 1.1005, new Date());
+    // HiLo: tailPart = (1.1000-1.0900)/0.0110 ≈ 0.909 → hammer
+    expect(hammerBar.isHammer(0.55)).toBe(true);
+    // OpenClose: range = |1.1005-1.1000| = 0.0005, tailRange = 1.1000-1.0900 = 0.0100
+    // tailPart = 0.0100/0.0005 = 20.0 → still hammer (but proportions change drastically)
+    expect(hammerBar.isHammer(0.55, BarBase.OpenClose)).toBe(true);
+  });
+
+  it('isSolid accepts base parameter', () => {
+    // Bar with tiny wicks relative to hi-lo
+    const solidBar = new Bar(1.0950, 1.1050, 1.0950, 1.1050, new Date());
+    expect(solidBar.isSolid(0.01, 0.01)).toBe(true);
+    expect(solidBar.isSolid(0.01, 0.01, BarBase.OpenClose)).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// T1.2 – Bars: multi-bar patterns
+// ─────────────────────────────────────────────────────────────
+
+describe('T1.2 – Bars multi-bar patterns', () => {
+  it('isEngulfingLong: current low < prev low AND close > prev high', () => {
+    const bars = new Bars([
+      { open: 1.0950, high: 1.1060, low: 1.0890, close: 1.1050, time: new Date() }, // engulfs
+      { open: 1.1020, high: 1.1040, low: 1.0900, close: 1.0920, time: new Date() }, // prev
+    ]);
+    expect(bars.isEngulfingLong(0)).toBe(true);
+  });
+
+  it('isEngulfingLong: false when close does not exceed prev high', () => {
+    const bars = new Bars([
+      { open: 1.0950, high: 1.1030, low: 1.0890, close: 1.1030, time: new Date() },
+      { open: 1.1020, high: 1.1040, low: 1.0900, close: 1.0920, time: new Date() },
+    ]);
+    expect(bars.isEngulfingLong(0)).toBe(false); // close 1.1030 < prev high 1.1040
+  });
+
+  it('isEngulfingShort: current high > prev high AND close < prev low', () => {
+    const bars = new Bars([
+      { open: 1.1050, high: 1.1060, low: 1.0880, close: 1.0880, time: new Date() }, // engulfs down
+      { open: 1.0920, high: 1.1040, low: 1.0900, close: 1.1020, time: new Date() }, // prev
+    ]);
+    expect(bars.isEngulfingShort(0)).toBe(true);
+  });
+
+  it('isReversingLong: bullish bar with higher high and close > prev close & open', () => {
+    const bars = new Bars([
+      { open: 1.0930, high: 1.1060, low: 1.0920, close: 1.1050, time: new Date() }, // reversal
+      { open: 1.1020, high: 1.1040, low: 1.0900, close: 1.0930, time: new Date() }, // prev bearish
+    ]);
+    expect(bars.isReversingLong(0)).toBe(true);
+  });
+
+  it('isReversingShort: bearish bar with lower low and close < prev close & open', () => {
+    const bars = new Bars([
+      { open: 1.1050, high: 1.1060, low: 1.0880, close: 1.0890, time: new Date() }, // reversal
+      { open: 1.0920, high: 1.1040, low: 1.0900, close: 1.1020, time: new Date() }, // prev bullish
+    ]);
+    expect(bars.isReversingShort(0)).toBe(true);
+  });
+
+  it('multi-bar patterns return false when not enough bars', () => {
+    const bars = new Bars([
+      { open: 1.1000, high: 1.1050, low: 1.0950, close: 1.1030, time: new Date() },
+    ]);
+    expect(bars.isEngulfingLong(0)).toBe(false);
+    expect(bars.isEngulfingShort(0)).toBe(false);
+    expect(bars.isReversingLong(0)).toBe(false);
+    expect(bars.isReversingShort(0)).toBe(false);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// T1.3 – Bars: EMA
+// ─────────────────────────────────────────────────────────────
+
+describe('T1.3 – Bars.ema', () => {
+  it('ema(1) returns the close at shift', () => {
+    const bars = new Bars([
+      { open: 1, high: 2, low: 0.5, close: 1.5, time: new Date() },
+      { open: 1, high: 2, low: 0.5, close: 1.0, time: new Date() },
+    ]);
+    // EMA(1) with k=1.0 should converge to the close at shift
+    expect(bars.ema(1, 0)).toBeCloseTo(1.5, 5);
+  });
+
+  it('ema with constant closes equals that close', () => {
+    const data = Array.from({ length: 20 }, () => ({
+      open: 1.1, high: 1.2, low: 1.0, close: 1.1, time: new Date(),
+    }));
+    const bars = new Bars(data);
+    expect(bars.ema(10, 0)).toBeCloseTo(1.1, 5);
+  });
+
+  it('ema reacts faster than sma to recent price changes', () => {
+    // 10 bars at 1.0, then jump to 2.0 at shift 0
+    const data = [
+      { open: 2, high: 2, low: 2, close: 2.0, time: new Date() },
+      ...Array.from({ length: 10 }, () => ({
+        open: 1, high: 1, low: 1, close: 1.0, time: new Date(),
+      })),
+    ];
+    const bars = new Bars(data);
+    const emaVal = bars.ema(5, 0);
+    const smaVal = bars.sma(5, 0);
+    // EMA weights recent data more → closer to 2.0 than SMA
+    expect(emaVal).toBeGreaterThan(smaVal);
+  });
+
+  it('ema returns close when only 1 bar available', () => {
+    const bars = new Bars([{ open: 1, high: 2, low: 0.5, close: 1.5, time: new Date() }]);
+    expect(bars.ema(10, 0)).toBeCloseTo(1.5, 5);
+  });
+});
