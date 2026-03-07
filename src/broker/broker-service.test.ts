@@ -4,14 +4,14 @@ import type { AppEventMap } from '../shared/services/event-map.js';
 import { ServiceStatus, ServiceKind } from '../shared/services/types.js';
 import { BrokerService } from './broker-service.js';
 import { PaperBroker } from './paper/paper-broker.js';
-import { SymbolInfo, TradingEngine, Bar, Bars, } from '../../trading-engine.js';
+import { SymbolInfoForex, TradingEngine, Bar, Bars, } from '../../trading-engine.js';
 import { nullLogger } from '../shared/lib/logger.js';
 
 function makeBrokerService(id = 'broker:paper:test') {
   const bus = new TypedEventBus<AppEventMap>();
   const broker = new PaperBroker(bus, nullLogger);
   return new BrokerService(
-    { id, name: 'paper-test', broker, symbol: new SymbolInfo('EURUSD', 5), hedging: true },
+    { id, name: 'paper-test', broker, symbol: new SymbolInfoForex('EURUSD', 5), hedging: true },
     bus,
     nullLogger,
   );
@@ -53,7 +53,7 @@ describe('BrokerService', () => {
   it('reuses existing engine when provided', () => {
     const bus = new TypedEventBus<AppEventMap>();
     const broker = new PaperBroker(bus, nullLogger);
-    const symbol = new SymbolInfo('EURUSD', 5);
+    const symbol = new SymbolInfoForex('EURUSD', 5);
     const existingEngine = new TradingEngine(symbol, broker, true);
     const svc = new BrokerService(
       { id: 'reuse', name: 'reuse-test', broker, symbol, hedging: true, engine: existingEngine },
@@ -91,11 +91,11 @@ describe('BrokerService — multi-broker isolation', () => {
     const brokerB = new PaperBroker(busB, nullLogger);
 
     const svcA = new BrokerService(
-      { id: 'broker:a', name: 'a', broker: brokerA, symbol: new SymbolInfo('EURUSD', 5), hedging: true },
+      { id: 'broker:a', name: 'a', broker: brokerA, symbol: new SymbolInfoForex('EURUSD', 5), hedging: true },
       busA, nullLogger,
     );
     const svcB = new BrokerService(
-      { id: 'broker:b', name: 'b', broker: brokerB, symbol: new SymbolInfo('GBPUSD', 5), hedging: true },
+      { id: 'broker:b', name: 'b', broker: brokerB, symbol: new SymbolInfoForex('GBPUSD', 5), hedging: true },
       busB, nullLogger,
     );
 

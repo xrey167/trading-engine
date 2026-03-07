@@ -13,7 +13,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import {
-  TradingEngine, Bars, SymbolInfo, Bar,
+  TradingEngine, Bars, SymbolInfoForex, Bar,
   AtrMethod, BarsAtrMode, BarBase, TrailMode, Side, LimitConfirm,
   checkSLTP, calcTrailingSL,
   ScaledOrderEngine, AtrModule,
@@ -62,7 +62,7 @@ function mockBroker(fillPrice = 1.1000): IBrokerAdapter {
   };
 }
 
-const EURUSD5 = new SymbolInfo('EURUSD', 5); // pointSize = 0.00001
+const EURUSD5 = new SymbolInfoForex('EURUSD', 5); // pointSize = 0.00001
 
 // ─────────────────────────────────────────────────────────────
 // T1 – sl()/tp() setters
@@ -257,7 +257,7 @@ describe('T5 – plhRef starts at Infinity for Short so trail fires on first bar
     // Use calcTrailingSL directly — it is exported and takes an explicit TrailState.
     const state: TrailState = { active: false, plhRef: Infinity };
     const bar = new Bar(1.1100, 1.1200, 1.0900, 1.1050, new Date());
-    const sym = new SymbolInfo('EURUSD', 5);
+    const sym = new SymbolInfoForex('EURUSD', 5);
     // For Short PlhPeak: if (bar.low < state.plhRef) → 1.09 < Infinity → true
     // → state.plhRef = bar.low = 1.09; cand = bar.high + distPrice
     const distancePts = 10;

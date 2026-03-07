@@ -95,26 +95,33 @@ export class Bar implements OHLC {
   isBearish(): boolean { return this.close < this.open; }
   isDoji(tol = 0): boolean { return Math.abs(this.open - this.close) <= tol; }
 
-  range():     number { return this.high - this.low; }
+  effectiveHigh(base: BarBase = BarBase.HiLo): number {
+    return base === BarBase.HiLo ? this.high : Math.max(this.open, this.close);
+  }
+  effectiveLow(base: BarBase = BarBase.HiLo): number {
+    return base === BarBase.HiLo ? this.low : Math.min(this.open, this.close);
+  }
+
+  range(base: BarBase = BarBase.HiLo): number { return this.effectiveHigh(base) - this.effectiveLow(base); }
   wickRange(): number { return this.high - Math.max(this.open, this.close); }
   tailRange(): number { return Math.min(this.open, this.close) - this.low; }
   bodyRange(): number { return Math.abs(this.open - this.close); }
 
-  bodyPart(): number { const r = this.range(); return r === 0 ? 0 : this.bodyRange() / r; }
-  tailPart(): number { const r = this.range(); return r === 0 ? 0 : this.tailRange() / r; }
-  wickPart(): number { const r = this.range(); return r === 0 ? 0 : this.wickRange() / r; }
+  bodyPart(base: BarBase = BarBase.HiLo): number { const r = this.range(base); return r === 0 ? 0 : this.bodyRange() / r; }
+  tailPart(base: BarBase = BarBase.HiLo): number { const r = this.range(base); return r === 0 ? 0 : this.tailRange() / r; }
+  wickPart(base: BarBase = BarBase.HiLo): number { const r = this.range(base); return r === 0 ? 0 : this.wickRange() / r; }
 
-  isHammer(tailMin = 0.55): boolean {
-    return this.tailPart() >= tailMin && this.wickPart() <= this.tailPart() * 0.5;
+  isHammer(tailMin = 0.55, base: BarBase = BarBase.HiLo): boolean {
+    return this.tailPart(base) >= tailMin && this.wickPart(base) <= this.tailPart(base) * 0.5;
   }
-  isShootingStar(wickMin = 0.55): boolean {
-    return this.wickPart() >= wickMin && this.tailPart() <= this.wickPart() * 0.5;
+  isShootingStar(wickMin = 0.55, base: BarBase = BarBase.HiLo): boolean {
+    return this.wickPart(base) >= wickMin && this.tailPart(base) <= this.wickPart(base) * 0.5;
   }
-  isSolid(wickMax = 0.15, tailMax = 0.15): boolean {
-    return this.tailPart() <= tailMax && this.wickPart() <= wickMax;
+  isSolid(wickMax = 0.15, tailMax = 0.15, base: BarBase = BarBase.HiLo): boolean {
+    return this.tailPart(base) <= tailMax && this.wickPart(base) <= wickMax;
   }
-  isSolidBullish(wickMax = 0.15): boolean { return this.isBullish() && this.wickPart() <= wickMax; }
-  isSolidBearish(tailMax = 0.15): boolean { return this.isBearish() && this.tailPart() <= tailMax; }
+  isSolidBullish(wickMax = 0.15, base: BarBase = BarBase.HiLo): boolean { return this.isBullish() && this.wickPart(base) <= wickMax; }
+  isSolidBearish(tailMax = 0.15, base: BarBase = BarBase.HiLo): boolean { return this.isBearish() && this.tailPart(base) <= tailMax; }
 
   isBreaking(price: number): boolean {
     return (this.open > price && this.close < price) || (this.open < price && this.close > price);
@@ -250,14 +257,69 @@ export class Bars {
     }
     return true;
   }
+
+  ema(periods: number, shift = 0): number {
+    const end = Math.min(shift + periods * 3, this.data.length); // use enough bars for convergence
+    if (end <= shift) return 0;
+    // Seed with SMA of the oldest `periods` bars in the window
+    let seed = 0, cnt = 0;
+    const seedStart = Math.min(shift + periods, end);
+    for (let i = seedStart; i < end; i++) { seed += this.data[i].close; cnt++; }
+    if (cnt === 0) return this.data[shift].close;
+    seed /= cnt;
+    // Apply EMA from oldest toward shift
+    const k = 2 / (periods + 1);
+    let ema = seed;
+    for (let i = Math.min(seedStart - 1, end - 1); i >= shift; i--) {
+      ema = this.data[i].close * k + ema * (1 - k);
+    }
+    return ema;
+  }
+
+  // Multi-bar patterns (require shift+1 to exist)
+  isEngulfingLong(shift = 0): boolean {
+    if (shift + 1 >= this.data.length) return false;
+    return this.data[shift].low < this.data[shift + 1].low
+        && this.data[shift].close > this.data[shift + 1].high;
+  }
+
+  isEngulfingShort(shift = 0): boolean {
+    if (shift + 1 >= this.data.length) return false;
+    return this.data[shift].high > this.data[shift + 1].high
+        && this.data[shift].close < this.data[shift + 1].low;
+  }
+
+  isReversingLong(shift = 0): boolean {
+    if (shift + 1 >= this.data.length) return false;
+    const cur = this.data[shift], prev = this.data[shift + 1];
+    return cur.high > prev.high && cur.close > prev.close
+        && cur.close > prev.open && cur.close > cur.open;
+  }
+
+  isReversingShort(shift = 0): boolean {
+    if (shift + 1 >= this.data.length) return false;
+    const cur = this.data[shift], prev = this.data[shift + 1];
+    return cur.low < prev.low && cur.close < prev.close
+        && cur.close < prev.open && cur.open > cur.close;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
 // Symbol metadata
 // ─────────────────────────────────────────────────────────────
 
-export class SymbolInfo {
+export const AssetType = {
+  Forex:  'FOREX',
+  Stock:  'STOCK',
+  Future: 'FUTURE',
+  Crypto: 'CRYPTO',
+  Index:  'INDEX',
+} as const;
+export type AssetType = (typeof AssetType)[keyof typeof AssetType];
+
+export abstract class SymbolInfoBase {
   readonly pointSize: number;
+  abstract readonly assetType: AssetType;
 
   constructor(public readonly name: string, public readonly digits: number) {
     this.pointSize = 10 ** -digits;
@@ -267,6 +329,37 @@ export class SymbolInfo {
   pointsToPrice(points: number): number { return points * this.pointSize; }
   normalize(price: number): number { return parseFloat(price.toFixed(this.digits)); }
 }
+
+export class SymbolInfoForex extends SymbolInfoBase {
+  readonly assetType = AssetType.Forex;
+  readonly baseCurrency: string;
+  readonly quoteCurrency: string;
+
+  constructor(name: string, digits: number) {
+    super(name, digits);
+    this.baseCurrency  = name.slice(0, 3).toUpperCase();
+    this.quoteCurrency = name.slice(3, 6).toUpperCase();
+  }
+}
+
+export class SymbolInfoStock extends SymbolInfoBase {
+  readonly assetType = AssetType.Stock;
+
+  constructor(name: string, digits: number, readonly exchange?: string) {
+    super(name, digits);
+  }
+}
+
+export class SymbolInfoFuture extends SymbolInfoBase {
+  readonly assetType = AssetType.Future;
+
+  constructor(name: string, digits: number, readonly contractSize: number = 1) {
+    super(name, digits);
+  }
+}
+
+// Backward-compat alias so existing code still compiles without changes
+export { SymbolInfoForex as SymbolInfo };
 
 // ─────────────────────────────────────────────────────────────
 // Trailing-stop calculation (per-bar, pure function)
@@ -297,7 +390,7 @@ export function calcTrailingSL(p: {
   trailBeginPts: number;
   trail:         TrailConfig;
   state:         TrailState; // mutable
-  symbol:        SymbolInfo;
+  symbol:        SymbolInfoBase;
 }): number {
   const { side, bar, bars, posPrice, spreadAbs, trail, state, symbol } = p;
   let { currentSL } = p;
@@ -568,7 +661,7 @@ export class TradingEngine {
   private _spreadAbs = 0;
 
   constructor(
-    private readonly symbol:  SymbolInfo,
+    private readonly symbol:  SymbolInfoBase,
     private readonly broker:  IBrokerAdapter,
     private readonly hedging  = true,   // false = net-mode (like MT4 non-hedge)
   ) {}
@@ -1393,7 +1486,7 @@ export class TradingEngine {
 export async function evaluateCandleATR03(
   bars:   Bars,
   engine: TradingEngine,
-  symbol: SymbolInfo,
+  symbol: SymbolInfoBase,
 ): Promise<void> {
   const prev  = bars.bar(1);
   const atr14 = bars.atr(14, 1);
@@ -1473,7 +1566,7 @@ export class AtrModule {
   constructor(
     private readonly cfg:    AtrModuleConfig,
     private readonly engine: TradingEngine,
-    private readonly symbol: SymbolInfo,
+    private readonly symbol: SymbolInfoBase,
   ) {}
 
   onBar(bars: Bars): void {
@@ -1623,7 +1716,7 @@ export class ScaledOrderEngine {
 
   constructor(
     private readonly engine:  TradingEngine,
-    private readonly symbol:  SymbolInfo,
+    private readonly symbol:  SymbolInfoBase,
     preset: ScaledOrderPreset | string,
   ) {
     this._preset = typeof preset === 'string'
@@ -1787,7 +1880,7 @@ class MyBroker implements IBrokerAdapter {
 }
 
 // 2. Set up
-const symbol = new SymbolInfo('EURUSD', 5);
+const symbol = new SymbolInfoForex('EURUSD', 5);
 const engine = new TradingEngine(symbol, new MyBroker(), true); // hedging=true
 
 // 3. Example: OCO bracket order
