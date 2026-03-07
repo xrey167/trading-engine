@@ -308,6 +308,7 @@ export class Bars {
 // Symbol metadata
 // ─────────────────────────────────────────────────────────────
 
+/** Discriminator for the symbol class hierarchy. */
 export const AssetType = {
   Forex:  'FOREX',
   Stock:  'STOCK',
@@ -317,22 +318,60 @@ export const AssetType = {
 } as const;
 export type AssetType = (typeof AssetType)[keyof typeof AssetType];
 
+/**
+ * Abstract base for all symbol descriptors.
+ *
+ * Holds the symbol `name`, decimal `digits`, and the derived `pointSize`
+ * (`10 ** -digits`). Shared conversion helpers are defined here so every
+ * subclass inherits identical math.
+ *
+ * @example
+ * // Subclass for a custom asset type
+ * class SymbolInfoCrypto extends SymbolInfoBase {
+ *   readonly assetType = AssetType.Crypto;
+ * }
+ */
 export abstract class SymbolInfoBase {
+  /** Smallest price increment: `10 ** -digits`. */
   readonly pointSize: number;
+  /** Asset-class discriminator — set by each concrete subclass. */
   abstract readonly assetType: AssetType;
 
-  constructor(public readonly name: string, public readonly digits: number) {
+  constructor(
+    /** Broker symbol name, e.g. `'EURUSD'` or `'AAPL'`. */
+    public readonly name: string,
+    /** Number of decimal places in the price, e.g. `5` for forex. */
+    public readonly digits: number,
+  ) {
     this.pointSize = 10 ** -digits;
   }
 
+  /** Convert a raw price value to points (integer multiples of `pointSize`). */
   priceToPoints(price: number): number  { return price / this.pointSize; }
+  /** Convert points back to a price value. */
   pointsToPrice(points: number): number { return points * this.pointSize; }
+  /** Round `price` to `digits` decimal places. */
   normalize(price: number): number { return parseFloat(price.toFixed(this.digits)); }
 }
 
+/**
+ * Symbol descriptor for forex currency pairs.
+ *
+ * Automatically extracts `baseCurrency` and `quoteCurrency` from the
+ * first six characters of `name`.
+ *
+ * @example
+ * const sym = new SymbolInfoForex('EURUSD', 5);
+ * sym.baseCurrency;          // 'EUR'
+ * sym.quoteCurrency;         // 'USD'
+ * sym.pointSize;             // 0.00001
+ * sym.priceToPoints(0.0001); // 10
+ */
 export class SymbolInfoForex extends SymbolInfoBase {
   readonly assetType = AssetType.Forex;
+  /** First three characters of the symbol name (base currency). */
   readonly baseCurrency: string;
+  /** Characters 3–5 of the symbol name (quote currency). */
   readonly quoteCurrency: string;
 
   constructor(name: string, digits: number) {
@@ -342,23 +381,47 @@ export class SymbolInfoForex extends SymbolInfoBase {
   }
 }
 
+/**
+ * Symbol descriptor for equities.
+ *
+ * @example
+ * const sym = new SymbolInfoStock('AAPL', 2, 'NASDAQ');
+ * sym.exchange; // 'NASDAQ'
+ */
 export class SymbolInfoStock extends SymbolInfoBase {
   readonly assetType = AssetType.Stock;
 
-  constructor(name: string, digits: number, readonly exchange?: string) {
+  constructor(
+    name: string,
+    digits: number,
+    /** Optional exchange identifier, e.g. `'NYSE'` or `'NASDAQ'`. */
+    readonly exchange?: string,
+  ) {
     super(name, digits);
   }
 }
 
+/**
+ * Symbol descriptor for futures contracts.
+ *
+ * @example
+ * const sym = new SymbolInfoFuture('ES', 2, 50); // E-mini S&P 500
+ * sym.contractSize; // 50
+ */
 export class SymbolInfoFuture extends SymbolInfoBase {
   readonly assetType = AssetType.Future;
 
-  constructor(name: string, digits: number, readonly contractSize: number = 1) {
+  constructor(
+    name: string,
+    digits: number,
+    /** Number of underlying units per contract (default `1`). */
+    readonly contractSize: number = 1,
+  ) {
     super(name, digits);
   }
 }
 
-// Backward-compat alias so existing code still compiles without changes
+/** @deprecated Use {@link SymbolInfoForex} directly. Kept for backward compatibility. */
 export { SymbolInfoForex as SymbolInfo };
 
 // ─────────────────────────────────────────────────────────────
