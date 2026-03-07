@@ -1002,22 +1002,22 @@ export abstract class TrailingOrder extends Order {
   }
 
   override updateTrailingRef(bar: Bar, _bars: Bars, symbol: SymbolInfoBase): void {
-    // Pullback takes priority
     if (this.pullbackPts != null) { super.updateTrailingRef(bar, _bars, symbol); return; }
-    const dist = symbol.pointsToPrice(this.trailEntry.distPts);
-    if (this.type === 'BUY_LIMIT') {
-      if (bar.high > (this._trailRef ?? -Infinity)) { this._trailRef = bar.high; this.price = bar.high - dist; }
-    } else if (this.type === 'SELL_LIMIT') {
-      if (bar.low  < (this._trailRef ?? Infinity))  { this._trailRef = bar.low;  this.price = bar.low  + dist; }
-    } else if (this.type === 'BUY_STOP' || this.type === 'BUY_MTO') {
-      if (bar.low  < (this._trailRef ?? Infinity))  { this._trailRef = bar.low;  this.price = bar.low  + dist; }
-    } else if (this.type === 'SELL_STOP' || this.type === 'SELL_MTO') {
-      if (bar.high > (this._trailRef ?? -Infinity)) { this._trailRef = bar.high; this.price = bar.high - dist; }
-    }
+    this._updateTrailRef(bar, symbol);
   }
+
+  protected abstract _updateTrailRef(bar: Bar, symbol: SymbolInfoBase): void;
 }
 
 export class TrailingLimitOrder extends TrailingOrder {
+  protected override _updateTrailRef(bar: Bar, symbol: SymbolInfoBase): void {
+    const dist = symbol.pointsToPrice(this.trailEntry.distPts);
+    if (this.side === Side.Long) {
+      if (bar.high > (this._trailRef ?? -Infinity)) { this._trailRef = bar.high; this.price = bar.high - dist; }
+    } else {
+      if (bar.low < (this._trailRef ?? Infinity)) { this._trailRef = bar.low; this.price = bar.low + dist; }
+    }
+  }
   isFilled(bar: Bar): boolean {
     return this.side === Side.Long ? bar.low <= this.price : bar.high >= this.price;
   }
@@ -1027,6 +1027,14 @@ export class TrailingLimitOrder extends TrailingOrder {
 }
 
 export class TrailingStopOrder extends TrailingOrder {
+  protected override _updateTrailRef(bar: Bar, symbol: SymbolInfoBase): void {
+    const dist = symbol.pointsToPrice(this.trailEntry.distPts);
+    if (this.side === Side.Long) {
+      if (bar.low < (this._trailRef ?? Infinity)) { this._trailRef = bar.low; this.price = bar.low + dist; }
+    } else {
+      if (bar.high > (this._trailRef ?? -Infinity)) { this._trailRef = bar.high; this.price = bar.high - dist; }
+    }
+  }
   isFilled(bar: Bar): boolean {
     return this.side === Side.Long ? bar.high >= this.price : bar.low <= this.price;
   }
@@ -1035,11 +1043,7 @@ export class TrailingStopOrder extends TrailingOrder {
   }
 }
 
-export class MTOOrder extends TrailingOrder {
-  // MTO triggers like a stop
-  isFilled(bar: Bar): boolean {
-    return this.side === Side.Long ? bar.high >= this.price : bar.low <= this.price;
-  }
+export class MTOOrder extends TrailingStopOrder {
   computeFillPrice(bar: Bar): number { return bar.close; }
   override get fillsAtMarket(): boolean { return true; }
 }
