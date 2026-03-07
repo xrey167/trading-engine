@@ -1452,3 +1452,230 @@ describe('T2.4 – isCrossingAbove / isCrossingBelow', () => {
     expect(isCrossingBelow(2, 3, 3, 3)).toBe(true);
   });
 });
+
+// ─────────────────────────────────────────────────────────────
+// T3.1 – Bar: fiboPrice & pivotPrice
+// ─────────────────────────────────────────────────────────────
+
+describe('T3.1 – Bar.fiboPrice & pivotPrice', () => {
+  const bar = new Bar(1.1, 1.5, 1.0, 1.3, new Date());
+
+  it('fiboPrice at 0 = low', () => {
+    expect(bar.fiboPrice(0)).toBeCloseTo(1.0, 5);
+  });
+
+  it('fiboPrice at 1 = high', () => {
+    expect(bar.fiboPrice(1)).toBeCloseTo(1.5, 5);
+  });
+
+  it('fiboPrice at 0.618 = low + range * 0.618', () => {
+    expect(bar.fiboPrice(0.618)).toBeCloseTo(1.0 + 0.5 * 0.618, 5);
+  });
+
+  it('pivotPrice PP = (H+L+C)/3', () => {
+    expect(bar.pivotPrice('PP')).toBeCloseTo((1.5 + 1.0 + 1.3) / 3, 5);
+  });
+
+  it('pivotPrice R1 = 2*PP - L', () => {
+    const pp = (1.5 + 1.0 + 1.3) / 3;
+    expect(bar.pivotPrice('R1')).toBeCloseTo(2 * pp - 1.0, 5);
+  });
+
+  it('pivotPrice S1 = 2*PP - H', () => {
+    const pp = (1.5 + 1.0 + 1.3) / 3;
+    expect(bar.pivotPrice('S1')).toBeCloseTo(2 * pp - 1.5, 5);
+  });
+
+  it('pivotPrice R2 = PP + (H-L)', () => {
+    const pp = (1.5 + 1.0 + 1.3) / 3;
+    expect(bar.pivotPrice('R2')).toBeCloseTo(pp + 0.5, 5);
+  });
+
+  it('pivotPrice S2 = PP - (H-L)', () => {
+    const pp = (1.5 + 1.0 + 1.3) / 3;
+    expect(bar.pivotPrice('S2')).toBeCloseTo(pp - 0.5, 5);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// T3.2 – Bars: highestHighShift & lowestLowShift
+// ─────────────────────────────────────────────────────────────
+
+describe('T3.2 – Bars shift lookups', () => {
+  const data: OHLC[] = [
+    { open: 5, high: 10, low: 3, close: 7, time: new Date('2026-01-05') },
+    { open: 4, high: 15, low: 2, close: 6, time: new Date('2026-01-04') }, // highest high
+    { open: 3, high: 8,  low: 1, close: 5, time: new Date('2026-01-03') }, // lowest low
+    { open: 2, high: 9,  low: 4, close: 4, time: new Date('2026-01-02') },
+    { open: 1, high: 7,  low: 3, close: 3, time: new Date('2026-01-01') },
+  ];
+  const bars = new Bars(data);
+
+  it('highestHighShift returns shift of max high', () => {
+    expect(bars.highestHighShift(5)).toBe(1); // high=15 at index 1
+  });
+
+  it('lowestLowShift returns shift of min low', () => {
+    expect(bars.lowestLowShift(5)).toBe(2); // low=1 at index 2
+  });
+
+  it('highestHighShift respects shift parameter', () => {
+    expect(bars.highestHighShift(3, 2)).toBe(3); // indices 2,3,4 → high=9 at index 3
+  });
+
+  it('lowestLowShift respects shift parameter', () => {
+    expect(bars.lowestLowShift(2, 0)).toBe(1); // indices 0,1 → low=2 at index 1
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// T3.3 – Bars: getBarShift (binary search)
+// ─────────────────────────────────────────────────────────────
+
+describe('T3.3 – Bars.getBarShift', () => {
+  const dates = [
+    new Date('2026-01-05T00:00Z'),
+    new Date('2026-01-04T00:00Z'),
+    new Date('2026-01-03T00:00Z'),
+    new Date('2026-01-02T00:00Z'),
+    new Date('2026-01-01T00:00Z'),
+  ];
+  const data: OHLC[] = dates.map(d => ({ open: 1, high: 2, low: 0.5, close: 1.5, time: d }));
+  const bars = new Bars(data);
+
+  it('finds exact match', () => {
+    expect(bars.getBarShift(new Date('2026-01-03T00:00Z'))).toBe(2);
+  });
+
+  it('finds nearest bar for in-between date', () => {
+    // Between index 1 (Jan 4) and index 2 (Jan 3) — should return nearest
+    const shift = bars.getBarShift(new Date('2026-01-03T12:00Z'));
+    expect(shift).toBeGreaterThanOrEqual(1);
+    expect(shift).toBeLessThanOrEqual(2);
+  });
+
+  it('returns 0 for date newer than all bars', () => {
+    expect(bars.getBarShift(new Date('2026-02-01T00:00Z'))).toBe(0);
+  });
+
+  it('returns last index for date older than all bars', () => {
+    expect(bars.getBarShift(new Date('2025-01-01T00:00Z'))).toBe(4);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// T3.4 – Bars: findOutsideBar
+// ─────────────────────────────────────────────────────────────
+
+describe('T3.4 – Bars.findOutsideBar', () => {
+  it('finds enclosing bar scanning backward', () => {
+    const data: OHLC[] = [
+      { open: 1.2, high: 1.3, low: 1.1, close: 1.25, time: new Date() }, // narrow bar
+      { open: 1.1, high: 1.2, low: 1.15, close: 1.18, time: new Date() }, // too narrow
+      { open: 1.0, high: 1.5, low: 0.9, close: 1.4, time: new Date() },  // outside bar — encloses bar[0]
+    ];
+    const bars = new Bars(data);
+    expect(bars.findOutsideBar(0)).toBe(2);
+  });
+
+  it('returns -1 when no outside bar found', () => {
+    const data: OHLC[] = [
+      { open: 1, high: 10, low: 0.1, close: 5, time: new Date() },
+      { open: 1, high: 5,  low: 1,   close: 3, time: new Date() },
+    ];
+    const bars = new Bars(data);
+    expect(bars.findOutsideBar(0)).toBe(-1);
+  });
+
+  it('respects maxScan limit', () => {
+    const data: OHLC[] = [
+      { open: 1.2, high: 1.3, low: 1.1, close: 1.25, time: new Date() },
+      { open: 1.1, high: 1.2, low: 1.15, close: 1.18, time: new Date() },
+      { open: 1.0, high: 1.5, low: 0.9, close: 1.4, time: new Date() },
+    ];
+    const bars = new Bars(data);
+    // maxScan=1 only checks bar[1], which doesn't enclose bar[0]
+    expect(bars.findOutsideBar(0, 1)).toBe(-1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// T3.5 – Bars: dayOHLC
+// ─────────────────────────────────────────────────────────────
+
+describe('T3.5 – Bars.dayOHLC', () => {
+  // Simulate 2 days of intraday bars (newest first)
+  const data: OHLC[] = [
+    // Day 2 (Jan 2) — 2 bars
+    { open: 5, high: 7, low: 4, close: 6, time: new Date('2026-01-02T12:00Z') },
+    { open: 4, high: 6, low: 3, close: 5, time: new Date('2026-01-02T08:00Z') },
+    // Day 1 (Jan 1) — 2 bars
+    { open: 2, high: 4, low: 1, close: 3, time: new Date('2026-01-01T12:00Z') },
+    { open: 1, high: 3, low: 0, close: 2, time: new Date('2026-01-01T08:00Z') },
+  ];
+  const bars = new Bars(data);
+
+  it('daysBack=0 returns today (most recent day)', () => {
+    const day = bars.dayOHLC(0);
+    expect(day).not.toBeNull();
+    expect(day?.open).toBe(4);  // oldest bar of the day = bar[1]
+    expect(day?.close).toBe(6); // newest bar of the day = bar[0]
+    expect(day?.high).toBe(7);
+    expect(day?.low).toBe(3);
+  });
+
+  it('daysBack=1 returns previous day', () => {
+    const day = bars.dayOHLC(1);
+    expect(day).not.toBeNull();
+    expect(day?.open).toBe(1);
+    expect(day?.close).toBe(3);
+    expect(day?.high).toBe(4);
+    expect(day?.low).toBe(0);
+  });
+
+  it('returns null for out-of-range day', () => {
+    expect(bars.dayOHLC(5)).toBeNull();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// T3.6 – Bars: LWMA & SMMA
+// ─────────────────────────────────────────────────────────────
+
+describe('T3.6 – Bars.lwma & smma', () => {
+  // closes: [5, 4, 3, 2, 1] (newest first)
+  const data: OHLC[] = Array.from({ length: 5 }, (_, i) => ({
+    open: 5 - i, high: 6 - i, low: 4 - i, close: 5 - i, time: new Date(),
+  }));
+  const bars = new Bars(data);
+
+  it('lwma weights newest bar highest', () => {
+    // LWMA(3) at shift 0: (5*3 + 4*2 + 3*1) / (3+2+1) = (15+8+3)/6 = 26/6
+    expect(bars.lwma(3)).toBeCloseTo(26 / 6, 5);
+  });
+
+  it('lwma(1) = close', () => {
+    expect(bars.lwma(1)).toBeCloseTo(5, 5);
+  });
+
+  it('smma converges differently than sma', () => {
+    // SMMA applies Wilder's smoothing — should differ from simple SMA
+    const smmaVal = bars.smma(3);
+    const smaVal = bars.sma(3);
+    // Both should be reasonable values in the [1, 5] range
+    expect(smmaVal).toBeGreaterThan(0);
+    expect(smmaVal).toBeLessThan(6);
+    // SMMA lags more than SMA
+    expect(smmaVal).not.toBeCloseTo(smaVal, 2);
+  });
+
+  it('lwma returns 0 for empty bars', () => {
+    const empty = new Bars([]);
+    expect(empty.lwma(5)).toBe(0);
+  });
+
+  it('smma returns 0 for empty bars', () => {
+    const empty = new Bars([]);
+    expect(empty.smma(5)).toBe(0);
+  });
+});
