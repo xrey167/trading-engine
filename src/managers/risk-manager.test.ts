@@ -62,8 +62,8 @@ describe('RiskManagerService', () => {
     await svc.start();
 
     // Simulate 2 filled orders
-    bus.emit('order', { action: 'FILLED', brokerId: 'b', symbol: 'EURUSD', direction: 'BUY', lots: 1, price: 1.1, metadata: {}, timestamp: new Date().toISOString() });
-    bus.emit('order', { action: 'FILLED', brokerId: 'b', symbol: 'GBPUSD', direction: 'BUY', lots: 1, price: 1.3, metadata: {}, timestamp: new Date().toISOString() });
+    bus.emit('order', { action: 'FILLED', orderId: 0, orderType: 'UNKNOWN', brokerId: 'b', symbol: 'EURUSD', direction: 'BUY', lots: 1, price: 1.1, metadata: {}, timestamp: new Date().toISOString() });
+    bus.emit('order', { action: 'FILLED', orderId: 0, orderType: 'UNKNOWN', brokerId: 'b', symbol: 'GBPUSD', direction: 'BUY', lots: 1, price: 1.3, metadata: {}, timestamp: new Date().toISOString() });
 
     const result = svc.validateOrder({ symbol: 'USDJPY', direction: 'BUY', lots: 1 });
     expect(result.ok).toBe(true);
@@ -78,7 +78,7 @@ describe('RiskManagerService', () => {
     const { bus, svc } = makeRiskManager({ maxPositionsPerSymbol: 1 });
     await svc.start();
 
-    bus.emit('order', { action: 'FILLED', brokerId: 'b', symbol: 'EURUSD', direction: 'BUY', lots: 1, price: 1.1, metadata: {}, timestamp: new Date().toISOString() });
+    bus.emit('order', { action: 'FILLED', orderId: 0, orderType: 'UNKNOWN', brokerId: 'b', symbol: 'EURUSD', direction: 'BUY', lots: 1, price: 1.1, metadata: {}, timestamp: new Date().toISOString() });
 
     const result = svc.validateOrder({ symbol: 'EURUSD', direction: 'BUY', lots: 1 });
     expect(result.ok).toBe(true);
@@ -116,7 +116,7 @@ describe('RiskManagerService', () => {
     expect(events[0].action).toBe('APPROVED');
 
     // Simulate fill
-    bus.emit('order', { action: 'FILLED', brokerId: 'b', symbol: 'EURUSD', direction: 'BUY', lots: 1, price: 1.1, metadata: {}, timestamp: new Date().toISOString() });
+    bus.emit('order', { action: 'FILLED', orderId: 0, orderType: 'UNKNOWN', brokerId: 'b', symbol: 'EURUSD', direction: 'BUY', lots: 1, price: 1.1, metadata: {}, timestamp: new Date().toISOString() });
 
     // Second order — rejected
     svc.validateOrder({ symbol: 'GBPUSD', direction: 'BUY', lots: 1 });
@@ -130,7 +130,7 @@ describe('RiskManagerService', () => {
     const { bus, svc } = makeRiskManager({ maxOpenPositions: 1 });
     await svc.start();
 
-    bus.emit('order', { action: 'FILLED', brokerId: 'b', symbol: 'EURUSD', direction: 'BUY', lots: 1, price: 1.1, metadata: {}, timestamp: new Date().toISOString() });
+    bus.emit('order', { action: 'FILLED', orderId: 0, orderType: 'UNKNOWN', brokerId: 'b', symbol: 'EURUSD', direction: 'BUY', lots: 1, price: 1.1, metadata: {}, timestamp: new Date().toISOString() });
 
     // Should be rejected
     let result = svc.validateOrder({ symbol: 'GBPUSD', direction: 'BUY', lots: 1 });
