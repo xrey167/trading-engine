@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { Candle } from '../../../trading-engine.js';
+import { Bar } from '../../../trading-engine.js';
 
 // Unit 1 — Result
 import {
@@ -200,12 +200,12 @@ describe('Domain enums', () => {
 });
 
 // ─────────────────────────────────────────────────────────────
-// Unit 3 — Candle analysis
+// Unit 3 — Bar analysis
 // ─────────────────────────────────────────────────────────────
 
-describe('Candle analysis', () => {
-  const bullish = new Candle(1.1000, 1.1050, 1.0950, 1.1040, new Date());
-  const bearish = new Candle(1.1040, 1.1050, 1.0950, 1.1000, new Date());
+describe('Bar analysis', () => {
+  const bullish = new Bar(1.1000, 1.1050, 1.0950, 1.1040, new Date());
+  const bearish = new Bar(1.1040, 1.1050, 1.0950, 1.1000, new Date());
 
   it('isBullish detects bullish candles', () => {
     expect(bullish.isBullish()).toBe(true);

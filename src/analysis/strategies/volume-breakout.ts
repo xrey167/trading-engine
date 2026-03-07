@@ -18,7 +18,7 @@ function tickVolumeAverage(bars: Bars, lookback: number): number | null {
   if (bars.length < lookback) return null;
   let sum = 0;
   for (let i = 0; i < lookback; i++) {
-    const c = bars.candle(i);
+    const c = bars.bar(i);
     sum += c.volume ?? 0;
   }
   return sum / lookback;
@@ -56,7 +56,7 @@ export class VolumeBreakoutStrategy implements ISignalStrategy {
 
     const shift = context.runMode === RunMode.Live ? 0 : 1;
     if (context.bars.length <= shift) return SignalResult.HOLD;
-    const bar = context.bars.candle(shift);
+    const bar = context.bars.bar(shift);
 
     if (bar.bodyRange() < this.config.minBodyRange) {
       return SignalResult.HOLD;

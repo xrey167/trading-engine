@@ -1,4 +1,4 @@
-import { TradingEngine, type SymbolInfo, type Candle, type Bars } from '../../trading-engine.js';
+import { TradingEngine, type SymbolInfo, type Bar, type Bars } from '../../trading-engine.js';
 import type { IFullBrokerAdapter } from './types.js';
 import type { TypedEventBus } from '../shared/event-bus.js';
 import type { AppEventMap } from '../shared/services/event-map.js';
@@ -44,7 +44,7 @@ export class BrokerService extends BaseService {
     );
   }
 
-  async processBar(bar: Candle, bars: Bars): Promise<void> {
+  async processBar(bar: Bar, bars: Bars): Promise<void> {
     const release = await this.engineMutex.acquire();
     try {
       await this.circuitBreaker.call(() => {

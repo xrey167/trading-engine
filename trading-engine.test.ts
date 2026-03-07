@@ -13,7 +13,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import {
-  TradingEngine, Bars, SymbolInfo, Candle,
+  TradingEngine, Bars, SymbolInfo, Bar,
   AtrMethod, BarsAtrMode, BarBase, TrailMode, Side, LimitConfirm,
   checkSLTP, calcTrailingSL,
   ScaledOrderEngine, AtrModule,
@@ -256,7 +256,7 @@ describe('T5 – plhRef starts at Infinity for Short so trail fires on first bar
   it('Short PlhPeak trail: first bar updates plhRef (bar.low < Infinity is always true)', () => {
     // Use calcTrailingSL directly — it is exported and takes an explicit TrailState.
     const state: TrailState = { active: false, plhRef: Infinity };
-    const bar = new Candle(1.1100, 1.1200, 1.0900, 1.1050, new Date());
+    const bar = new Bar(1.1100, 1.1200, 1.0900, 1.1050, new Date());
     const sym = new SymbolInfo('EURUSD', 5);
     // For Short PlhPeak: if (bar.low < state.plhRef) → 1.09 < Infinity → true
     // → state.plhRef = bar.low = 1.09; cand = bar.high + distPrice
@@ -423,8 +423,8 @@ describe('T8 – placeBoth executes Long then Short sequentially', () => {
 //            break-even, net mode, evaluateCandleATR03
 // ─────────────────────────────────────────────────────────────
 
-function makeSingleCandle(open: number, high: number, low: number, close: number): Candle {
-  return new Candle(open, high, low, close, new Date('2024-01-02'));
+function makeSingleCandle(open: number, high: number, low: number, close: number): Bar {
+  return new Bar(open, high, low, close, new Date('2024-01-02'));
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -680,7 +680,7 @@ describe('P6 – evaluateCandleATR03', () => {
 describe('P7 – checkSLTP: both SL and TP hit on the same bar', () => {
   it('bullish bar hitting both SL and TP → TP_BOTH (TP assumed first)', () => {
     // open=1.099, close=1.110 → bullish; high=1.111 >= tp=1.110; low=1.089 <= sl=1.090
-    const bar = new Candle(1.099, 1.111, 1.089, 1.110, new Date());
+    const bar = new Bar(1.099, 1.111, 1.089, 1.110, new Date());
     const result = checkSLTP({
       side: Side.Long, bar,
       sl: 1.090, tp: 1.110,
@@ -691,7 +691,7 @@ describe('P7 – checkSLTP: both SL and TP hit on the same bar', () => {
 
   it('bearish bar hitting both SL and TP → SL_BOTH (SL assumed first)', () => {
     // open=1.102, close=1.095 → bearish; high=1.111 >= tp=1.110; low=1.089 <= sl=1.090
-    const bar = new Candle(1.102, 1.111, 1.089, 1.095, new Date());
+    const bar = new Bar(1.102, 1.111, 1.089, 1.095, new Date());
     const result = checkSLTP({
       side: Side.Long, bar,
       sl: 1.090, tp: 1.110,
@@ -906,7 +906,7 @@ describe('P15 – calcTrailingSL TrailMode.Eop anchors SL below lowest-low', () 
       [1.1010, 1.1010, 1.1010, 1.1010],
       [1.0960, 1.0950, 1.0940, 1.0930],
     );
-    const bar = new Candle(1.1000, 1.1010, 1.0960, 1.1005, new Date());
+    const bar = new Bar(1.1000, 1.1010, 1.0960, 1.1005, new Date());
     const state: TrailState = { active: false, plhRef: 0 };
 
     const sl = calcTrailingSL({
@@ -937,7 +937,7 @@ describe('P16 – calcTrailingSL TrailMode.Ma anchors SL below SMA', () => {
   it('Long Ma: SL = sma(5) − distance', () => {
     // All closes = 1.1000 → sma(5) = 1.1000
     const bars = makeBars(Array(6).fill(1.1000));
-    const bar = new Candle(1.1000, 1.1010, 1.0990, 1.1005, new Date());
+    const bar = new Bar(1.1000, 1.1010, 1.0990, 1.1005, new Date());
     const state: TrailState = { active: false, plhRef: 0 };
 
     const sl = calcTrailingSL({
@@ -1044,7 +1044,7 @@ describe('P19 – BUY_MIT fill calls broker.marketOrder', () => {
     eng.addBuyMIT(1.09800);   // triggers when bar.low <= 1.09800
 
     // bar.low = 1.09780 ≤ 1.09800 → triggered
-    const bar = new Candle(1.10000, 1.10050, 1.09780, 1.09850, new Date());
+    const bar = new Bar(1.10000, 1.10050, 1.09780, 1.09850, new Date());
     await eng.onBar(bar, makeBars(Array(3).fill(1.10000)));
 
     expect(eng.isLong()).toBe(true);
@@ -1066,7 +1066,7 @@ describe('P20 – LimitConfirm.WickBreak', () => {
 
     // open=1.09950, close=1.10050 → min(open,close)=1.09950 > 1.09900 ✓
     // low=1.09870 ≤ 1.09900 ✓  → fills
-    const bar = new Candle(1.09950, 1.10100, 1.09870, 1.10050, new Date());
+    const bar = new Bar(1.09950, 1.10100, 1.09870, 1.10050, new Date());
     await eng.onBar(bar, makeBars(Array(3).fill(1.10000)));
 
     expect(eng.isLong()).toBe(true);
@@ -1079,7 +1079,7 @@ describe('P20 – LimitConfirm.WickBreak', () => {
     eng.addBuyLimit(1.09900);
 
     // open=1.09880, close=1.10050 → min(open,close)=1.09880 < 1.09900 ✗ → no fill
-    const bar = new Candle(1.09880, 1.10100, 1.09870, 1.10050, new Date());
+    const bar = new Bar(1.09880, 1.10100, 1.09870, 1.10050, new Date());
     await eng.onBar(bar, makeBars(Array(3).fill(1.10000)));
 
     expect(eng.isLong()).toBe(false);
@@ -1100,7 +1100,7 @@ describe('P21 – LimitConfirm.WickColor', () => {
 
     // Bullish: open=1.09920 < close=1.10050 → isBullish ✓
     // low=1.09870 ≤ 1.09900 ✓, close=1.10050 > 1.09900 ✓ → fills
-    const bar = new Candle(1.09920, 1.10100, 1.09870, 1.10050, new Date());
+    const bar = new Bar(1.09920, 1.10100, 1.09870, 1.10050, new Date());
     await eng.onBar(bar, makeBars(Array(3).fill(1.10000)));
 
     expect(eng.isLong()).toBe(true);
@@ -1123,7 +1123,7 @@ describe('P22 – OCO same-bar regression: second order must not fill after OCO 
     eng.addSellLimit(1.10100);   // Short: triggers when bar.high ≥ 1.10100
 
     // Bar touches both levels: low=1.09850, high=1.10150
-    const bar = new Candle(1.10000, 1.10150, 1.09850, 1.10050, new Date());
+    const bar = new Bar(1.10000, 1.10150, 1.09850, 1.10050, new Date());
     await eng.onBar(bar, makeBars(Array(3).fill(1.10000)));
 
     // Only the first (BUY_LIMIT) should have filled; SELL_LIMIT cancelled by OCO

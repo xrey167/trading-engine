@@ -4,7 +4,7 @@ import type { AppEventMap } from '../shared/services/event-map.js';
 import { ServiceStatus, ServiceKind } from '../shared/services/types.js';
 import { BrokerService } from './broker-service.js';
 import { PaperBroker } from './paper/paper-broker.js';
-import { SymbolInfo, TradingEngine, Candle, Bars, } from '../../trading-engine.js';
+import { SymbolInfo, TradingEngine, Bar, Bars, } from '../../trading-engine.js';
 import { nullLogger } from '../shared/lib/logger.js';
 
 function makeBrokerService(id = 'broker:paper:test') {
@@ -76,7 +76,7 @@ describe('BrokerService', () => {
   it('processBar acquires mutex and calls onBar', async () => {
     const svc = makeBrokerService();
     await svc.start();
-    const bar = new Candle(1.1, 1.12, 1.09, 1.11, new Date('2024-01-01'));
+    const bar = new Bar(1.1, 1.12, 1.09, 1.11, new Date('2024-01-01'));
     const bars = new Bars([bar]);
     await svc.processBar(bar, bars);
     // Engine processed the bar without throwing
@@ -103,7 +103,7 @@ describe('BrokerService — multi-broker isolation', () => {
     expect(svcA.engineMutex).not.toBe(svcB.engineMutex);
 
     // Process a bar on A — should not affect B
-    const bar = new Candle(1.1, 1.12, 1.09, 1.11, new Date('2024-01-01'));
+    const bar = new Bar(1.1, 1.12, 1.09, 1.11, new Date('2024-01-01'));
     brokerA.setPrice(1.11);
     await svcA.processBar(bar, new Bars([bar]));
 

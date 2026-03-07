@@ -73,7 +73,7 @@ export const LimitConfirm = {
 export type LimitConfirm = (typeof LimitConfirm)[keyof typeof LimitConfirm];
 
 // ─────────────────────────────────────────────────────────────
-// OHLC / Candle
+// OHLC / Bar
 // ─────────────────────────────────────────────────────────────
 
 export interface OHLC {
@@ -81,7 +81,7 @@ export interface OHLC {
   time: Date; volume?: number | undefined;
 }
 
-export class Candle implements OHLC {
+export class Bar implements OHLC {
   constructor(
     public open:   number,
     public high:   number,
@@ -151,10 +151,10 @@ export class Bars {
 
   get length(): number { return this.data.length; }
 
-  candle(shift = 0): Candle {
+  bar(shift = 0): Bar {
     const b = this.data[shift];
     if (!b) throw new RangeError(`shift ${shift} out of range (len=${this.data.length})`);
-    return new Candle(b.open, b.high, b.low, b.close, b.time, b.volume);
+    return new Bar(b.open, b.high, b.low, b.close, b.time, b.volume);
   }
 
   high(shift = 0):  number { return this.data[shift].high;  }
@@ -289,7 +289,7 @@ export interface TrailState {
  */
 export function calcTrailingSL(p: {
   side:          Side;
-  bar:           Candle;
+  bar:           Bar;
   bars:          Bars;
   posPrice:      number;
   currentSL:     number;   // -1 = not yet set
@@ -366,7 +366,7 @@ export interface HitResult {
 
 export function checkSLTP(p: {
   side:        Side;
-  bar:         Candle;
+  bar:         Bar;
   sl:          number;      // -1 = disabled
   tp:          number;      // -1 = disabled
   slActive:    boolean;
@@ -581,7 +581,7 @@ export class TradingEngine {
    * Call this on every new closed bar.
    * Sequence: fill pending orders → update trailing stops → check SL/TP exits.
    */
-  async onBar(bar: Candle, bars: Bars): Promise<void> {
+  async onBar(bar: Bar, bars: Bars): Promise<void> {
     this._spreadAbs = await this.broker.getSpread(this.symbol.name);
 
     await this._updateTrailingEntryOrders(bar, bars);
@@ -1050,7 +1050,7 @@ export class TradingEngine {
   }
 
   /** Per-bar: update trailing-entry order prices */
-  private async _updateTrailingEntryOrders(bar: Candle, _bars: Bars): Promise<void> {
+  private async _updateTrailingEntryOrders(bar: Bar, _bars: Bars): Promise<void> {
     for (const o of this.orders) {
       // Limit-pullback: trailing pending limit that follows the market
       if (o.attributes.pullbackPts != null) {
@@ -1104,7 +1104,7 @@ export class TradingEngine {
   }
 
   /** Per-bar: check which pending orders were triggered */
-  private async _checkOrderFills(bar: Candle, bars: Bars): Promise<void> {
+  private async _checkOrderFills(bar: Bar, bars: Bars): Promise<void> {
     const toFill: PendingOrder[] = [];
 
     for (const o of this.orders) {
@@ -1133,7 +1133,7 @@ export class TradingEngine {
     }
   }
 
-  private async _fillOrder(o: PendingOrder, bar: Candle, _bars: Bars): Promise<void> {
+  private async _fillOrder(o: PendingOrder, bar: Bar, _bars: Bars): Promise<void> {
     const attrs = o.attributes;
 
     // Limit-confirm check (require wick / color confirmation)
@@ -1206,7 +1206,7 @@ export class TradingEngine {
   }
 
   /** Check limit-confirmation candle logic */
-  private _checkLimitConfirm(o: PendingOrder, bar: Candle, confirm: LimitConfirm): boolean {
+  private _checkLimitConfirm(o: PendingOrder, bar: Bar, confirm: LimitConfirm): boolean {
     switch (confirm) {
       case LimitConfirm.Wick:
         // Price must have wicked through the limit but closed on the other side
@@ -1231,7 +1231,7 @@ export class TradingEngine {
   // Private — per-slot updates
   // ──────────────────────────────────────────────────────────
 
-  private async _updateTrailingSL(slot: PositionSlot, bar: Candle, bars: Bars): Promise<void> {
+  private async _updateTrailingSL(slot: PositionSlot, bar: Bar, bars: Bars): Promise<void> {
     if (slot.trailCfg.mode === TrailMode.None) return;
     const newSL = calcTrailingSL({
       side:          slot.side,
@@ -1251,7 +1251,7 @@ export class TradingEngine {
     }
   }
 
-  private async _updateBreakEven(slot: PositionSlot, bar: Candle): Promise<void> {
+  private async _updateBreakEven(slot: PositionSlot, bar: Bar): Promise<void> {
     if (!slot.beActive || slot.openPrice < 0) return;
     const triggerDist = this.symbol.pointsToPrice(slot.trailBeginPts);
     const beDist      = this.symbol.pointsToPrice(slot.beAddPts);
@@ -1267,7 +1267,7 @@ export class TradingEngine {
     }
   }
 
-  private async _checkExits(slot: PositionSlot, bar: Candle): Promise<void> {
+  private async _checkExits(slot: PositionSlot, bar: Bar): Promise<void> {
     const hit = checkSLTP({
       side:        slot.side,
       bar,
@@ -1378,7 +1378,7 @@ export class TradingEngine {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Strategy: CandleATR_03  (port of CandleATR_03.mq5)
+// Strategy: BarATR_03  (port of CandleATR_03.mq5)
 // ─────────────────────────────────────────────────────────────
 
 /**
@@ -1395,7 +1395,7 @@ export async function evaluateCandleATR03(
   engine: TradingEngine,
   symbol: SymbolInfo,
 ): Promise<void> {
-  const prev  = bars.candle(1);
+  const prev  = bars.bar(1);
   const atr14 = bars.atr(14, 1);
 
   if (prev.range() < atr14 * 2.0) return;
@@ -1806,7 +1806,7 @@ engine.addBuyLimit(0);          // price set dynamically each bar
 // 6. On each bar
 async function onBar(allBars: OHLC[]) {
   const bars = new Bars(allBars);
-  await engine.onBar(bars.candle(0), bars);
+  await engine.onBar(bars.bar(0), bars);
   await evaluateCandleATR03(bars, engine, symbol);
 }
 */

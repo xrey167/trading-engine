@@ -168,7 +168,7 @@ const udfRoute: FastifyPluginAsync = async (fastify) => {
 
     // Bars are indexed 0 = most recent; iterate in reverse for chronological order
     for (let i = bars.length - 1; i >= 0; i--) {
-      const candle = bars.candle(i);
+      const candle = bars.bar(i);
       const ts = Math.floor(candle.time.getTime() / 1000);
       if (ts >= from && ts <= to) {
         t.push(ts);
