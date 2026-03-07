@@ -1863,6 +1863,7 @@ paths:
   /v1/events:
     get:
       tags: [Events]
+      operationId: listEventDefinitions
       summary: Query event definitions
       description: |
         Returns `EventDefinition` records matching the supplied filters.
@@ -1939,6 +1940,7 @@ paths:
   /v1/events/{id}:
     get:
       tags: [Events]
+      operationId: getEventDefinitionById
       summary: Get event definition by ID
       description: |
         Returns a single `EventDefinition` by its dot-notation ID.
