@@ -23,7 +23,6 @@ import signalRoute from './routes/signal/index.js';
 import v1PositionsRoute from './routes/v1-positions/index.js';
 import moneyManagementRoute from './routes/money-management/index.js';
 import openbbRoute from './routes/openbb/index.js';
-import skillsRoute from './routes/skills/index.js';
 import './types/index.js';
 
 const SWAGGER_UI_HTML = `<!DOCTYPE html>
@@ -125,10 +124,7 @@ export async function buildApp(
   // 8. OpenBB Workspace integration (widgets.json, apps.json, /openbb/* data routes)
   await app.register(openbbRoute);
 
-  // 9. Agent SDK skills (SSE streaming, auth-gated)
-  await app.register(skillsRoute);
-
-  // 10. API docs — /openapi.yaml (raw spec) + /docs (Swagger UI via CDN)
+  // 9. API docs — /openapi.yaml (raw spec) + /docs (Swagger UI via CDN)
   const __dirname = dirname(fileURLToPath(import.meta.url));
   const specPath = join(__dirname, '../../openapi.yaml');
   let specContent = '';
