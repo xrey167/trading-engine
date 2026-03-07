@@ -152,11 +152,13 @@ export async function buildApp(
 
   app.get('/openapi.yaml', async (_req, reply) => {
     reply.header('Content-Type', 'text/yaml; charset=utf-8');
+    reply.header('Cache-Control', 'public, max-age=3600');
     return reply.send(specContent);
   });
 
   app.get('/docs', async (_req, reply) => {
     reply.header('Content-Type', 'text/html; charset=utf-8');
+    reply.header('Cache-Control', 'public, max-age=3600');
     return reply.send(SWAGGER_UI_HTML);
   });
 

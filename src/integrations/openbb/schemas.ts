@@ -1,4 +1,4 @@
-import { Type } from '@sinclair/typebox';
+import { Type, type TSchema } from '@sinclair/typebox';
 
 export const OpenBBPositionRowSchema = Type.Object({
   side:      Type.Union([Type.Literal('LONG'), Type.Literal('SHORT')]),
@@ -28,7 +28,45 @@ export const OpenBBDealRowSchema = Type.Object({
   time:       Type.String({ format: 'date-time' }),
 });
 
-export const OpenBBOmniContentSchema = Type.Object({
+export const OpenBBOmniTextSchema = Type.Object({
+  type:    Type.Literal('text'),
   content: Type.String(),
-  type:    Type.String(),
 });
+
+export const OpenBBOmniTableSchema = Type.Object({
+  type:    Type.Literal('table'),
+  content: Type.Array(Type.Record(Type.String(), Type.Unknown())),
+});
+
+export const OpenBBOmniChartSchema = Type.Object({
+  type:    Type.Literal('chart'),
+  content: Type.Object({
+    data:      Type.Array(Type.Record(Type.String(), Type.Unknown())),
+    chartType: Type.Optional(Type.String()),
+    xKey:      Type.Optional(Type.String()),
+    yKey:      Type.Optional(Type.String()),
+  }),
+});
+
+export const OpenBBOmniContentSchema = Type.Union([
+  OpenBBOmniTextSchema,
+  OpenBBOmniTableSchema,
+  OpenBBOmniChartSchema,
+]);
+
+// ─────────────────────────────────────────────────────────────
+// SSRM (Server-Side Row Model) pagination
+// ─────────────────────────────────────────────────────────────
+
+export const SSRMQuerySchema = Type.Object({
+  startRow:    Type.Optional(Type.Integer({ minimum: 0 })),
+  endRow:      Type.Optional(Type.Integer({ minimum: 0 })),
+  sortModel:   Type.Optional(Type.String()),
+  filterModel: Type.Optional(Type.String()),
+});
+
+export const SSRMResponseSchema = <T extends TSchema>(itemSchema: T) =>
+  Type.Object({
+    rows:    Type.Array(itemSchema),
+    lastRow: Type.Integer(),
+  });

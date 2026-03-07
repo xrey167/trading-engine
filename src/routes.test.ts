@@ -1319,6 +1319,29 @@ describe('R25 – GET /openbb/positions', () => {
   });
 });
 
+describe('R25 – GET /openbb/positions SSRM', () => {
+  let app: FastifyInstance;
+  beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
+  afterEach(() => app.close());
+
+  it('returns SSRM envelope when startRow/endRow are provided', async () => {
+    const res = await app.inject({ method: 'GET', url: '/openbb/positions?startRow=0&endRow=1' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body).toHaveProperty('rows');
+    expect(body).toHaveProperty('lastRow');
+    expect(body.rows).toHaveLength(1);
+    expect(body.lastRow).toBe(2);
+  });
+
+  it('returns plain array when no SSRM params', async () => {
+    const res = await app.inject({ method: 'GET', url: '/openbb/positions' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(Array.isArray(body)).toBe(true);
+  });
+});
+
 describe('R25 – GET /openbb/orders', () => {
   let app: FastifyInstance;
   beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
@@ -1393,14 +1416,17 @@ describe('R25 – GET /openbb/engine-config', () => {
   beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
   afterEach(() => app.close());
 
-  it('returns omni content array with ATR config markdown', async () => {
+  it('returns omni content array with text and table blocks', async () => {
     const res = await app.inject({ method: 'GET', url: '/openbb/engine-config' });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(Array.isArray(body)).toBe(true);
     expect(body[0]).toMatchObject({ type: 'text' });
-    expect(body[0].content).toContain('## ATR Config');
-    expect(body[0].content).toContain('period');
+    expect(body[0].content).toContain('ATR Configuration');
+    expect(body[1]).toMatchObject({ type: 'table' });
+    expect(Array.isArray(body[1].content)).toBe(true);
+    expect(body[1].content[0]).toHaveProperty('key');
+    expect(body[1].content[0]).toHaveProperty('value');
   });
 });
 
@@ -1414,7 +1440,8 @@ describe('R25 – OPENBB_API_KEY auth guard', () => {
     await app.ready();
   });
   afterEach(async () => {
-    process.env.OPENBB_API_KEY = ORIGINAL_KEY;
+    if (ORIGINAL_KEY !== undefined) process.env.OPENBB_API_KEY = ORIGINAL_KEY;
+    else delete process.env.OPENBB_API_KEY;
     await app.close();
   });
 
@@ -1558,5 +1585,86 @@ describe('R26 – /skills routes enabled with auth', () => {
       expect(skill.command).toBeTruthy();
       expect(skill.category).toBeTruthy();
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// R27 – Cache-Control headers
+// ─────────────────────────────────────────────────────────────
+
+describe('R27 – Cache-Control headers', () => {
+  let app: FastifyInstance;
+  const savedOBBKey = process.env.OPENBB_API_KEY;
+  beforeEach(async () => {
+    delete process.env.OPENBB_API_KEY; // ensure no auth guard
+    app = await buildApp({ logger: false });
+    await app.ready();
+  });
+  afterEach(async () => {
+    if (savedOBBKey !== undefined) process.env.OPENBB_API_KEY = savedOBBKey;
+    else delete process.env.OPENBB_API_KEY;
+    await app.close();
+  });
+
+  it('/widgets.json has Cache-Control: public, max-age=3600 and ETag', async () => {
+    const res = await app.inject({ method: 'GET', url: '/widgets.json' });
+    expect(res.headers['cache-control']).toBe('public, max-age=3600');
+    expect(res.headers.etag).toBeDefined();
+  });
+
+  it('/widgets.json returns 304 for matching If-None-Match', async () => {
+    const first = await app.inject({ method: 'GET', url: '/widgets.json' });
+    const etag = first.headers.etag as string;
+    const second = await app.inject({
+      method: 'GET', url: '/widgets.json',
+      headers: { 'if-none-match': etag },
+    });
+    expect(second.statusCode).toBe(304);
+  });
+
+  it('/apps.json has Cache-Control: public, max-age=3600 and ETag', async () => {
+    const res = await app.inject({ method: 'GET', url: '/apps.json' });
+    expect(res.headers['cache-control']).toBe('public, max-age=3600');
+    expect(res.headers.etag).toBeDefined();
+  });
+
+  it('/openbb/positions has Cache-Control: no-store', async () => {
+    const res = await app.inject({ method: 'GET', url: '/openbb/positions' });
+    expect(res.headers['cache-control']).toBe('no-store');
+  });
+
+  it('/openbb/orders has Cache-Control: no-store', async () => {
+    const res = await app.inject({ method: 'GET', url: '/openbb/orders' });
+    expect(res.headers['cache-control']).toBe('no-store');
+  });
+
+  it('/openbb/account/equity has Cache-Control: no-store', async () => {
+    const res = await app.inject({ method: 'GET', url: '/openbb/account/equity' });
+    expect(res.headers['cache-control']).toBe('no-store');
+  });
+
+  it('/openbb/account/balance has Cache-Control: no-store', async () => {
+    const res = await app.inject({ method: 'GET', url: '/openbb/account/balance' });
+    expect(res.headers['cache-control']).toBe('no-store');
+  });
+
+  it('/openbb/deals has Cache-Control: private, max-age=10', async () => {
+    const res = await app.inject({ method: 'GET', url: '/openbb/deals' });
+    expect(res.headers['cache-control']).toBe('private, max-age=10');
+  });
+
+  it('/openbb/symbol has Cache-Control: public, max-age=60', async () => {
+    const res = await app.inject({ method: 'GET', url: '/openbb/symbol?symbol=EURUSD' });
+    expect(res.headers['cache-control']).toBe('public, max-age=60');
+  });
+
+  it('/openapi.yaml has Cache-Control: public, max-age=3600', async () => {
+    const res = await app.inject({ method: 'GET', url: '/openapi.yaml' });
+    expect(res.headers['cache-control']).toBe('public, max-age=3600');
+  });
+
+  it('/docs has Cache-Control: public, max-age=3600', async () => {
+    const res = await app.inject({ method: 'GET', url: '/docs' });
+    expect(res.headers['cache-control']).toBe('public, max-age=3600');
   });
 });

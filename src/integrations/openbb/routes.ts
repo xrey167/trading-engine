@@ -1,4 +1,4 @@
-import { timingSafeEqual } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import type { FastifyPluginAsync } from 'fastify';
 import { Type } from '@sinclair/typebox';
 import { Side } from '../../../trading-engine.js';
@@ -8,9 +8,11 @@ import {
   OpenBBMetricSchema,
   OpenBBDealRowSchema,
   OpenBBOmniContentSchema,
+  SSRMQuerySchema,
 } from './schemas.js';
 import { PendingOrderSchema } from '../../trading/schemas.js';
 import { SymbolInfoVOSchema } from '../../shared/domain/account.js';
+import { applySSRM, type SSRMParams } from '../../shared/lib/ssrm.js';
 
 // ─── Discovery configs ───────────────────────────────────────────────────────
 
@@ -23,6 +25,7 @@ const WIDGETS_CONFIG = {
     endpoint: '/openbb/positions',
     gridDimensions: { w: 8, h: 5 },
     refetchInterval: 3000,
+    ssrm: true,
     parameters: [],
   },
   pending_orders: {
@@ -33,6 +36,7 @@ const WIDGETS_CONFIG = {
     endpoint: '/openbb/orders',
     gridDimensions: { w: 6, h: 4 },
     refetchInterval: 3000,
+    ssrm: true,
     parameters: [],
   },
   account_equity: {
@@ -57,6 +61,7 @@ const WIDGETS_CONFIG = {
     type: 'table',
     endpoint: '/openbb/deals',
     gridDimensions: { w: 8, h: 5 },
+    ssrm: true,
     parameters: [
       { paramName: 'from', label: 'From', type: 'date', show: true, optional: true,  value: '' },
       { paramName: 'to',   label: 'To',   type: 'date', show: true, optional: true,  value: '' },
@@ -106,6 +111,13 @@ const APPS_CONFIG = {
   },
 };
 
+// ─── ETag for static configs ─────────────────────────────────────────────────
+
+const WIDGETS_JSON = JSON.stringify(WIDGETS_CONFIG);
+const WIDGETS_ETAG = `"${createHash('sha256').update(WIDGETS_JSON).digest('hex').slice(0, 16)}"`;
+const APPS_JSON = JSON.stringify(APPS_CONFIG);
+const APPS_ETAG = `"${createHash('sha256').update(APPS_JSON).digest('hex').slice(0, 16)}"`;
+
 // Querystring schemas (TypeBox) — validates and strips unknown params
 const DealsQuerySchema = Type.Object({
   from:   Type.Optional(Type.String()),
@@ -139,21 +151,37 @@ const openbbRoute: FastifyPluginAsync = async (fastify) => {
 
   fastify.get('/widgets.json', {
     schema: { response: { 200: Type.Object({}, { additionalProperties: true }) } },
-  }, async (_req, reply) => {
+  }, async (req, reply) => {
+    reply.header('Cache-Control', 'public, max-age=3600');
+    reply.header('ETag', WIDGETS_ETAG);
+    if (req.headers['if-none-match'] === WIDGETS_ETAG) {
+      reply.raw.writeHead(304); return reply.raw.end();
+    }
     return reply.send(WIDGETS_CONFIG);
   });
 
   fastify.get('/apps.json', {
     schema: { response: { 200: Type.Object({}, { additionalProperties: true }) } },
-  }, async (_req, reply) => {
+  }, async (req, reply) => {
+    reply.header('Cache-Control', 'public, max-age=3600');
+    reply.header('ETag', APPS_ETAG);
+    if (req.headers['if-none-match'] === APPS_ETAG) {
+      reply.raw.writeHead(304); return reply.raw.end();
+    }
     return reply.send(APPS_CONFIG);
   });
 
   // ── Positions ──────────────────────────────────────────────────────────────
 
+  const PositionsQuerySchema = Type.Intersect([
+    SSRMQuerySchema,
+    Type.Object({ apiKey: Type.Optional(Type.String()) }),
+  ]);
+
   fastify.get('/openbb/positions', {
-    schema: { response: { 200: Type.Array(OpenBBPositionRowSchema) } },
-  }, async (_req, reply) => {
+    schema: { querystring: PositionsQuerySchema },
+  }, async (req, reply) => {
+    reply.header('Cache-Control', 'no-store');
     const { engine, broker } = fastify;
     const price = broker.getPrice();
     const rows = [Side.Long, Side.Short].map(side => {
@@ -161,25 +189,39 @@ const openbbRoute: FastifyPluginAsync = async (fastify) => {
       const size = isLong ? engine.getSizeBuy() : engine.getSizeSell();
       const open = size > 0;
       return {
-        side:      isLong ? 'LONG' : 'SHORT',
+        side:      isLong ? 'LONG' as const : 'SHORT' as const,
         size,
-        // null when flat — engine uses -1 as a sentinel for "not set"
         openPrice: open ? (isLong ? engine.getBEBuy()      : engine.getBESell())  : null,
         sl:        open ? (isLong ? engine.getSLBuy()      : engine.getSLSell())  : null,
         tp:        open ? (isLong ? engine.getTPBuy()      : engine.getTPSell())  : null,
         pl:        isLong ? engine.getPLBuy(price) : engine.getPLSell(price),
-        status:    open ? 'OPEN' : 'FLAT',
+        status:    open ? 'OPEN' as const : 'FLAT' as const,
       };
     });
+    const q = req.query as SSRMParams;
+    if (q.startRow != null || q.endRow != null || q.sortModel || q.filterModel) {
+      return reply.send(applySSRM(rows, q));
+    }
     return reply.send(rows);
   });
 
   // ── Orders ─────────────────────────────────────────────────────────────────
 
+  const OrdersQuerySchema = Type.Intersect([
+    SSRMQuerySchema,
+    Type.Object({ apiKey: Type.Optional(Type.String()) }),
+  ]);
+
   fastify.get('/openbb/orders', {
-    schema: { response: { 200: Type.Array(PendingOrderSchema) } },
-  }, async (_req, reply) => {
-    return reply.send(fastify.engine.getOrders());
+    schema: { querystring: OrdersQuerySchema },
+  }, async (req, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    const orders = [...fastify.engine.getOrders()] as unknown as Record<string, unknown>[];
+    const q = req.query as SSRMParams;
+    if (q.startRow != null || q.endRow != null || q.sortModel || q.filterModel) {
+      return reply.send(applySSRM(orders, q));
+    }
+    return reply.send(orders);
   });
 
   // ── Account ────────────────────────────────────────────────────────────────
@@ -187,6 +229,7 @@ const openbbRoute: FastifyPluginAsync = async (fastify) => {
   fastify.get('/openbb/account/equity', {
     schema: { response: { 200: OpenBBMetricSchema } },
   }, async (_req, reply) => {
+    reply.header('Cache-Control', 'no-store');
     const { equity, balance } = await fastify.broker.getAccount();
     return reply.send({ value: equity, label: 'Equity', delta: equity - balance });
   });
@@ -194,22 +237,28 @@ const openbbRoute: FastifyPluginAsync = async (fastify) => {
   fastify.get('/openbb/account/balance', {
     schema: { response: { 200: OpenBBMetricSchema } },
   }, async (_req, reply) => {
+    reply.header('Cache-Control', 'no-store');
     const { balance } = await fastify.broker.getAccount();
     return reply.send({ value: balance, label: 'Balance', delta: 0 });
   });
 
   // ── History ────────────────────────────────────────────────────────────────
 
+  const DealsQueryWithSSRMSchema = Type.Intersect([
+    DealsQuerySchema,
+    SSRMQuerySchema,
+  ]);
+
   fastify.get('/openbb/deals', {
     schema: {
-      querystring: DealsQuerySchema,
+      querystring: DealsQueryWithSSRMSchema,
       response: {
-        200: Type.Array(OpenBBDealRowSchema),
         400: ErrorResponseSchema,
         500: ErrorResponseSchema,
       },
     },
   }, async (req, reply) => {
+    reply.header('Cache-Control', 'private, max-age=10');
     const { from, to } = req.query as { from?: string; to?: string };
     const fromDate = from ? new Date(from) : new Date(0);
     const toDate   = to   ? new Date(to)   : new Date();
@@ -221,7 +270,7 @@ const openbbRoute: FastifyPluginAsync = async (fastify) => {
       return reply.status(400).send({ error: '"from" must be before "to"' });
     const result = await fastify.broker.getDeals('default', fromDate, toDate);
     if (!result.ok) return reply.status(500).send({ error: result.error.message });
-    return reply.send(result.value.map(d => ({
+    const deals = result.value.map(d => ({
       ticket:     d.ticket,
       symbol:     d.symbol,
       type:       d.type,
@@ -231,7 +280,12 @@ const openbbRoute: FastifyPluginAsync = async (fastify) => {
       swap:       d.swap,
       commission: d.commission,
       time:       d.time,
-    })));
+    }));
+    const q = req.query as SSRMParams;
+    if (q.startRow != null || q.endRow != null || q.sortModel || q.filterModel) {
+      return reply.send(applySSRM(deals as Record<string, unknown>[], q));
+    }
+    return reply.send(deals);
   });
 
   // ── Market data ────────────────────────────────────────────────────────────
@@ -246,6 +300,7 @@ const openbbRoute: FastifyPluginAsync = async (fastify) => {
       },
     },
   }, async (req, reply) => {
+    reply.header('Cache-Control', 'public, max-age=60');
     const { symbol } = req.query as { symbol?: string };
     if (!symbol) return reply.status(400).send({ error: 'symbol query param required' });
     const result = await fastify.broker.getSymbolInfo(symbol);
@@ -259,21 +314,13 @@ const openbbRoute: FastifyPluginAsync = async (fastify) => {
     schema: { response: { 200: Type.Array(OpenBBOmniContentSchema) } },
   }, async (_req, reply) => {
     const cfg = fastify.atrConfig;
-    const md = [
-      '## ATR Config',
-      '',
-      '| Key | Value |',
-      '|-----|-------|',
-      `| period               | ${cfg.period}               |`,
-      `| method               | ${cfg.method}               |`,
-      `| shift                | ${cfg.shift}                |`,
-      `| slMultiplier         | ${cfg.slMultiplier}         |`,
-      `| tpMultiplier         | ${cfg.tpMultiplier}         |`,
-      `| trailBeginMultiplier | ${cfg.trailBeginMultiplier} |`,
-      `| trailDistMultiplier  | ${cfg.trailDistMultiplier}  |`,
-      `| onlyWhenFlat         | ${cfg.onlyWhenFlat}         |`,
-    ].join('\n');
-    return reply.send([{ content: md, type: 'text' }]);
+    return reply.send([
+      { type: 'text', content: '## Engine & ATR Configuration' },
+      {
+        type: 'table',
+        content: Object.entries(cfg).map(([key, value]) => ({ key, value })),
+      },
+    ]);
   });
 };
 
