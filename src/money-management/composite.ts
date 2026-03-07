@@ -1,7 +1,7 @@
 import type { IMoneyManagementStrategy, ILotsProvider, IStopLossCalculator, ITakeProfitCalculator, MoneyManagementResult, MoneyManagementParams } from './types.js';
-import type { Result } from '../lib/result.js';
-import type { DomainError } from '../lib/errors.js';
-import { ok } from '../lib/result.js';
+import type { Result } from '../shared/lib/result.js';
+import type { DomainError } from '../shared/lib/errors.js';
+import { ok } from '../shared/lib/result.js';
 
 /**
  * Port of MoneyManagementStrategy.mqh.

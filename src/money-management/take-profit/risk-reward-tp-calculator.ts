@@ -1,8 +1,8 @@
 import { BaseCalculator } from '../base-calculator.js';
 import type { ITakeProfitCalculator, TakeProfitParams } from '../types.js';
-import type { Result } from '../../lib/result.js';
-import type { DomainError } from '../../lib/errors.js';
-import { ok } from '../../lib/result.js';
+import type { Result } from '../../shared/lib/result.js';
+import type { DomainError } from '../../shared/lib/errors.js';
+import { ok } from '../../shared/lib/result.js';
 import { priceDelta, targetPrice } from '../price-utils.js';
 
 /**

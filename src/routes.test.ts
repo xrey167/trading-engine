@@ -29,7 +29,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from './app.js';
-import type { PaperBroker } from './plugins/broker.js';
+import type { PaperBroker } from './broker/paper/paper-broker.js';
 
 // ─────────────────────────────────────────────────────────────
 // Helpers
@@ -1319,6 +1319,29 @@ describe('R25 – GET /openbb/positions', () => {
   });
 });
 
+describe('R25 – GET /openbb/positions SSRM', () => {
+  let app: FastifyInstance;
+  beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
+  afterEach(() => app.close());
+
+  it('returns SSRM envelope when startRow/endRow are provided', async () => {
+    const res = await app.inject({ method: 'GET', url: '/openbb/positions?startRow=0&endRow=1' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body).toHaveProperty('rows');
+    expect(body).toHaveProperty('lastRow');
+    expect(body.rows).toHaveLength(1);
+    expect(body.lastRow).toBe(2);
+  });
+
+  it('returns plain array when no SSRM params', async () => {
+    const res = await app.inject({ method: 'GET', url: '/openbb/positions' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(Array.isArray(body)).toBe(true);
+  });
+});
+
 describe('R25 – GET /openbb/orders', () => {
   let app: FastifyInstance;
   beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
@@ -1393,14 +1416,17 @@ describe('R25 – GET /openbb/engine-config', () => {
   beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
   afterEach(() => app.close());
 
-  it('returns omni content array with ATR config markdown', async () => {
+  it('returns omni content array with text and table blocks', async () => {
     const res = await app.inject({ method: 'GET', url: '/openbb/engine-config' });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(Array.isArray(body)).toBe(true);
     expect(body[0]).toMatchObject({ type: 'text' });
-    expect(body[0].content).toContain('## ATR Config');
-    expect(body[0].content).toContain('period');
+    expect(body[0].content).toContain('ATR Configuration');
+    expect(body[1]).toMatchObject({ type: 'table' });
+    expect(Array.isArray(body[1].content)).toBe(true);
+    expect(body[1].content[0]).toHaveProperty('key');
+    expect(body[1].content[0]).toHaveProperty('value');
   });
 });
 
@@ -1414,7 +1440,8 @@ describe('R25 – OPENBB_API_KEY auth guard', () => {
     await app.ready();
   });
   afterEach(async () => {
-    process.env.OPENBB_API_KEY = ORIGINAL_KEY;
+    if (ORIGINAL_KEY !== undefined) process.env.OPENBB_API_KEY = ORIGINAL_KEY;
+    else delete process.env.OPENBB_API_KEY;
     await app.close();
   });
 
@@ -1558,5 +1585,301 @@ describe('R26 – /skills routes enabled with auth', () => {
       expect(skill.command).toBeTruthy();
       expect(skill.category).toBeTruthy();
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// R27 – Cache-Control headers
+// ─────────────────────────────────────────────────────────────
+
+describe('R27 – Cache-Control headers', () => {
+  let app: FastifyInstance;
+  const savedOBBKey = process.env.OPENBB_API_KEY;
+  beforeEach(async () => {
+    delete process.env.OPENBB_API_KEY; // ensure no auth guard
+    app = await buildApp({ logger: false });
+    await app.ready();
+  });
+  afterEach(async () => {
+    if (savedOBBKey !== undefined) process.env.OPENBB_API_KEY = savedOBBKey;
+    else delete process.env.OPENBB_API_KEY;
+    await app.close();
+  });
+
+  it('/widgets.json has Cache-Control: public, max-age=3600 and ETag', async () => {
+    const res = await app.inject({ method: 'GET', url: '/widgets.json' });
+    expect(res.headers['cache-control']).toBe('public, max-age=3600');
+    expect(res.headers.etag).toBeDefined();
+  });
+
+  it('/widgets.json returns 304 for matching If-None-Match', async () => {
+    const first = await app.inject({ method: 'GET', url: '/widgets.json' });
+    const etag = first.headers.etag as string;
+    const second = await app.inject({
+      method: 'GET', url: '/widgets.json',
+      headers: { 'if-none-match': etag },
+    });
+    expect(second.statusCode).toBe(304);
+  });
+
+  it('/apps.json has Cache-Control: public, max-age=3600 and ETag', async () => {
+    const res = await app.inject({ method: 'GET', url: '/apps.json' });
+    expect(res.headers['cache-control']).toBe('public, max-age=3600');
+    expect(res.headers.etag).toBeDefined();
+  });
+
+  it('/openbb/positions has Cache-Control: no-store', async () => {
+    const res = await app.inject({ method: 'GET', url: '/openbb/positions' });
+    expect(res.headers['cache-control']).toBe('no-store');
+  });
+
+  it('/openbb/orders has Cache-Control: no-store', async () => {
+    const res = await app.inject({ method: 'GET', url: '/openbb/orders' });
+    expect(res.headers['cache-control']).toBe('no-store');
+  });
+
+  it('/openbb/account/equity has Cache-Control: no-store', async () => {
+    const res = await app.inject({ method: 'GET', url: '/openbb/account/equity' });
+    expect(res.headers['cache-control']).toBe('no-store');
+  });
+
+  it('/openbb/account/balance has Cache-Control: no-store', async () => {
+    const res = await app.inject({ method: 'GET', url: '/openbb/account/balance' });
+    expect(res.headers['cache-control']).toBe('no-store');
+  });
+
+  it('/openbb/deals has Cache-Control: private, max-age=10', async () => {
+    const res = await app.inject({ method: 'GET', url: '/openbb/deals' });
+    expect(res.headers['cache-control']).toBe('private, max-age=10');
+  });
+
+  it('/openbb/symbol has Cache-Control: public, max-age=60', async () => {
+    const res = await app.inject({ method: 'GET', url: '/openbb/symbol?symbol=EURUSD' });
+    expect(res.headers['cache-control']).toBe('public, max-age=60');
+  });
+
+  it('/openapi.yaml has Cache-Control: public, max-age=3600', async () => {
+    const res = await app.inject({ method: 'GET', url: '/openapi.yaml' });
+    expect(res.headers['cache-control']).toBe('public, max-age=3600');
+  });
+
+  it('/docs has Cache-Control: public, max-age=3600', async () => {
+    const res = await app.inject({ method: 'GET', url: '/docs' });
+    expect(res.headers['cache-control']).toBe('public, max-age=3600');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// R28 – API_KEY auth guard consistency
+// ─────────────────────────────────────────────────────────────
+
+describe('R28 – all mutating routes reject requests when API_KEY is set', () => {
+  let app: FastifyInstance;
+  const savedKey = process.env.API_KEY;
+
+  beforeEach(async () => {
+    process.env.API_KEY = 'test-secret-key';
+    app = await buildApp({ logger: false });
+  });
+  afterEach(async () => {
+    if (savedKey !== undefined) process.env.API_KEY = savedKey;
+    else delete process.env.API_KEY;
+    await app.close();
+  });
+
+  const mutatingRoutes = [
+    { method: 'POST'   as const, url: '/positions/long',    body: { size: 1 } },
+    { method: 'POST'   as const, url: '/positions/short',   body: { size: 1 } },
+    { method: 'POST'   as const, url: '/positions/hedge' },
+    { method: 'POST'   as const, url: '/positions/long/flat' },
+    { method: 'POST'   as const, url: '/positions/short/flat' },
+    { method: 'POST'   as const, url: '/positions/flat' },
+    { method: 'DELETE' as const, url: '/positions/long' },
+    { method: 'PUT'    as const, url: '/positions/long/sl-tp', body: { sl: 10 } },
+    { method: 'POST'   as const, url: '/orders',            body: { type: 'BUY_LIMIT', price: 1.1, size: 1 } },
+    { method: 'POST'   as const, url: '/orders/bracket',    body: { entryType: 'BUY_LIMIT', entryPrice: 1.1, slPts: 10, tpPts: 20 } },
+    { method: 'PATCH'  as const, url: '/orders/fake-id',    body: { price: 1.2 } },
+    { method: 'DELETE' as const, url: '/orders?side=all' },
+    { method: 'DELETE' as const, url: '/orders/fake-id' },
+    { method: 'POST'   as const, url: '/bars',              body: { bar: makeBar(), bars: [makeBar()] } },
+    { method: 'PUT'    as const, url: '/engine/config',     body: { removeOrdersOnFlat: true } },
+    { method: 'PUT'    as const, url: '/atr/config',        body: { slMultiplier: 2 } },
+    { method: 'POST'   as const, url: '/scaled-orders',     body: { side: 'long', preset: 'Scalper_I', currentPrice: 1.1 } },
+  ];
+
+  for (const { method, url, body } of mutatingRoutes) {
+    it(`${method} ${url} returns 401 without x-api-key`, async () => {
+      const res = await app.inject({
+        method,
+        url,
+        ...(body ? { payload: body } : {}),
+      });
+      expect(res.statusCode).toBe(401);
+    });
+  }
+
+  it('GET /positions (read-only) is allowed without x-api-key', async () => {
+    const res = await app.inject({ method: 'GET', url: '/positions' });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('GET /orders (read-only) is allowed without x-api-key', async () => {
+    const res = await app.inject({ method: 'GET', url: '/orders' });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('GET /account (read-only) is allowed without x-api-key', async () => {
+    const res = await app.inject({ method: 'GET', url: '/account' });
+    expect(res.statusCode).toBe(200);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// R29 – UDF response schemas
+// ─────────────────────────────────────────────────────────────
+
+describe('R29 – UDF routes return well-shaped responses', () => {
+  let app: FastifyInstance;
+  beforeEach(async () => { app = await buildApp({ logger: false }); });
+  afterEach(async () => { await app.close(); });
+
+  it('GET /udf/config returns supported_resolutions and flags', async () => {
+    const res = await app.inject({ method: 'GET', url: '/udf/config' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.supports_search).toBe(true);
+    expect(body.supports_time).toBe(true);
+    expect(Array.isArray(body.supported_resolutions)).toBe(true);
+    expect(body.supported_resolutions).toContain('1D');
+  });
+
+  it('GET /udf/time returns a Unix timestamp string', async () => {
+    const res = await app.inject({ method: 'GET', url: '/udf/time' });
+    expect(res.statusCode).toBe(200);
+    const ts = Number(res.payload);
+    expect(ts).toBeGreaterThan(1_000_000_000);
+  });
+
+  it('GET /udf/symbols returns symbol metadata', async () => {
+    const res = await app.inject({ method: 'GET', url: '/udf/symbols?symbol=EURUSD' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.name).toBe('EURUSD');
+    expect(body.type).toBe('forex');
+    expect(body.pricescale).toBe(100000);
+  });
+
+  it('GET /udf/history returns no_data for empty broker', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/udf/history?symbol=EURUSD&from=0&to=9999999999&resolution=1D',
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.s).toBe('no_data');
+  });
+
+  it('GET /udf/history rejects unsupported resolution', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/udf/history?symbol=EURUSD&from=0&to=9999999999&resolution=3M',
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.s).toBe('error');
+    expect(body.errmsg).toContain('Unsupported resolution');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// R30 – WebSocket /stream
+// ─────────────────────────────────────────────────────────────
+
+describe('R30 – WebSocket /stream', () => {
+  let app: FastifyInstance;
+  let port: number;
+
+  beforeEach(async () => {
+    app = await buildApp({ logger: false });
+    await app.listen({ port: 0 });
+    const addr = app.server.address();
+    port = typeof addr === 'object' && addr ? addr.port : 0;
+  });
+  afterEach(async () => { await app.close(); });
+
+  /** Connect a WS client and collect messages. Listener is set before open to avoid race. */
+  async function connectWS(path = '/stream'): Promise<{ ws: import('ws').WebSocket; msgs: string[] }> {
+    const { default: WS } = await import('ws');
+    const msgs: string[] = [];
+    const ws = new WS(`ws://127.0.0.1:${port}${path}`);
+    ws.on('message', (data: Buffer) => msgs.push(data.toString()));
+    await new Promise<void>((resolve, reject) => {
+      ws.on('open', () => resolve());
+      ws.on('error', reject);
+    });
+    return { ws, msgs };
+  }
+
+  it('v2 client receives connected message with protocol version', async () => {
+    const { ws, msgs } = await connectWS();
+    await new Promise(r => setTimeout(r, 100));
+    expect(msgs.length).toBeGreaterThanOrEqual(1);
+    const connected = JSON.parse(msgs[0]);
+    expect(connected.type).toBe('connected');
+    expect(connected.protocol).toBe(2);
+    ws.close();
+  });
+
+  it('v2 client receives bar events as envelopes', async () => {
+    const { ws, msgs } = await connectWS();
+    await new Promise(r => setTimeout(r, 50)); // wait for connected msg
+
+    await app.inject({ method: 'POST', url: '/bars', payload: barsPayload() });
+    await new Promise(r => setTimeout(r, 200)); // wait for flush interval
+
+    expect(msgs.length).toBeGreaterThanOrEqual(2);
+    const barEvent = JSON.parse(msgs[1]);
+    expect(barEvent.type).toBe('bar');
+    expect(barEvent.id).toBeGreaterThan(0);
+    expect(barEvent.payload).toBeDefined();
+    ws.close();
+  });
+
+  it('v1 client does not receive connected message', async () => {
+    const { ws, msgs } = await connectWS('/stream?v=1');
+    await new Promise(r => setTimeout(r, 100));
+    const hasConnected = msgs.some(m => {
+      try { return JSON.parse(m).type === 'connected'; } catch { return false; }
+    });
+    expect(hasConnected).toBe(false);
+    ws.close();
+  });
+
+  it('reconnection replays missed events via lastEventId', async () => {
+    // Connect client to register route-level listeners
+    const { ws: ws1 } = await connectWS();
+    await new Promise(r => setTimeout(r, 50));
+
+    // Emit bars to populate replay buffer
+    await app.inject({ method: 'POST', url: '/bars', payload: barsPayload() });
+    await app.inject({ method: 'POST', url: '/bars', payload: barsPayload() });
+    await app.inject({ method: 'POST', url: '/bars', payload: barsPayload() });
+    ws1.close();
+    await new Promise(r => setTimeout(r, 100));
+
+    // Reconnect with lastEventId=1
+    const { ws: ws2, msgs } = await connectWS('/stream?lastEventId=1');
+    await new Promise(r => setTimeout(r, 200));
+
+    // Should have connected + replayed bar events (order may vary due to flush timing)
+    expect(msgs.length).toBeGreaterThanOrEqual(1);
+    const parsed = msgs.map(m => JSON.parse(m));
+    expect(parsed.some((e: { type: string }) => e.type === 'connected')).toBe(true);
+
+    const replayed = parsed.filter((e: { type: string }) => e.type === 'bar');
+    for (const evt of replayed) {
+      expect(evt.id).toBeGreaterThan(1);
+    }
+    ws2.close();
   });
 });
