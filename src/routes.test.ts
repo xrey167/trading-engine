@@ -1668,3 +1668,151 @@ describe('R27 – Cache-Control headers', () => {
     expect(res.headers['cache-control']).toBe('public, max-age=3600');
   });
 });
+
+// ─────────────────────────────────────────────────────────────
+// R28 – API_KEY auth guard consistency
+// ─────────────────────────────────────────────────────────────
+
+describe('R28 – all mutating routes reject requests when API_KEY is set', () => {
+  let app: FastifyInstance;
+  const savedKey = process.env.API_KEY;
+
+  beforeEach(async () => {
+    process.env.API_KEY = 'test-secret-key';
+    app = await buildApp({ logger: false });
+  });
+  afterEach(async () => {
+    if (savedKey !== undefined) process.env.API_KEY = savedKey;
+    else delete process.env.API_KEY;
+    await app.close();
+  });
+
+  const mutatingRoutes = [
+    { method: 'POST'   as const, url: '/positions/long',    body: { size: 1 } },
+    { method: 'POST'   as const, url: '/positions/short',   body: { size: 1 } },
+    { method: 'POST'   as const, url: '/positions/hedge' },
+    { method: 'POST'   as const, url: '/positions/long/flat' },
+    { method: 'POST'   as const, url: '/positions/short/flat' },
+    { method: 'POST'   as const, url: '/positions/flat' },
+    { method: 'DELETE' as const, url: '/positions/long' },
+    { method: 'PUT'    as const, url: '/positions/long/sl-tp', body: { sl: 10 } },
+    { method: 'POST'   as const, url: '/orders',            body: { type: 'BUY_LIMIT', price: 1.1, size: 1 } },
+    { method: 'POST'   as const, url: '/orders/bracket',    body: { entryType: 'BUY_LIMIT', entryPrice: 1.1, slPts: 10, tpPts: 20 } },
+    { method: 'PATCH'  as const, url: '/orders/fake-id',    body: { price: 1.2 } },
+    { method: 'DELETE' as const, url: '/orders?side=all' },
+    { method: 'DELETE' as const, url: '/orders/fake-id' },
+    { method: 'POST'   as const, url: '/bars',              body: { bar: makeBar(), bars: [makeBar()] } },
+    { method: 'PUT'    as const, url: '/engine/config',     body: { removeOrdersOnFlat: true } },
+    { method: 'PUT'    as const, url: '/atr/config',        body: { slMultiplier: 2 } },
+    { method: 'POST'   as const, url: '/scaled-orders',     body: { side: 'long', preset: 'Scalper_I', currentPrice: 1.1 } },
+  ];
+
+  for (const { method, url, body } of mutatingRoutes) {
+    it(`${method} ${url} returns 401 without x-api-key`, async () => {
+      const res = await app.inject({
+        method,
+        url,
+        ...(body ? { payload: body } : {}),
+      });
+      expect(res.statusCode).toBe(401);
+    });
+  }
+
+  it('GET /positions (read-only) is allowed without x-api-key', async () => {
+    const res = await app.inject({ method: 'GET', url: '/positions' });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('GET /orders (read-only) is allowed without x-api-key', async () => {
+    const res = await app.inject({ method: 'GET', url: '/orders' });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('GET /account (read-only) is allowed without x-api-key', async () => {
+    const res = await app.inject({ method: 'GET', url: '/account' });
+    expect(res.statusCode).toBe(200);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// R29 – UDF response schemas
+// ─────────────────────────────────────────────────────────────
+
+describe('R29 – UDF routes return well-shaped responses', () => {
+  let app: FastifyInstance;
+  beforeEach(async () => { app = await buildApp({ logger: false }); });
+  afterEach(async () => { await app.close(); });
+
+  it('GET /udf/config returns supported_resolutions and flags', async () => {
+    const res = await app.inject({ method: 'GET', url: '/udf/config' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.supports_search).toBe(true);
+    expect(body.supports_time).toBe(true);
+    expect(Array.isArray(body.supported_resolutions)).toBe(true);
+    expect(body.supported_resolutions).toContain('1D');
+  });
+
+  it('GET /udf/time returns a Unix timestamp string', async () => {
+    const res = await app.inject({ method: 'GET', url: '/udf/time' });
+    expect(res.statusCode).toBe(200);
+    const ts = Number(res.payload);
+    expect(ts).toBeGreaterThan(1_000_000_000);
+  });
+
+  it('GET /udf/symbols returns symbol metadata', async () => {
+    const res = await app.inject({ method: 'GET', url: '/udf/symbols?symbol=EURUSD' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.name).toBe('EURUSD');
+    expect(body.type).toBe('forex');
+    expect(body.pricescale).toBe(100000);
+  });
+
+  it('GET /udf/history returns no_data for empty broker', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/udf/history?symbol=EURUSD&from=0&to=9999999999&resolution=1D',
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.s).toBe('no_data');
+  });
+
+  it('GET /udf/history rejects unsupported resolution', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/udf/history?symbol=EURUSD&from=0&to=9999999999&resolution=3M',
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.s).toBe('error');
+    expect(body.errmsg).toContain('Unsupported resolution');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// R30 – WS protocol versioning
+// ─────────────────────────────────────────────────────────────
+
+describe('R30 – WebSocket protocol versioning', () => {
+  let app: FastifyInstance;
+  beforeEach(async () => { app = await buildApp({ logger: false }); await app.listen({ port: 0 }); });
+  afterEach(async () => { await app.close(); });
+
+  it('v2 client receives connected message with protocol version', async () => {
+    const addr = app.server.address();
+    const port = typeof addr === 'object' && addr ? addr.port : 0;
+    const { WebSocket } = await import('ws');
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/stream`);
+    const msg = await new Promise<string>((resolve, reject) => {
+      ws.on('message', (data: Buffer) => resolve(data.toString()));
+      ws.on('error', reject);
+      setTimeout(() => reject(new Error('timeout')), 5000);
+    });
+    const parsed = JSON.parse(msg);
+    expect(parsed.type).toBe('connected');
+    expect(parsed.protocol).toBe(2);
+    ws.close();
+  });
+});

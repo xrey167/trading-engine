@@ -42,12 +42,58 @@ const HistoryQuerySchema = Type.Object({
   resolution: Type.String(),
 });
 
+// ─── Response schemas ─────────────────────────────────────────────────────
+
+const UdfConfigResponseSchema = Type.Object({
+  supports_search:        Type.Boolean(),
+  supports_group_request: Type.Boolean(),
+  supports_marks:         Type.Boolean(),
+  supports_timescale_marks: Type.Boolean(),
+  supports_time:          Type.Boolean(),
+  exchanges:              Type.Array(Type.Object({ value: Type.String(), name: Type.String(), desc: Type.String() })),
+  symbols_types:          Type.Array(Type.Object({ name: Type.String(), value: Type.String() })),
+  supported_resolutions:  Type.Array(Type.String()),
+});
+
+const UdfSymbolResponseSchema = Type.Object({
+  name:                   Type.String(),
+  full_name:              Type.String(),
+  description:            Type.String(),
+  type:                   Type.String(),
+  session:                Type.String(),
+  exchange:               Type.String(),
+  listed_exchange:        Type.String(),
+  timezone:               Type.String(),
+  has_intraday:           Type.Boolean(),
+  has_daily:              Type.Boolean(),
+  pricescale:             Type.Number(),
+  minmov:                 Type.Number(),
+  supported_resolutions:  Type.Array(Type.String()),
+  data_status:            Type.String(),
+});
+
+const UdfHistoryResponseSchema = Type.Union([
+  Type.Object({
+    s: Type.Literal('ok'),
+    t: Type.Array(Type.Number()),
+    o: Type.Array(Type.Number()),
+    h: Type.Array(Type.Number()),
+    l: Type.Array(Type.Number()),
+    c: Type.Array(Type.Number()),
+    v: Type.Array(Type.Number()),
+  }),
+  Type.Object({ s: Type.Literal('no_data') }),
+  Type.Object({ s: Type.Literal('error'), errmsg: Type.String() }),
+]);
+
 // ─── Plugin ────────────────────────────────────────────────────────────────
 
 const udfRoute: FastifyPluginAsync = async (fastify) => {
 
   // GET /udf/config — server capabilities
-  fastify.get('/udf/config', async (_req, reply) => {
+  fastify.get('/udf/config', {
+    schema: { response: { 200: UdfConfigResponseSchema } },
+  }, async (_req, reply) => {
     return reply.send({
       supports_search: true,
       supports_group_request: false,
@@ -67,7 +113,7 @@ const udfRoute: FastifyPluginAsync = async (fastify) => {
 
   // GET /udf/symbols — symbol info
   fastify.get('/udf/symbols', {
-    schema: { querystring: SymbolQuerySchema },
+    schema: { querystring: SymbolQuerySchema, response: { 200: UdfSymbolResponseSchema } },
   }, async (req, reply) => {
     const { symbol } = req.query as { symbol: string };
     const symbolName = fastify.symbol.name;
@@ -94,7 +140,7 @@ const udfRoute: FastifyPluginAsync = async (fastify) => {
 
   // GET /udf/history — OHLCV data
   fastify.get('/udf/history', {
-    schema: { querystring: HistoryQuerySchema },
+    schema: { querystring: HistoryQuerySchema, response: { 200: UdfHistoryResponseSchema } },
   }, async (req, reply) => {
     const { symbol, from, to, resolution } = req.query as {
       symbol: string; from: number; to: number; resolution: string;

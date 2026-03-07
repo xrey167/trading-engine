@@ -7,10 +7,12 @@ import {
   type PostScaledOrdersBody,
   ScaledOrderResultSchema,
 } from '../schemas.js';
+import { apiKeyPreHandler } from '../../shared/lib/api-utils.js';
 
 const scaledOrdersRoute: FastifyPluginAsync = async (fastify) => {
   // POST /scaled-orders — place a full order grid using a named preset (Unit 7)
   fastify.post<{ Body: PostScaledOrdersBody }>('/scaled-orders', {
+    preHandler: [apiKeyPreHandler],
     schema: {
       body: PostScaledOrdersBodySchema,
       response: {

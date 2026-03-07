@@ -74,29 +74,29 @@ const ordersRoute: FastifyPluginAsync = async (fastify) => {
         case 'BUY_LIMIT_TRAIL': {
           if (!trailEntry) return reply.status(400).send({ error: 'trailEntry required for BUY_LIMIT_TRAIL' });
           if (size !== undefined) engine.orderSize(size);
-          id = engine.addBuyLimitTrail(trailEntry.mode as TrailMode, trailEntry.distancePts, trailEntry.periods);
-          if (size !== undefined) engine.orderSize(1);
+          try { id = engine.addBuyLimitTrail(trailEntry.mode as TrailMode, trailEntry.distancePts, trailEntry.periods); }
+          finally { if (size !== undefined) engine.orderSize(1); }
           break;
         }
         case 'BUY_STOP_TRAIL': {
           if (!trailEntry) return reply.status(400).send({ error: 'trailEntry required for BUY_STOP_TRAIL' });
           if (size !== undefined) engine.orderSize(size);
-          id = engine.addBuyStopTrail(trailEntry.mode as TrailMode, trailEntry.distancePts, trailEntry.periods);
-          if (size !== undefined) engine.orderSize(1);
+          try { id = engine.addBuyStopTrail(trailEntry.mode as TrailMode, trailEntry.distancePts, trailEntry.periods); }
+          finally { if (size !== undefined) engine.orderSize(1); }
           break;
         }
         case 'SELL_LIMIT_TRAIL': {
           if (!trailEntry) return reply.status(400).send({ error: 'trailEntry required for SELL_LIMIT_TRAIL' });
           if (size !== undefined) engine.orderSize(size);
-          id = engine.addSellLimitTrail(trailEntry.mode as TrailMode, trailEntry.distancePts, trailEntry.periods);
-          if (size !== undefined) engine.orderSize(1);
+          try { id = engine.addSellLimitTrail(trailEntry.mode as TrailMode, trailEntry.distancePts, trailEntry.periods); }
+          finally { if (size !== undefined) engine.orderSize(1); }
           break;
         }
         case 'SELL_STOP_TRAIL': {
           if (!trailEntry) return reply.status(400).send({ error: 'trailEntry required for SELL_STOP_TRAIL' });
           if (size !== undefined) engine.orderSize(size);
-          id = engine.addSellStopTrail(trailEntry.mode as TrailMode, trailEntry.distancePts, trailEntry.periods);
-          if (size !== undefined) engine.orderSize(1);
+          try { id = engine.addSellStopTrail(trailEntry.mode as TrailMode, trailEntry.distancePts, trailEntry.periods); }
+          finally { if (size !== undefined) engine.orderSize(1); }
           break;
         }
         default:

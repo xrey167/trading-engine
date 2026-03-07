@@ -6,6 +6,7 @@ import {
   PutAtrConfigBodySchema,
   type PutAtrConfigBody,
 } from './schemas.js';
+import { apiKeyPreHandler } from '../shared/lib/api-utils.js';
 
 const engineRoutes: FastifyPluginAsync = async (fastify) => {
   // GET /account
@@ -17,6 +18,7 @@ const engineRoutes: FastifyPluginAsync = async (fastify) => {
 
   // PUT /engine/config — update engine-level flags (Unit 6)
   fastify.put<{ Body: PutEngineConfigBody }>('/engine/config', {
+    preHandler: [apiKeyPreHandler],
     schema: {
       body: PutEngineConfigBodySchema,
       response: { 200: OkResponseSchema },
@@ -30,6 +32,7 @@ const engineRoutes: FastifyPluginAsync = async (fastify) => {
 
   // PUT /atr/config — update AtrModule multipliers and flags at runtime (Unit 8)
   fastify.put<{ Body: PutAtrConfigBody }>('/atr/config', {
+    preHandler: [apiKeyPreHandler],
     schema: {
       body: PutAtrConfigBodySchema,
       response: { 200: OkResponseSchema },

@@ -9,6 +9,7 @@ import {
   OpenBBDealRowSchema,
   OpenBBOmniContentSchema,
   SSRMQuerySchema,
+  SSRMResponseSchema,
 } from './schemas.js';
 import { PendingOrderSchema } from '../../trading/schemas.js';
 import { SymbolInfoVOSchema } from '../../shared/domain/account.js';
@@ -179,7 +180,10 @@ const openbbRoute: FastifyPluginAsync = async (fastify) => {
   ]);
 
   fastify.get('/openbb/positions', {
-    schema: { querystring: PositionsQuerySchema },
+    schema: {
+      querystring: PositionsQuerySchema,
+      response: { 200: Type.Union([Type.Array(OpenBBPositionRowSchema), SSRMResponseSchema(OpenBBPositionRowSchema)]) },
+    },
   }, async (req, reply) => {
     reply.header('Cache-Control', 'no-store');
     const { engine, broker } = fastify;
@@ -213,7 +217,10 @@ const openbbRoute: FastifyPluginAsync = async (fastify) => {
   ]);
 
   fastify.get('/openbb/orders', {
-    schema: { querystring: OrdersQuerySchema },
+    schema: {
+      querystring: OrdersQuerySchema,
+      response: { 200: Type.Union([Type.Array(PendingOrderSchema), SSRMResponseSchema(PendingOrderSchema)]) },
+    },
   }, async (req, reply) => {
     reply.header('Cache-Control', 'no-store');
     const orders = [...fastify.engine.getOrders()] as unknown as Record<string, unknown>[];
@@ -253,6 +260,7 @@ const openbbRoute: FastifyPluginAsync = async (fastify) => {
     schema: {
       querystring: DealsQueryWithSSRMSchema,
       response: {
+        200: Type.Union([Type.Array(OpenBBDealRowSchema), SSRMResponseSchema(OpenBBDealRowSchema)]),
         400: ErrorResponseSchema,
         500: ErrorResponseSchema,
       },

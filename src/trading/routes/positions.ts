@@ -12,7 +12,7 @@ import {
 import { apiKeyPreHandler } from '../../shared/lib/api-utils.js';
 
 const positionsRoute: FastifyPluginAsync = async (fastify) => {
-  // GET /positions — all 16 fields + pl (Unit 6)
+  // GET /positions — all 16 fields + pl (Unit 6) — read-only, no auth
   fastify.get('/positions', {
     schema: {
       response: {
@@ -78,6 +78,7 @@ const positionsRoute: FastifyPluginAsync = async (fastify) => {
 
   // PUT /positions/:side/sl-tp  — update SL/TP/trail/BE on a live position (Units 5 + existing)
   fastify.put<{ Params: { side: string }; Body: PutPositionSlTpBody }>('/positions/:side/sl-tp', {
+    preHandler: [apiKeyPreHandler],
     schema: {
       params: Type.Object({ side: Type.String() }),
       body: PutPositionSlTpBodySchema,
@@ -116,6 +117,7 @@ const positionsRoute: FastifyPluginAsync = async (fastify) => {
 
   // POST /positions/long   — market buy  (Unit 1)
   fastify.post<{ Body: PostMarketOrderBody }>('/positions/long', {
+    preHandler: [apiKeyPreHandler],
     schema: {
       body: PostMarketOrderBodySchema,
       response: { 200: OkResponseSchema, 400: ErrorResponseSchema },
@@ -129,6 +131,7 @@ const positionsRoute: FastifyPluginAsync = async (fastify) => {
 
   // POST /positions/short  — market sell (Unit 1)
   fastify.post<{ Body: PostMarketOrderBody }>('/positions/short', {
+    preHandler: [apiKeyPreHandler],
     schema: {
       body: PostMarketOrderBodySchema,
       response: { 200: OkResponseSchema, 400: ErrorResponseSchema },
@@ -142,6 +145,7 @@ const positionsRoute: FastifyPluginAsync = async (fastify) => {
 
   // POST /positions/hedge  — hedge all   (Unit 1)
   fastify.post('/positions/hedge', {
+    preHandler: [apiKeyPreHandler],
     schema: { response: { 200: OkResponseSchema } },
   }, async (_req, reply) => {
     await fastify.engine.hedgeAll();
@@ -150,6 +154,7 @@ const positionsRoute: FastifyPluginAsync = async (fastify) => {
 
   // POST /positions/long/flat  — close long + cancel buy orders  (Unit 2)
   fastify.post('/positions/long/flat', {
+    preHandler: [apiKeyPreHandler],
     schema: { response: { 200: OkResponseSchema } },
   }, async (_req, reply) => {
     await fastify.engine.flatLong();
@@ -158,6 +163,7 @@ const positionsRoute: FastifyPluginAsync = async (fastify) => {
 
   // POST /positions/short/flat — close short + cancel sell orders (Unit 2)
   fastify.post('/positions/short/flat', {
+    preHandler: [apiKeyPreHandler],
     schema: { response: { 200: OkResponseSchema } },
   }, async (_req, reply) => {
     await fastify.engine.flatShort();
@@ -166,6 +172,7 @@ const positionsRoute: FastifyPluginAsync = async (fastify) => {
 
   // POST /positions/flat — close all positions + cancel all orders (Unit 2)
   fastify.post('/positions/flat', {
+    preHandler: [apiKeyPreHandler],
     schema: { response: { 200: OkResponseSchema } },
   }, async (_req, reply) => {
     await fastify.engine.flat();

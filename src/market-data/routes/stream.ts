@@ -6,6 +6,7 @@ const HEARTBEAT_INTERVAL_MS = 30_000;
 const FLUSH_INTERVAL_MS = 50;
 const QUEUE_MAX_SIZE = 100;
 const REPLAY_BUFFER_SIZE = 50;
+const PROTOCOL_VERSION = 2;
 
 interface EventEnvelope {
   id: number;
@@ -41,16 +42,26 @@ const streamRoute: FastifyPluginAsync = async (fastify) => {
   emitter.on('close', (e: unknown) => broadcastEvent('close', e));
 
   // GET /stream — WebSocket real-time event stream
+  // Protocol v2: { id, type, payload } envelopes with replay support
+  // Clients can request v1 (raw payloads) via ?v=1 query param
   fastify.get('/stream', { websocket: true }, (socket, request) => {
+    const query = request.query as Record<string, string>;
+    const clientVersion = Number(query['v']) || PROTOCOL_VERSION;
+    const useEnvelope = clientVersion >= 2;
     const queue = new BoundedQueue<string>(QUEUE_MAX_SIZE);
     let lastDroppedSnapshot = 0;
 
     clientQueues.add(queue);
 
+    // Send protocol version on connect
+    if (useEnvelope) {
+      socket.send(JSON.stringify({ type: 'connected', protocol: PROTOCOL_VERSION }));
+    }
+
     // ── Reconnection: replay missed events ──
     const lastEventId =
       (request.headers['last-event-id'] as string | undefined) ??
-      (request.query as Record<string, string>)['lastEventId'];
+      query['lastEventId'];
 
     if (lastEventId != null) {
       const id = Number(lastEventId);
@@ -67,16 +78,23 @@ const streamRoute: FastifyPluginAsync = async (fastify) => {
     const flushInterval = setInterval(() => {
       if (socket.readyState !== WebSocket.OPEN) return;
 
-      const dropped = queue.droppedCount - lastDroppedSnapshot;
-      if (dropped > 0) {
-        lastDroppedSnapshot = queue.droppedCount;
-        socket.send(JSON.stringify({ type: 'dropped', count: dropped }));
+      if (useEnvelope) {
+        const dropped = queue.droppedCount - lastDroppedSnapshot;
+        if (dropped > 0) {
+          lastDroppedSnapshot = queue.droppedCount;
+          socket.send(JSON.stringify({ type: 'dropped', count: dropped }));
+        }
       }
 
       const messages = queue.drain();
       for (const msg of messages) {
-        if (socket.readyState === WebSocket.OPEN) {
+        if (socket.readyState !== WebSocket.OPEN) break;
+        if (useEnvelope) {
           socket.send(msg);
+        } else {
+          // v1 compat: strip envelope, send raw payload
+          const parsed = JSON.parse(msg) as EventEnvelope;
+          socket.send(JSON.stringify(parsed.payload));
         }
       }
     }, FLUSH_INTERVAL_MS);
