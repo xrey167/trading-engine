@@ -86,7 +86,7 @@ All gateway and use-case methods return `Result<T, DomainError>` (discriminated 
   ```
 - **ESM with `.js` extensions** — all relative imports must use `.js` (Node ESM requirement)
 - **biome v2** — `biome.json` uses `includes` (not `include`); formatter disabled, linter only
-- **TypeBox for schemas** — request/response validation and serialization in `src/schemas/index.ts`
+- **TypeBox for schemas** — request/response validation and serialization. Schemas are now co-located with their modules (e.g., `src/trading/schemas.ts`).
 - **No formatter** — biome formatter is disabled; don't add prettier or similar
 
 ## Environment
