@@ -13,6 +13,10 @@ npm run build                     # tsc → dist/
 npm run lint                      # biome lint
 npm start                         # node dist/src/server.js (port 3000)
 npm run dev                       # same with --watch
+npm run validate                  # contract validation against running backend (port 3000)
+npm run db:push                   # push Drizzle schema to Postgres (dev)
+npm run db:generate               # generate Drizzle migration files
+npm run clean                     # rm -rf dist
 ```
 
 ## Architecture
@@ -29,6 +33,7 @@ npm run dev                       # same with --watch
 shared/
   lib/              — Result<T,E>, DomainError, logger, mutex, circuit-breaker,
                       redis-client, redis-event-bridge, amqp-client, amqp-event-bridge
+  db/               — Drizzle ORM schema, client, deal-writer, snapshot-writer (optional PostgreSQL)
   domain/           — value objects, enums, trade-signal/trade-params, trading-calendar
   schemas/          — common TypeBox schemas (OHLC, enums, errors)
   services/         — IService, BaseService, ServiceRegistry, event-map (AppEventMap)
@@ -67,7 +72,7 @@ integrations/
 | `/v1/signal` | POST | evaluate strategy → BUY/SELL/HOLD |
 | `/v1/positions` | GET, DELETE, PATCH | ticket-based position CRUD (quant-lib VO) |
 | `/v1/money-management` | POST | validate money management config |
-| `/openbb/*` | GET | widgets.json, positions, orders, account, deals |
+| `/openbb/*` | GET | widgets.json, positions, orders, account, deals, equity-curve, signals, audit |
 | `/skills` | GET, POST | Agent SDK skill execution via SSE streaming |
 | `/audit/events` | GET | audit trail query (type/since/limit filters); 503 when RABBITMQ_URL unset |
 | `/docs`, `/openapi.yaml` | GET | Swagger UI (dark theme) and raw spec |
@@ -84,7 +89,9 @@ integrations/
 - `app.atrModule` / `app.atrConfig` — ATR indicator with runtime-mutable config
 - `app.emitter.setMaxListeners(0)` — unbounded; each WS client adds 3 listeners
 - Skills routes use `@anthropic-ai/claude-agent-sdk` — `query()` streams via SSE to clients
-- `app.barCache` — `IBarCache` (in-memory or Redis write-through when `REDIS_URL` set)
+- `app.barCache` — `IBarCache` (Postgres > Redis > in-memory cascade based on env vars)
+- `app.snapshotWriter` — `SnapshotWriter | null` (periodic + event-driven equity snapshots; null when `DATABASE_URL` unset)
+- `DealWriter` — subscribes to order events, writes filled deals to Postgres (fire-and-forget)
 - `RedisEventBridge` — optional cross-instance pub/sub for `signal`, `normalized_bar` events (ephemeral)
 - `AmqpEventBridge` — optional durable cross-instance pub/sub via RabbitMQ for `order`, `risk` events; enabled when `RABBITMQ_URL` set
 - When both bridges active, events are split to prevent duplicate delivery
@@ -92,7 +99,7 @@ integrations/
 
 ### Result type pattern
 
-All gateway and use-case methods return `Result<T, DomainError>` (discriminated union with `ok: boolean`). Use `ok()` / `err()` constructors and `isOk()` / `isErr()` guards from `src/lib/result.ts`.
+All gateway and use-case methods return `Result<T, DomainError>` (discriminated union with `ok: boolean`). Use `ok()` / `err()` constructors and `isOk()` / `isErr()` guards from `src/shared/lib/result.ts`.
 
 ## Conventions
 
@@ -114,6 +121,7 @@ All gateway and use-case methods return `Result<T, DomainError>` (discriminated 
 | `OPENBB_API_KEY` | No | `/openbb/*` routes (timing-safe compare) |
 | `ANTHROPIC_API_KEY` | For `/skills` | Agent SDK key (or use `CLAUDE_CODE_OAUTH_TOKEN`) |
 | `CLAUDE_CODE_OAUTH_TOKEN` | For `/skills` | OAuth alternative to `ANTHROPIC_API_KEY` |
+| `DATABASE_URL` | No | PostgreSQL persistence (bars, deals, audit, account snapshots via Drizzle ORM); falls back to Redis/in-memory when unset |
 | `REDIS_URL` | No | Redis bar cache (write-through) + cross-instance pub/sub event bridge; falls back to in-memory when unset |
 | `RABBITMQ_URL` | No | AMQP event bridge (durable order/risk events) + audit trail consumer; disabled when unset |
 | `NODE_ENV` | No | `production` hides stack traces in error responses |
@@ -126,6 +134,7 @@ No `.env` file is committed. Node 18+ required (ES2022 target).
 - **Engine is bar-driven** — orders and positions only update when `POST /bars` calls `engine.onBar()`. Nothing happens between bars.
 - **`app.inject()` for tests, not HTTP** — Fastify's zero-cost injection; all route tests use this pattern with `beforeEach(buildApp)` / `afterEach(app.close)`.
 - **Mutex on engine** — `app.engineMutex` serializes concurrent writes. Don't call `engine.onBar()` outside the mutex.
+- **Directory name has a space** — `npx vitest run "src/market-data"` requires quoted paths; prefer `-t "pattern"` for targeted test runs.
 
 ## Relevant Skills
 
