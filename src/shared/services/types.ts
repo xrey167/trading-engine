@@ -18,6 +18,7 @@ export const ServiceKind = {
   OrderManager:  'ORDER_MANAGER',
   RiskManager:   'RISK_MANAGER',
   ExecutionSaga: 'EXECUTION_SAGA',
+  TickIngestion: 'TICK_INGESTION',
 } as const;
 export type ServiceKind = (typeof ServiceKind)[keyof typeof ServiceKind];
 

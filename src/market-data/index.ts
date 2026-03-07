@@ -12,4 +12,6 @@ const marketDataModule: FastifyPluginAsync = async (fastify) => {
   await fastify.register(udfRoute);
 };
 
+export { TickIngestionService } from './tick-ingestion-service.js';
+
 export default fp(marketDataModule, { name: 'market-data-module' });

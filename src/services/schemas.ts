@@ -17,6 +17,7 @@ export const ServiceKindSchema = Type.Union([
   Type.Literal('ORDER_MANAGER'),
   Type.Literal('RISK_MANAGER'),
   Type.Literal('EXECUTION_SAGA'),
+  Type.Literal('TICK_INGESTION'),
 ]);
 
 export const ServiceSummarySchema = Type.Object({
