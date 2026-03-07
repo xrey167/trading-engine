@@ -801,12 +801,14 @@ export function checkSLTP(p: {
     const tpHit = tpOn && bar.high >= tp;
     if (!slHit && !tpHit) return null;
     if (slHit && tpHit) {
-      return bar.isBullish()
-        ? { reason: 'TP_BOTH', exitPrice: Math.min(bar.open, tp)  }   // open may gap above tp
-        : { reason: 'SL_BOTH', exitPrice: Math.max(bar.open, sl)  };  // open may gap below sl
+      // MQL rule: Long → SL always wins (conservative worst-case assumption)
+      return { reason: 'SL_BOTH', exitPrice: Math.min(bar.open, sl) };
     }
-    if (slHit) return { reason: 'SL', exitPrice: Math.max(bar.open, sl)  };
-    return          { reason: 'TP', exitPrice: Math.min(bar.open, tp)  };
+    // Gap clamping matches MQL _SimCheckSLTP:
+    //   SL adverse gap (bar.open < sl)  → fill at bar.open (slippage)
+    //   TP favorable gap (bar.open > tp) → fill at bar.open (gap benefit)
+    if (slHit) return { reason: 'SL', exitPrice: Math.min(bar.open, sl) };
+    return          { reason: 'TP', exitPrice: Math.max(bar.open, tp) };
   }
 
   if (side === Side.Short) {
@@ -814,12 +816,14 @@ export function checkSLTP(p: {
     const tpHit = tpOn && bar.low  + spreadAbs <= tp;
     if (!slHit && !tpHit) return null;
     if (slHit && tpHit) {
-      return bar.isBullish()
-        ? { reason: 'TP_BOTH', exitPrice: Math.max(bar.open, tp)  }
-        : { reason: 'SL_BOTH', exitPrice: Math.min(bar.open, sl)  };
+      // MQL rule: Short → TP always wins (conservative worst-case assumption)
+      return { reason: 'TP_BOTH', exitPrice: Math.min(bar.open, tp) };
     }
-    if (slHit) return { reason: 'SL', exitPrice: Math.min(bar.open, sl)  };
-    return          { reason: 'TP', exitPrice: Math.max(bar.open, tp)  };
+    // Gap clamping matches MQL _SimCheckSLTP:
+    //   SL adverse gap (bar.open > sl)  → fill at bar.open (slippage)
+    //   TP favorable gap (bar.open < tp) → fill at bar.open (gap benefit)
+    if (slHit) return { reason: 'SL', exitPrice: Math.max(bar.open, sl) };
+    return          { reason: 'TP', exitPrice: Math.min(bar.open, tp) };
   }
 
   return null;
@@ -932,14 +936,19 @@ export class LimitOrder extends Order {
   isFilled(bar: Bar): boolean {
     return this.side === Side.Long ? bar.low <= this.price : bar.high >= this.price;
   }
-  computeFillPrice(_bar: Bar): number { return this.price; }
+  // Gap clamping: MathMax(price, bar_open) for buys, MathMin for sells (MQL GetFillPrice)
+  computeFillPrice(bar: Bar): number {
+    return this.side === Side.Long ? Math.max(this.price, bar.open) : Math.min(this.price, bar.open);
+  }
 }
 
 export class StopOrder extends Order {
   isFilled(bar: Bar): boolean {
     return this.side === Side.Long ? bar.high >= this.price : bar.low <= this.price;
   }
-  computeFillPrice(_bar: Bar): number { return this.price; }
+  computeFillPrice(bar: Bar): number {
+    return this.side === Side.Long ? Math.max(this.price, bar.open) : Math.min(this.price, bar.open);
+  }
 }
 
 export class MITOrder extends Order {
@@ -962,7 +971,9 @@ export class StopLimitOrder extends Order {
   isFilled(bar: Bar): boolean {
     return this.side === Side.Long ? bar.high >= this.price : bar.low <= this.price;
   }
-  computeFillPrice(_bar: Bar): number { return this.limitPrice; }
+  computeFillPrice(bar: Bar): number {
+    return this.side === Side.Long ? Math.max(this.limitPrice, bar.open) : Math.min(this.limitPrice, bar.open);
+  }
 
   /** True if the bar's range covers the limit price (fill can proceed). */
   limitCovered(bar: Bar): boolean {
@@ -1010,14 +1021,18 @@ export class TrailingLimitOrder extends TrailingOrder {
   isFilled(bar: Bar): boolean {
     return this.side === Side.Long ? bar.low <= this.price : bar.high >= this.price;
   }
-  computeFillPrice(_bar: Bar): number { return this.price; }
+  computeFillPrice(bar: Bar): number {
+    return this.side === Side.Long ? Math.max(this.price, bar.open) : Math.min(this.price, bar.open);
+  }
 }
 
 export class TrailingStopOrder extends TrailingOrder {
   isFilled(bar: Bar): boolean {
     return this.side === Side.Long ? bar.high >= this.price : bar.low <= this.price;
   }
-  computeFillPrice(_bar: Bar): number { return this.price; }
+  computeFillPrice(bar: Bar): number {
+    return this.side === Side.Long ? Math.max(this.price, bar.open) : Math.min(this.price, bar.open);
+  }
 }
 
 export class MTOOrder extends TrailingOrder {
@@ -1058,6 +1073,11 @@ export interface PositionSlot {
   trailBeginPts: number;
   beActive:   boolean;
   beAddPts:   number;
+  // Per-trade tracking (reset on close)
+  barsHeld:    number;   // bars the position has been open
+  entryReason: string;   // 'market', order type, etc.
+  mae:         number;   // Maximum Adverse Excursion in points (≥ 0)
+  mfe:         number;   // Maximum Favorable Excursion in points (≥ 0)
 }
 
 function emptySlot(side: Side): PositionSlot {
@@ -1068,7 +1088,63 @@ function emptySlot(side: Side): PositionSlot {
     trailState: { active: false, plhRef: side === Side.Long ? 0 : Infinity },
     trailActive: false, trailBeginPts: 0,
     beActive: false, beAddPts: 0,
+    barsHeld: 0, entryReason: '', mae: 0, mfe: 0,
   };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Closed-trade record — ported from CSEADeal in SEA_OrderManagement.mqh
+// ─────────────────────────────────────────────────────────────
+
+export interface DealRecord {
+  id:          number;
+  side:        Side;
+  entryPrice:  number;
+  exitPrice:   number;
+  size:        number;
+  openTime:    Date;
+  closeTime:   Date;
+  barsHeld:    number;
+  entryReason: string;
+  exitReason:  string;
+  /** Gross P&L in points from the position holder's perspective. */
+  plPoints:    number;
+  result:      'win' | 'loss' | 'breakeven';
+  /** Maximum Adverse Excursion — worst intra-trade drawdown in points. */
+  mae:         number;
+  /** Maximum Favorable Excursion — best intra-trade run-up in points. */
+  mfe:         number;
+}
+
+/** Cumulative backtest statistics — ported from SDealStats in SEA_OrderManagement.mqh. */
+export interface DealStats {
+  totalDeals:     number;
+  winningDeals:   number;
+  losingDeals:    number;
+  breakevenDeals: number;
+  grossProfitPts: number;
+  grossLossPts:   number;    // always ≤ 0
+  netPLPts:       number;
+  maxWinStreak:   number;
+  maxLossStreak:  number;
+  maxDrawdownPts: number;    // always ≥ 0
+  marRatio:       number;    // netPL / maxDrawdown (0 when drawdown = 0)
+}
+
+/** Computed statistics derived from DealStats (call after every update). */
+export function dealStatsComputed(s: DealStats): {
+  winRate:         number;
+  profitFactor:    number;
+  avgWinPts:       number;
+  avgLossPts:      number;
+  expectedValuePts: number;
+} {
+  const winRate      = s.totalDeals > 0 ? s.winningDeals / s.totalDeals : 0;
+  const profitFactor = s.grossLossPts !== 0 ? Math.abs(s.grossProfitPts / s.grossLossPts) : Infinity;
+  const avgWinPts    = s.winningDeals > 0 ? s.grossProfitPts / s.winningDeals : 0;
+  const avgLossPts   = s.losingDeals  > 0 ? s.grossLossPts  / s.losingDeals  : 0;
+  const expectedValuePts = winRate * avgWinPts + (1 - winRate) * avgLossPts;
+  return { winRate, profitFactor, avgWinPts, avgLossPts, expectedValuePts };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1142,6 +1218,23 @@ export class TradingEngine {
   // Spread cache
   private _spreadAbs = 0;
 
+  // Deal history and statistics — ported from CSEADeal / SDealStats
+  private _deals: DealRecord[] = [];
+  private _dealSeq = 0;
+  private _stats: DealStats = {
+    totalDeals: 0, winningDeals: 0, losingDeals: 0, breakevenDeals: 0,
+    grossProfitPts: 0, grossLossPts: 0, netPLPts: 0,
+    maxWinStreak: 0, maxLossStreak: 0, maxDrawdownPts: 0, marRatio: 0,
+  };
+  private _runningEquityPts  = 0;
+  private _maxEquityPeak     = 0;
+  private _currentWinStreak  = 0;
+  private _currentLossStreak = 0;
+
+  // Global default SL/TP applied when no explicit bracket is set (MQL _ResolveSLDist/_ResolveTPDist)
+  private _defaultSLDist = 0;
+  private _defaultTPDist = 0;
+
   constructor(
     private readonly symbol:  SymbolInfoBase,
     private readonly broker:  IBrokerAdapter,
@@ -1154,20 +1247,26 @@ export class TradingEngine {
 
   /**
    * Call this on every new closed bar.
-   * Sequence: fill pending orders → update trailing stops → check SL/TP exits.
+   * Sequence (matches MQL _SimOnNewBar):
+   *   1. Update trailing-entry order prices
+   *   2. Increment barsHeld + update MAE/MFE + trailing SL + break-even + SL/TP exits
+   *   3. Fill pending orders (exits fire before new fills on the same bar)
    */
   async onBar(bar: Bar, bars: Bars): Promise<void> {
     this._spreadAbs = await this.broker.getSpread(this.symbol.name);
 
     await this._updateTrailingEntryOrders(bar, bars);
-    await this._checkOrderFills(bar, bars);
 
     for (const slot of [this.longPos, this.shortPos]) {
       if (slot.size === 0) continue;
+      slot.barsHeld++;
+      this._updateMAEMFE(slot, bar);
       await this._updateTrailingSL(slot, bar, bars);
       await this._updateBreakEven(slot, bar);
       await this._checkExits(slot, bar);
     }
+
+    await this._checkOrderFills(bar, bars);
   }
 
   // ──────────────────────────────────────────────────────────
@@ -1183,7 +1282,7 @@ export class TradingEngine {
     const s = size ?? this._nextOrderSize;
     if (!this.hedging && this.shortPos.size > 0) await this._closeSlot(this.shortPos, info);
     const r = await this.broker.marketOrder(Side.Long, s, info);
-    this._applyFill(this.longPos, r.price, s, r.time);
+    this._applyFill(this.longPos, r.price, s, r.time, info ?? 'market');
     this._applyBracket(this.longPos);
     await this._pushSLTP(this.longPos);
     return true;
@@ -1198,7 +1297,7 @@ export class TradingEngine {
     const s = size ?? this._nextOrderSize;
     if (!this.hedging && this.longPos.size > 0) await this._closeSlot(this.longPos, info);
     const r = await this.broker.marketOrder(Side.Short, s, info);
-    this._applyFill(this.shortPos, r.price, s, r.time);
+    this._applyFill(this.shortPos, r.price, s, r.time, info ?? 'market');
     this._applyBracket(this.shortPos);
     await this._pushSLTP(this.shortPos);
     return true;
@@ -1674,10 +1773,10 @@ export class TradingEngine {
       if (curSize > 0) await this._closeSlot(slot, 'REV');
       if (o.side === Side.Long) {
         await this.broker.marketOrder(Side.Long, o.size + curSize);
-        this._applyFill(this.longPos, o.price, o.size + curSize, bar.time);
+        this._applyFill(this.longPos, o.price, o.size + curSize, bar.time, o.type);
       } else {
         await this.broker.marketOrder(Side.Short, o.size + curSize);
-        this._applyFill(this.shortPos, o.price, o.size + curSize, bar.time);
+        this._applyFill(this.shortPos, o.price, o.size + curSize, bar.time, o.type);
       }
     } else if (isStopLimitOrder(o)) {
       // Stop-limit: only fill if bar's range covers the limit price
@@ -1692,14 +1791,14 @@ export class TradingEngine {
         }));
         return;
       }
-      this._applyFill(slot, o.limitPrice, o.size, bar.time);
+      this._applyFill(slot, o.computeFillPrice(bar), o.size, bar.time, o.type);
     } else if (o.fillsAtMarket) {
       // MIT / MTO: execute as market order; actual fill price comes from broker
       const r = await this.broker.marketOrder(o.side, o.size);
-      this._applyFill(slot, r.price, o.size, r.time);
+      this._applyFill(slot, r.price, o.size, r.time, o.type);
     } else {
-      // Limit / stop fill at computed price
-      this._applyFill(slot, o.computeFillPrice(bar), o.size, bar.time);
+      // Limit / stop fill at computed price (gap-clamped per MQL GetFillPrice)
+      this._applyFill(slot, o.computeFillPrice(bar), o.size, bar.time, o.type);
     }
 
     // Apply bracket SL/TP
@@ -1759,9 +1858,10 @@ export class TradingEngine {
     const triggerDist = this.symbol.pointsToPrice(slot.trailBeginPts);
     const beDist      = this.symbol.pointsToPrice(slot.beAddPts);
     let newSL         = slot.sl;
-    if (slot.side === Side.Long && bar.high >= slot.openPrice + triggerDist) {
+    // MQL uses bar_close as trigger reference (not high/low) — close-based avoids wick-only activation
+    if (slot.side === Side.Long && bar.close >= slot.openPrice + triggerDist) {
       newSL = Math.max(newSL === -1 ? -Infinity : newSL, slot.openPrice + beDist);
-    } else if (slot.side === Side.Short && bar.low + this._spreadAbs <= slot.openPrice - triggerDist) {
+    } else if (slot.side === Side.Short && bar.close <= slot.openPrice - triggerDist) {
       newSL = newSL === -1 ? slot.openPrice - beDist : Math.min(newSL, slot.openPrice - beDist);
     }
     if (newSL !== slot.sl) {
@@ -1782,6 +1882,7 @@ export class TradingEngine {
       spreadAbs:   this._spreadAbs,
     });
     if (!hit) return;
+    this._recordDeal(slot, hit.exitPrice, hit.reason.toLowerCase(), bar.time);
     await this.broker.closePosition(slot.side, slot.size, hit.reason);
     this._resetSlot(slot);
     if (this._removeOrdersOnFlat && this.getCntPos() === 0) this.orders = [];
@@ -1789,7 +1890,8 @@ export class TradingEngine {
 
   private async _closeSlot(slot: PositionSlot, info?: string): Promise<boolean> {
     if (slot.size === 0) return false;
-    await this.broker.closePosition(slot.side, slot.size, info);
+    const r = await this.broker.closePosition(slot.side, slot.size, info);
+    this._recordDeal(slot, r.price, info ?? 'market', new Date());
     this._resetSlot(slot);
     return true;
   }
@@ -1812,11 +1914,15 @@ export class TradingEngine {
     }
   }
 
-  private _applyFill(slot: PositionSlot, price: number, size: number, time: Date): void {
+  private _applyFill(slot: PositionSlot, price: number, size: number, time: Date, reason = ''): void {
     if (slot.size === 0) {
-      slot.openPrice  = price;
-      slot.openTime   = time;
-      slot.trailState = { active: false, plhRef: slot.side === Side.Long ? 0 : Infinity };
+      slot.openPrice   = price;
+      slot.openTime    = time;
+      slot.entryReason = reason;
+      slot.barsHeld    = 0;
+      slot.mae         = 0;
+      slot.mfe         = 0;
+      slot.trailState  = { active: false, plhRef: slot.side === Side.Long ? 0 : Infinity };
       if (slot.slOffsetPts > 0) {
         slot.sl = slot.side === Side.Long
           ? price - this.symbol.pointsToPrice(slot.slOffsetPts)
@@ -1835,16 +1941,19 @@ export class TradingEngine {
   }
 
   private _applyBracketPts(slot: PositionSlot, slPts?: number, tpPts?: number): void {
-    if (slPts != null) {
+    // Fall back to engine-level defaults when no explicit bracket is set (MQL _ResolveSLDist pattern)
+    const sl = slPts ?? (this._defaultSLDist > 0 ? this._defaultSLDist : undefined);
+    const tp = tpPts ?? (this._defaultTPDist > 0 ? this._defaultTPDist : undefined);
+    if (sl != null) {
       slot.sl = slot.side === Side.Long
-        ? slot.openPrice - this.symbol.pointsToPrice(slPts)
-        : slot.openPrice + this.symbol.pointsToPrice(slPts);
+        ? slot.openPrice - this.symbol.pointsToPrice(sl)
+        : slot.openPrice + this.symbol.pointsToPrice(sl);
       slot.slActive = true;
     }
-    if (tpPts != null) {
+    if (tp != null) {
       slot.tp = slot.side === Side.Long
-        ? slot.openPrice + this.symbol.pointsToPrice(tpPts)
-        : slot.openPrice - this.symbol.pointsToPrice(tpPts);
+        ? slot.openPrice + this.symbol.pointsToPrice(tp)
+        : slot.openPrice - this.symbol.pointsToPrice(tp);
       slot.tpActive = true;
     }
   }
@@ -1878,6 +1987,127 @@ export class TradingEngine {
       : slot.openPrice - currentPrice;
     return diff * slot.size;
   }
+
+  // ──────────────────────────────────────────────────────────
+  // Per-bar: MAE/MFE update (ported from CSEADeal concept in SEA_OrderManagement.mqh)
+  // ──────────────────────────────────────────────────────────
+
+  private _updateMAEMFE(slot: PositionSlot, bar: Bar): void {
+    if (slot.openPrice < 0) return;
+    const pt = this.symbol.pointsToPrice(1);
+    if (pt === 0) return;
+    let adverse: number;
+    let favorable: number;
+    if (slot.side === Side.Long) {
+      adverse   = (slot.openPrice - bar.low)  / pt;
+      favorable = (bar.high - slot.openPrice) / pt;
+    } else {
+      adverse   = (bar.high + this._spreadAbs - slot.openPrice) / pt;
+      favorable = (slot.openPrice - bar.low  - this._spreadAbs) / pt;
+    }
+    if (adverse  > slot.mae) slot.mae = adverse;
+    if (favorable > slot.mfe) slot.mfe = favorable;
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // Deal recording (ported from _SimRecordDeal / _SimUpdateStats in SEA_OrderManagement.mqh)
+  // ──────────────────────────────────────────────────────────
+
+  private _recordDeal(slot: PositionSlot, exitPrice: number, exitReason: string, closeTime: Date): void {
+    if (slot.size === 0 || slot.openPrice < 0) return;
+    const pt = this.symbol.pointsToPrice(1);
+    const plPoints = pt > 0
+      ? (slot.side === Side.Long
+          ? (exitPrice - slot.openPrice) / pt
+          : (slot.openPrice - exitPrice) / pt)
+      : 0;
+    const result: 'win' | 'loss' | 'breakeven' =
+      plPoints > 0 ? 'win' : plPoints < 0 ? 'loss' : 'breakeven';
+    const deal: DealRecord = {
+      id:          ++this._dealSeq,
+      side:        slot.side,
+      entryPrice:  slot.openPrice,
+      exitPrice,
+      size:        slot.size,
+      openTime:    slot.openTime,
+      closeTime,
+      barsHeld:    slot.barsHeld,
+      entryReason: slot.entryReason,
+      exitReason,
+      plPoints,
+      result,
+      mae:         Math.max(0, slot.mae),
+      mfe:         Math.max(0, slot.mfe),
+    };
+    this._deals.push(deal);
+    this._updateStats(deal);
+  }
+
+  private _updateStats(deal: DealRecord): void {
+    this._stats.totalDeals++;
+    this._stats.netPLPts       += deal.plPoints;
+    this._runningEquityPts     += deal.plPoints;
+    if (deal.plPoints > 0) {
+      this._stats.winningDeals++;
+      this._stats.grossProfitPts += deal.plPoints;
+      this._currentWinStreak++;
+      this._currentLossStreak = 0;
+      if (this._currentWinStreak > this._stats.maxWinStreak)
+        this._stats.maxWinStreak = this._currentWinStreak;
+    } else if (deal.plPoints < 0) {
+      this._stats.losingDeals++;
+      this._stats.grossLossPts += deal.plPoints;
+      this._currentLossStreak++;
+      this._currentWinStreak = 0;
+      if (this._currentLossStreak > this._stats.maxLossStreak)
+        this._stats.maxLossStreak = this._currentLossStreak;
+    } else {
+      this._stats.breakevenDeals++;
+    }
+    if (this._runningEquityPts > this._maxEquityPeak)
+      this._maxEquityPeak = this._runningEquityPts;
+    const dd = this._maxEquityPeak - this._runningEquityPts;
+    if (dd > this._stats.maxDrawdownPts) this._stats.maxDrawdownPts = dd;
+    if (this._stats.maxDrawdownPts > 0)
+      this._stats.marRatio = this._stats.netPLPts / this._stats.maxDrawdownPts;
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // Public: deal history, statistics, defaults
+  // ──────────────────────────────────────────────────────────
+
+  /** All closed trades since last {@link resetStats}. */
+  getDeals(): readonly DealRecord[] { return this._deals; }
+
+  /** Cumulative backtest statistics. Use {@link dealStatsComputed} for derived ratios. */
+  getStats(): Readonly<DealStats> { return this._stats; }
+
+  /** Reset deal history and all statistics counters. */
+  resetStats(): void {
+    this._deals             = [];
+    this._dealSeq           = 0;
+    this._runningEquityPts  = 0;
+    this._maxEquityPeak     = 0;
+    this._currentWinStreak  = 0;
+    this._currentLossStreak = 0;
+    this._stats = {
+      totalDeals: 0, winningDeals: 0, losingDeals: 0, breakevenDeals: 0,
+      grossProfitPts: 0, grossLossPts: 0, netPLPts: 0,
+      maxWinStreak: 0, maxLossStreak: 0, maxDrawdownPts: 0, marRatio: 0,
+    };
+  }
+
+  /**
+   * Set a global default SL distance (points) applied to any fill that has no explicit bracket SL.
+   * Matches MQL `_ResolveSLDist` / `m_default_sl_dist`.  Pass 0 to disable.
+   */
+  setDefaultSLDist(pts: number): void { this._defaultSLDist = pts; }
+
+  /**
+   * Set a global default TP distance (points) applied to any fill that has no explicit bracket TP.
+   * Matches MQL `_ResolveTPDist` / `m_default_tp_dist`.  Pass 0 to disable.
+   */
+  setDefaultTPDist(pts: number): void { this._defaultTPDist = pts; }
 }
 
 // ─────────────────────────────────────────────────────────────
