@@ -5,6 +5,7 @@ import { ServiceStatus, ServiceKind } from '../shared/services/types.js';
 import type { OHLCBody } from '../shared/schemas/common.js';
 import { InMemoryBarCache } from './bar-cache.js';
 import { DataProviderService, type IDataFetcher } from './data-provider-service.js';
+import { InternalProvider } from './internal-provider.js';
 import { nullLogger } from '../shared/lib/logger.js';
 
 class MockFetcher implements IDataFetcher {
@@ -170,5 +171,83 @@ describe('DataProviderService', () => {
       new MockFetcher(), cache, bus, nullLogger,
     );
     expect(svc.getCache()).toBe(cache);
+  });
+});
+
+describe('InMemoryBarCache.latest', () => {
+  it('returns the most recent bar', () => {
+    const cache = new InMemoryBarCache();
+    cache.push('EURUSD', 'M1', makeBar(1.10));
+    cache.push('EURUSD', 'M1', makeBar(1.11));
+    cache.push('EURUSD', 'M1', makeBar(1.12));
+    expect(cache.latest('EURUSD', 'M1')?.close).toBe(1.12);
+  });
+
+  it('returns undefined when no bars exist', () => {
+    const cache = new InMemoryBarCache();
+    expect(cache.latest('EURUSD', 'M1')).toBeUndefined();
+  });
+});
+
+describe('InternalProvider', () => {
+  it('bridges bar event to normalized_bar', async () => {
+    const bus = new TypedEventBus<AppEventMap>();
+    const cache = new InMemoryBarCache();
+    const provider = new InternalProvider('EURUSD', 'M1', cache, bus, nullLogger);
+
+    const events: NormalizedBarEvent[] = [];
+    bus.on('normalized_bar', (e) => events.push(e));
+
+    await provider.start();
+
+    const bar = makeBar(1.1050);
+    bus.emit('bar', { type: 'bar', bar });
+
+    expect(events).toHaveLength(1);
+    expect(events[0].providerId).toBe('dp:internal');
+    expect(events[0].symbol).toBe('EURUSD');
+    expect(events[0].timeframe).toBe('M1');
+    expect(events[0].bar.close).toBe(1.1050);
+
+    await provider.stop();
+  });
+
+  it('pushes bars to the cache', async () => {
+    const bus = new TypedEventBus<AppEventMap>();
+    const cache = new InMemoryBarCache();
+    const provider = new InternalProvider('EURUSD', 'M1', cache, bus, nullLogger);
+
+    await provider.start();
+
+    bus.emit('bar', { type: 'bar', bar: makeBar(1.10) });
+    bus.emit('bar', { type: 'bar', bar: makeBar(1.11) });
+
+    expect(cache.getBars('EURUSD', 'M1')).toHaveLength(2);
+    expect(cache.latest('EURUSD', 'M1')?.close).toBe(1.11);
+
+    await provider.stop();
+  });
+
+  it('stops listening after stop()', async () => {
+    const bus = new TypedEventBus<AppEventMap>();
+    const cache = new InMemoryBarCache();
+    const provider = new InternalProvider('EURUSD', 'M1', cache, bus, nullLogger);
+
+    await provider.start();
+    bus.emit('bar', { type: 'bar', bar: makeBar(1.10) });
+    expect(cache.getBars('EURUSD', 'M1')).toHaveLength(1);
+
+    await provider.stop();
+    bus.emit('bar', { type: 'bar', bar: makeBar(1.11) });
+    expect(cache.getBars('EURUSD', 'M1')).toHaveLength(1); // no new bar added
+  });
+
+  it('has correct service metadata', () => {
+    const bus = new TypedEventBus<AppEventMap>();
+    const cache = new InMemoryBarCache();
+    const provider = new InternalProvider('EURUSD', 'M1', cache, bus, nullLogger);
+    expect(provider.id).toBe('dp:internal');
+    expect(provider.kind).toBe(ServiceKind.DataProvider);
+    expect(provider.name).toBe('internal');
   });
 });

@@ -3,6 +3,7 @@ import type { AppEventMap } from '../shared/services/event-map.js';
 import type { Logger } from '../shared/lib/logger.js';
 import { BaseService } from '../shared/services/base-service.js';
 import { ServiceKind } from '../shared/services/types.js';
+import type { IBarCache } from '../market-data/data-provider-types.js';
 import type { ISignalStrategy, ISignalContext } from './strategies/types.js';
 import { SignalResult, RunMode } from './strategies/types.js';
 import { createStrategy } from './strategies/strategy-factory.js';
@@ -27,6 +28,7 @@ export class StrategyService extends BaseService {
     config: StrategyServiceConfig,
     eventBus: TypedEventBus<AppEventMap>,
     logger: Logger,
+    private readonly barCache?: IBarCache,
   ) {
     super(eventBus, logger);
     this.id = config.id;
@@ -94,15 +96,25 @@ export class StrategyService extends BaseService {
     if (event.symbol !== this.config.symbol || event.timeframe !== this.config.timeframe) return;
     try {
       const { Bars } = await import('../../trading-engine.js');
-      const ohlc = {
-        open: event.bar.open,
-        high: event.bar.high,
-        low: event.bar.low,
-        close: event.bar.close,
-        time: new Date(event.bar.time),
-        volume: event.bar.volume,
-      };
-      const bars = new Bars([ohlc]);
+
+      // Build Bars from cache history when available, otherwise single bar
+      let bars: InstanceType<typeof Bars>;
+      if (this.barCache) {
+        const cached = this.barCache.getBars(event.symbol, event.timeframe);
+        const ohlcArray = cached.map(b => ({
+          open: b.open, high: b.high, low: b.low, close: b.close,
+          time: new Date(b.time), volume: b.volume,
+        }));
+        bars = new Bars(ohlcArray.length > 0 ? ohlcArray : [{
+          open: event.bar.open, high: event.bar.high, low: event.bar.low, close: event.bar.close,
+          time: new Date(event.bar.time), volume: event.bar.volume,
+        }]);
+      } else {
+        bars = new Bars([{
+          open: event.bar.open, high: event.bar.high, low: event.bar.low, close: event.bar.close,
+          time: new Date(event.bar.time), volume: event.bar.volume,
+        }]);
+      }
 
       const context: ISignalContext = {
         isNewBar: true,

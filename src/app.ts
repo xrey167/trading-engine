@@ -6,6 +6,8 @@ import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastif
 import websocket from '@fastify/websocket';
 import { SymbolInfoForex } from '../trading-engine.js';
 import { PaperBroker } from './broker/paper/paper-broker.js';
+import { InMemoryBarCache } from './market-data/bar-cache.js';
+import { InternalProvider } from './market-data/internal-provider.js';
 import { toLogger } from './shared/lib/logger.js';
 import { TypedEventBus } from './shared/event-bus.js';
 import type { AppEventMap } from './shared/services/event-map.js';
@@ -139,6 +141,14 @@ export async function buildApp(
   // Start the broker service — PaperBroker.connect() is idempotent
   await primaryBrokerService.start();
   serviceRegistry.register(primaryBrokerService);
+
+  // 1c. Bar cache + internal data provider (bridges bar → normalized_bar)
+  const barCache = new InMemoryBarCache();
+  app.decorate('barCache', barCache);
+
+  const internalProvider = new InternalProvider(pair, 'M1', barCache, emitter, toLogger(app.log));
+  await internalProvider.start();
+  serviceRegistry.register(internalProvider);
 
   // 4. Global error handler
   app.setErrorHandler((err: Error & { statusCode?: number }, _request, reply) => {
