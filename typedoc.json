@@ -1,0 +1,37 @@
+{
+  "name": "Trading Engine — Internal API",
+  "entryPoints": [
+    "trading-engine.ts",
+    "src/shared/lib/result.ts",
+    "src/shared/lib/errors.ts",
+    "src/shared/lib/circuit-breaker.ts",
+    "src/shared/lib/mutex.ts",
+    "src/shared/services/types.ts",
+    "src/shared/services/event-map.ts",
+    "src/shared/event-bus.ts",
+    "src/broker/types.ts",
+    "src/broker/broker-service.ts",
+    "src/analysis/strategies/types.ts",
+    "src/analysis/strategy-service.ts",
+    "src/analysis/screener-service.ts",
+    "src/managers/risk-manager.ts",
+    "src/managers/order-manager.ts",
+    "src/managers/execution-saga.ts"
+  ],
+  "entryPointStrategy": "resolve",
+  "out": "docs-api",
+  "includeVersion": true,
+  "excludePrivate": true,
+  "excludeProtected": false,
+  "excludeExternals": true,
+  "readme": "none",
+  "navigationLinks": {
+    "REST API Docs": "/docs",
+    "OpenAPI Spec": "/openapi.yaml"
+  },
+  "darkHighlightTheme": "github-dark",
+  "lightHighlightTheme": "github-light",
+  "categorizeByGroup": true,
+  "groupOrder": ["Classes", "Interfaces", "Type Aliases", "Enumerations", "Functions", "Variables"],
+  "sort": ["source-order"]
+}

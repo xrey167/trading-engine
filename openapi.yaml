@@ -1413,10 +1413,22 @@ paths:
         | `trailBeginMultiplier` | ATR multiplier for trail activation threshold | 1.0     |
         | `trailDistMultiplier`  | ATR multiplier for trailing distance          | 0.8     |
         | `onlyWhenFlat`         | Only apply ATR offsets when opening new positions | false |
+        | `barsAtrMode`          | Filter which candles contribute to ATR: `0`=all, `1`=bullish only, `-1`=bearish only | 0 |
+        | `barBase`              | TR formula: `BASE_HILO`=standard (H-L + gaps), `BASE_OPENCLOSE`=body only | BASE_HILO |
+
+        ### Bar Filter Design — Collect N Qualifying Bars
+
+        When `barsAtrMode` is `1` or `-1`, the engine scans further back in history
+        to collect exactly `period` qualifying TRs before averaging. This keeps the
+        result properly normalized: "ATR of the 14 most recent bullish bars" is a
+        clean average of 14 TRs.
+
+        > Zero-padding would understate volatility proportionally to how rarely the
+        > filtered candle type appears — avoided by design.
 
         ### Code Examples
 
-        **curl:**
+        **curl — standard 14-bar ATR:**
         ```bash
         curl -X PUT http://localhost:3000/atr/config \
           -H 'Content-Type: application/json' \
@@ -1428,13 +1440,26 @@ paths:
           }'
         ```
 
-        **JavaScript:**
+        **curl — bullish-only body ATR for long-side sizing:**
+        ```bash
+        curl -X PUT http://localhost:3000/atr/config \
+          -H 'Content-Type: application/json' \
+          -d '{
+            "barsAtrMode": 1,
+            "barBase": "BASE_OPENCLOSE",
+            "slMultiplier": 1.5
+          }'
+        ```
+
+        **JavaScript — asymmetric volatility config:**
         ```javascript
         await fetch('http://localhost:3000/atr/config', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            period: 20, method: 1,  // 20-bar SMA-based ATR
+            period: 20, method: 1,        // 20-bar SMA-based ATR
+            barsAtrMode: 1,               // only bullish bars
+            barBase: 'BASE_OPENCLOSE',    // body range only
             slMultiplier: 2.0, tpMultiplier: 3.0,
           }),
         });
@@ -1457,6 +1482,8 @@ paths:
               trailBeginMultiplier: 1.0
               trailDistMultiplier: 0.8
               onlyWhenFlat: false
+              barsAtrMode: 0
+              barBase: BASE_HILO
       responses:
         '200':
           $ref: '#/components/responses/Ok'
@@ -3249,6 +3276,48 @@ components:
         RMA gives more weight to recent values and reacts faster to volatility changes.
         SMA is smoother and less sensitive to spikes.
 
+    BarsAtrMode:
+      type: integer
+      enum: [0, 1, -1]
+      description: |
+        Controls which candles are included when computing ATR.
+
+        | Value | Name      | Behaviour |
+        |-------|-----------|-----------|
+        | `0`   | Normal    | All bars contribute (default, standard ATR) |
+        | `1`   | Bullish   | Only bullish bars (close > open) contribute |
+        | `-1`  | Bearish   | Only bearish bars (close < open) contribute |
+
+        **Design note — collect N qualifying bars, not zero-pad:**
+        When a filter is active, the engine scans further back in history to collect
+        exactly `period` qualifying TRs before averaging. This keeps the ATR value
+        properly normalized: "ATR of the 14 most recent bullish bars" is a clean
+        average of 14 TRs. Zero-padding would dilute the average proportionally to
+        how rarely the filtered candle type appears, understating volatility.
+
+        **Use cases:**
+        - `Bullish` ATR for long-side SL sizing — measures only up-move volatility
+        - `Bearish` ATR for short-side SL sizing — measures only down-move volatility
+        - Asymmetric SL/TP when market shows directional volatility bias
+
+    BarBase:
+      type: string
+      enum: [BASE_HILO, BASE_OPENCLOSE]
+      description: |
+        Which price range forms the base of each True Range (TR) measurement.
+
+        | Value             | Formula                          | Use case |
+        |-------------------|----------------------------------|----------|
+        | `BASE_HILO`       | max(H-L, \|H-prevC\|, \|L-prevC\|) | Standard ATR — default, accounts for gaps |
+        | `BASE_OPENCLOSE`  | \|Open - Close\|                   | Body-only ATR — ignores wicks and gaps |
+
+        **When to use `BASE_OPENCLOSE`:**
+        Use body-only ATR when you care about *directional conviction* rather than
+        total candle range. A long-wick doji has a large H-L but a tiny body — in
+        standard ATR it inflates volatility even though no directional move occurred.
+        Body ATR filters that noise: only candles with real open→close displacement
+        contribute meaningful TR.
+
     LimitConfirm:
       type: string
       enum: [LIMIT_CONFIRM_NONE, LIMIT_CONFIRM_WICK, LIMIT_CONFIRM_WICKBREAK, LIMIT_CONFIRM_WICKCOLOR]
@@ -3668,6 +3737,8 @@ components:
         trailBeginMultiplier: { type: number, minimum: 0, example: 1.0, description: "Trail activation threshold = ATR * trailBeginMultiplier" }
         trailDistMultiplier:  { type: number, minimum: 0, example: 0.8, description: "Trail distance = ATR * trailDistMultiplier" }
         onlyWhenFlat:         { type: boolean, description: "Only apply ATR-based offsets when opening new positions (not on existing)" }
+        barsAtrMode:          { $ref: '#/components/schemas/BarsAtrMode' }
+        barBase:              { $ref: '#/components/schemas/BarBase' }
 
     PostScaledOrdersBody:
       type: object

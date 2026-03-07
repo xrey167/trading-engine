@@ -35,6 +35,21 @@ export type TrailMode = (typeof TrailMode)[keyof typeof TrailMode];
 export const AtrMethod = { Sma: 0, Ema: 1 } as const;
 export type AtrMethod = (typeof AtrMethod)[keyof typeof AtrMethod];
 
+/** Filter which candles contribute to ATR calculation */
+export const BarsAtrMode = {
+  Normal:  0,  // all bars (default)
+  Bullish: 1,  // only bullish bars (close > open)
+  Bearish: -1, // only bearish bars (close < open)
+} as const;
+export type BarsAtrMode = (typeof BarsAtrMode)[keyof typeof BarsAtrMode];
+
+/** Which price range forms the base of each TR measurement */
+export const BarBase = {
+  HiLo:       'BASE_HILO',       // High - Low  (standard True Range, default)
+  OpenClose:  'BASE_OPENCLOSE',  // |Open - Close|  (body range only)
+} as const;
+export type BarBase = (typeof BarBase)[keyof typeof BarBase];
+
 export const OrderAttr = {
   OCO:  'ORDER_ATTR_OCO',   // One Cancels Other — fill cancels all other pending orders
   CO:   'ORDER_ATTR_CO',    // Cancel Others on fill — cancel same-side pending orders
@@ -172,11 +187,23 @@ export class Bars {
     return cnt === 0 ? 0 : sum / cnt;
   }
 
-  atr(periods: number, shift = 0, method: AtrMethod = AtrMethod.Sma): number {
+  atr(
+    periods: number,
+    shift = 0,
+    method: AtrMethod = AtrMethod.Sma,
+    barsMode: BarsAtrMode = BarsAtrMode.Normal,
+    barBase: BarBase = BarBase.HiLo,
+  ): number {
     const trs: number[] = [];
-    for (let i = shift; i < shift + periods && i + 1 < this.data.length; i++) {
-      const c = this.data[i], p = this.data[i + 1];
-      trs.push(Math.max(c.high - c.low, Math.abs(c.high - p.close), Math.abs(c.low - p.close)));
+    for (let i = shift; trs.length < periods && i + 1 < this.data.length; i++) {
+      const c = this.data[i];
+      if (barsMode === BarsAtrMode.Bullish && c.close <= c.open) continue;
+      if (barsMode === BarsAtrMode.Bearish && c.close >= c.open) continue;
+      const p = this.data[i + 1];
+      const tr = barBase === BarBase.OpenClose
+        ? Math.abs(c.close - c.open)
+        : Math.max(c.high - c.low, Math.abs(c.high - p.close), Math.abs(c.low - p.close));
+      trs.push(tr);
     }
     if (trs.length === 0) return 0;
     if (method === AtrMethod.Sma) return trs.reduce((a, b) => a + b, 0) / trs.length;
@@ -1423,6 +1450,17 @@ export interface AtrModuleConfig {
    * When false: update every bar regardless.
    */
   onlyWhenFlat: boolean;
+  /**
+   * Filter which bar types contribute to ATR calculation.
+   * Normal = all bars, Bullish = only up-bars, Bearish = only down-bars.
+   */
+  barsAtrMode: BarsAtrMode;
+  /**
+   * Which price range forms each TR measurement.
+   * HiLo = standard True Range (High-Low + prev-close gaps).
+   * OpenClose = body range only (|Open - Close|).
+   */
+  barBase: BarBase;
 }
 
 /**
@@ -1439,7 +1477,7 @@ export class AtrModule {
   ) {}
 
   onBar(bars: Bars): void {
-    const atrPrice = bars.atr(this.cfg.period, this.cfg.shift, this.cfg.method);
+    const atrPrice = bars.atr(this.cfg.period, this.cfg.shift, this.cfg.method, this.cfg.barsAtrMode, this.cfg.barBase);
     if (atrPrice === 0) return;
     const atrPts = this.symbol.priceToPoints(atrPrice);
 

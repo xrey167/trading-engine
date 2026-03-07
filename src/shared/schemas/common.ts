@@ -27,6 +27,17 @@ export const AtrMethodSchema = Type.Union([
   Type.Literal(1),
 ]);
 
+export const BarsAtrModeSchema = Type.Union([
+  Type.Literal(0),   // Normal
+  Type.Literal(1),   // Bullish
+  Type.Literal(-1),  // Bearish
+]);
+
+export const BarBaseSchema = Type.Union([
+  Type.Literal('BASE_HILO'),
+  Type.Literal('BASE_OPENCLOSE'),
+]);
+
 // Named order attributes — combinable flags that modify fill behaviour.
 export const OrderAttrSchema = Type.Union([
   Type.Literal('ORDER_ATTR_OCO'),   // One Cancels Other — fill cancels all other pending orders

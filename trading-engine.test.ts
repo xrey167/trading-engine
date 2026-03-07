@@ -14,7 +14,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   TradingEngine, Bars, SymbolInfo, Candle,
-  AtrMethod, TrailMode, Side, LimitConfirm,
+  AtrMethod, BarsAtrMode, BarBase, TrailMode, Side, LimitConfirm,
   checkSLTP, calcTrailingSL,
   ScaledOrderEngine, AtrModule,
   evaluateCandleATR03,
@@ -983,6 +983,8 @@ describe('P17 – AtrModule.onBar applies ATR-scaled SL offset to engine', () =>
       slMultiplier: 2, tpMultiplier: 0,
       trailBeginMultiplier: 0, trailDistMultiplier: 0,
       onlyWhenFlat: false,
+      barsAtrMode: BarsAtrMode.Normal,
+      barBase: BarBase.HiLo,
     };
     const mod = new AtrModule(cfg, eng, EURUSD5);
     mod.onBar(bars);           // sets sl(200) on the engine
@@ -1019,6 +1021,8 @@ describe('P18 – AtrModule.onBar onlyWhenFlat=true skips SL update when positio
       slMultiplier: 3, tpMultiplier: 0,
       trailBeginMultiplier: 0, trailDistMultiplier: 0,
       onlyWhenFlat: true,
+      barsAtrMode: BarsAtrMode.Normal,
+      barBase: BarBase.HiLo,
     };
     const mod = new AtrModule(cfg, eng, EURUSD5);
     mod.onBar(bars);  // position is open → update skipped
