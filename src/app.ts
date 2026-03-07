@@ -17,6 +17,7 @@ import type { BridgeableEvent } from './shared/lib/redis-event-bridge.js';
 import { createAmqpClient, closeAmqpClient } from './shared/lib/amqp-client.js';
 import { AmqpEventBridge } from './shared/lib/amqp-event-bridge.js';
 import { AuditConsumer } from './audit/audit-consumer.js';
+import { createDatabase, OrderWriter } from './shared/db/index.js';
 import { TypedEventBus } from './shared/event-bus.js';
 import type { AppEventMap } from './shared/services/event-map.js';
 import { ServiceRegistry } from './shared/services/service-registry.js';
@@ -157,6 +158,13 @@ export async function buildApp(
 
   // 1c. Bar cache — Redis-backed if REDIS_URL is set, otherwise in-memory
   const logger = toLogger(app.log);
+
+  // 1c.0 PostgreSQL persistence — wires OrderWriter when DATABASE_URL is set
+  const db = createDatabase(logger);
+  if (db) {
+    new OrderWriter(db.db, app.emitter, logger);
+  }
+
   const redis = createRedisClient(logger);
   const barCache: IBarCache = redis ? new RedisBarCache(redis, logger) : new InMemoryBarCache();
   app.decorate('barCache', barCache);
