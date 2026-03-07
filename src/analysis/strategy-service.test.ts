@@ -55,7 +55,7 @@ describe('StrategyService', () => {
     await svc.stop();
   });
 
-  it('emits signal on bar when evaluateOnBar is true', async () => {
+  it('evaluates on normalized_bar when evaluateOnBar is true', async () => {
     const bus = new TypedEventBus<AppEventMap>();
     const signals: SignalEvent[] = [];
     bus.on('signal', (e) => signals.push(e));
@@ -66,10 +66,13 @@ describe('StrategyService', () => {
     );
     await svc.start();
 
-    // Emit a bar event
-    bus.emit('bar', {
-      type: 'bar',
+    // Emit a normalized_bar event (StrategyService no longer subscribes to raw bar)
+    bus.emit('normalized_bar', {
+      providerId: 'dp:internal',
+      symbol: 'EURUSD',
+      timeframe: 'H1',
       bar: { open: 1.1, high: 1.12, low: 1.09, close: 1.11, time: '2024-01-01T00:00:00Z' },
+      timestamp: new Date().toISOString(),
     });
 
     // Wait for async handler
@@ -80,7 +83,7 @@ describe('StrategyService', () => {
     await svc.stop();
   });
 
-  it('does NOT subscribe to bar events when evaluateOnBar is false', async () => {
+  it('does NOT subscribe to normalized_bar when evaluateOnBar is false', async () => {
     const bus = new TypedEventBus<AppEventMap>();
     const signals: SignalEvent[] = [];
     bus.on('signal', (e) => signals.push(e));
@@ -91,9 +94,12 @@ describe('StrategyService', () => {
     );
     await svc.start();
 
-    bus.emit('bar', {
-      type: 'bar',
+    bus.emit('normalized_bar', {
+      providerId: 'dp:internal',
+      symbol: 'EURUSD',
+      timeframe: 'H1',
       bar: { open: 1.1, high: 1.12, low: 1.09, close: 1.11, time: '2024-01-01T00:00:00Z' },
+      timestamp: new Date().toISOString(),
     });
 
     await new Promise(r => setTimeout(r, 50));

@@ -150,6 +150,11 @@ export async function buildApp(
   await internalProvider.start();
   serviceRegistry.register(internalProvider);
 
+  // 1d. Graceful shutdown — stop all registered services
+  app.addHook('onClose', async () => {
+    await serviceRegistry.stopAll();
+  });
+
   // 4. Global error handler
   app.setErrorHandler((err: Error & { statusCode?: number }, _request, reply) => {
     app.log.error(err);

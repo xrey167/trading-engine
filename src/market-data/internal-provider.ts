@@ -28,6 +28,7 @@ export class InternalProvider extends BaseService {
   }
 
   protected async onStart(): Promise<void> {
+    this.eventBus.off('bar', this.handleBar); // idempotent: prevent double-registration
     this.eventBus.on('bar', this.handleBar);
   }
 
