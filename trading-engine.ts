@@ -1096,6 +1096,9 @@ function emptySlot(side: Side): PositionSlot {
 // Closed-trade record — ported from CSEADeal in SEA_OrderManagement.mqh
 // ─────────────────────────────────────────────────────────────
 
+/** Maximum number of deal records retained before oldest entries are discarded. */
+const MAX_DEALS = 10_000;
+
 export interface DealRecord {
   id:          number;
   side:        Side;
@@ -1218,6 +1221,9 @@ export class TradingEngine {
   // Spread cache
   private _spreadAbs = 0;
 
+  // Last bar timestamp — used for deterministic deal close-time in _closeSlot
+  private _lastBarTime: Date = new Date(0);
+
   // Deal history and statistics — ported from CSEADeal / SDealStats
   private _deals: DealRecord[] = [];
   private _dealSeq = 0;
@@ -1254,6 +1260,7 @@ export class TradingEngine {
    */
   async onBar(bar: Bar, bars: Bars): Promise<void> {
     this._spreadAbs = await this.broker.getSpread(this.symbol.name);
+    this._lastBarTime = bar.time;
 
     await this._updateTrailingEntryOrders(bar, bars);
 
@@ -1891,7 +1898,7 @@ export class TradingEngine {
   private async _closeSlot(slot: PositionSlot, info?: string): Promise<boolean> {
     if (slot.size === 0) return false;
     const r = await this.broker.closePosition(slot.side, slot.size, info);
-    this._recordDeal(slot, r.price, info ?? 'market', new Date());
+    this._recordDeal(slot, r.price, info ?? 'market', this._lastBarTime);
     this._resetSlot(slot);
     return true;
   }
@@ -2040,12 +2047,15 @@ export class TradingEngine {
       mfe:         Math.max(0, slot.mfe),
     };
     this._deals.push(deal);
+    if (this._deals.length > MAX_DEALS) this._deals = this._deals.slice(-MAX_DEALS);
     this._updateStats(deal);
   }
 
   private _updateStats(deal: DealRecord): void {
     this._stats.totalDeals++;
     this._stats.netPLPts       += deal.plPoints;
+    // Note: incremental float addition can accumulate rounding drift over thousands of deals.
+    // Acceptable for backtest precision; use Kahan summation if sub-pip accuracy is required.
     this._runningEquityPts     += deal.plPoints;
     if (deal.plPoints > 0) {
       this._stats.winningDeals++;
