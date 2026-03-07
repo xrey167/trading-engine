@@ -112,6 +112,7 @@ const ordersRoute: FastifyPluginAsync = async (fastify) => {
 
   // POST /orders/bracket — place a bracket order (Unit 4)
   fastify.post<{ Body: PostBracketBody }>('/orders/bracket', {
+    preHandler: [apiKeyPreHandler],
     schema: {
       body: PostBracketBodySchema,
       response: {
@@ -127,6 +128,7 @@ const ordersRoute: FastifyPluginAsync = async (fastify) => {
 
   // PATCH /orders/:id — move order to a new price
   fastify.patch<{ Params: { id: string }; Body: PatchOrderBody }>('/orders/:id', {
+    preHandler: [apiKeyPreHandler],
     schema: {
       params: Type.Object({ id: Type.String() }),
       body: PatchOrderBodySchema,
