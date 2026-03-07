@@ -2904,6 +2904,123 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+  /openbb/equity-curve:
+    get:
+      tags: [OpenBB]
+      summary: Equity curve (Highcharts widget)
+      description: |
+        Returns a Highcharts configuration object with equity and balance time-series
+        data from periodic account snapshots stored in PostgreSQL.
+
+        Supports filtering by date range, strategy name, and asset type.
+        When `DATABASE_URL` is not configured, returns an empty chart with a
+        descriptive title.
+
+        Widget type: `chart-highcharts`
+      operationId: getOpenBBEquityCurve
+      parameters:
+        - $ref: '#/components/parameters/ApiKey'
+        - name: from
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+          description: Start of date range filter (ISO 8601)
+        - name: to
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+          description: End of date range filter (ISO 8601)
+        - name: strategy
+          in: query
+          required: false
+          schema: { type: string }
+          description: Filter snapshots by strategy name (e.g. `candle-atr`)
+        - name: assetType
+          in: query
+          required: false
+          schema: { type: string, enum: [forex, crypto, metals, energy, indices] }
+          description: Filter snapshots by asset type
+      responses:
+        '200':
+          description: Highcharts area chart configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HighchartsConfig'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /openbb/signals:
+    get:
+      tags: [OpenBB]
+      summary: Strategy signals feed (live grid)
+      description: |
+        Returns recent strategy signal events from an in-memory ring buffer
+        (last 200 signals). Signals are captured from the event bus whenever
+        a strategy service emits a `signal` event.
+
+        Supports SSRM pagination for AG Grid integration.
+
+        Widget type: `live_grid` with 3-second refresh.
+      operationId: getOpenBBSignals
+      parameters:
+        - $ref: '#/components/parameters/ApiKey'
+        - $ref: '#/components/parameters/SSRMStartRow'
+        - $ref: '#/components/parameters/SSRMEndRow'
+        - $ref: '#/components/parameters/SSRMSortModel'
+        - $ref: '#/components/parameters/SSRMFilterModel'
+      responses:
+        '200':
+          description: Signal rows or SSRM envelope
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: array
+                    items:
+                      $ref: '#/components/schemas/SignalRow'
+                  - $ref: '#/components/schemas/SSRMEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /openbb/audit:
+    get:
+      tags: [OpenBB]
+      summary: Audit trail (SSRM table)
+      description: |
+        Returns audit events from the `AuditConsumer` ring buffer (last 500 events).
+        When no `RABBITMQ_URL` is configured, the audit consumer is not available
+        and this endpoint returns an empty array.
+
+        Supports optional type filter and SSRM pagination.
+
+        Widget type: `table` with 5-second refresh.
+      operationId: getOpenBBAudit
+      parameters:
+        - $ref: '#/components/parameters/ApiKey'
+        - name: type
+          in: query
+          required: false
+          schema: { type: string }
+          description: Filter by event type (e.g. `order`, `risk`, `signal`)
+        - $ref: '#/components/parameters/SSRMStartRow'
+        - $ref: '#/components/parameters/SSRMEndRow'
+        - $ref: '#/components/parameters/SSRMSortModel'
+        - $ref: '#/components/parameters/SSRMFilterModel'
+      responses:
+        '200':
+          description: Audit event rows or SSRM envelope
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: array
+                    items:
+                      $ref: '#/components/schemas/AuditEventRow'
+                  - $ref: '#/components/schemas/SSRMEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
   # ─────────────────────────────────────────────────────────────
   # Skills (Agent SDK)
   # ─────────────────────────────────────────────────────────────
@@ -4728,6 +4845,58 @@ components:
         lastRow:
           type: integer
       required: [rows, lastRow]
+
+    HighchartsConfig:
+      type: object
+      description: Highcharts chart configuration object for equity curve rendering
+      required: [chart, title, xAxis, series]
+      properties:
+        chart:
+          type: object
+          properties:
+            type: { type: string, enum: [area], description: "Highcharts chart type" }
+        title:
+          type: object
+          properties:
+            text: { type: string, description: "Chart title" }
+        xAxis:
+          type: object
+          properties:
+            type: { type: string, enum: [datetime], description: "Axis type" }
+        series:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string, description: "Series label (Equity or Balance)" }
+              data:
+                type: array
+                items:
+                  type: array
+                  items: { type: number }
+                  minItems: 2
+                  maxItems: 2
+                description: "[timestamp_ms, value] data points"
+
+    SignalRow:
+      type: object
+      description: A strategy signal event captured from the event bus
+      required: [strategy, symbol, action, confidence, timestamp]
+      properties:
+        strategy:   { type: string, description: "Strategy service ID that emitted the signal" }
+        symbol:     { type: string, description: "Trading symbol (e.g. EURUSD)" }
+        action:     { type: string, enum: [BUY, SELL, HOLD], description: "Signal direction" }
+        confidence: { type: number, minimum: 0, maximum: 1, description: "Signal confidence score" }
+        timestamp:  { type: string, format: date-time, description: "When the signal was emitted" }
+
+    AuditEventRow:
+      type: object
+      description: An audit trail event from the RabbitMQ audit consumer
+      required: [type, payload, timestamp]
+      properties:
+        type:      { type: string, description: "Event type (e.g. order, risk, signal)" }
+        payload:   { type: object, additionalProperties: true, description: "Full event payload" }
+        timestamp: { type: string, format: date-time, description: "When the event was published" }
 
   securitySchemes:
     ApiKeyHeader:

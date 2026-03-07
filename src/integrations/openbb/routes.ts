@@ -13,12 +13,46 @@ import {
   OpenBBDealRowSchema,
   OpenBBOmniContentSchema,
   OpenBBOrderEventRowSchema,
+  OpenBBSignalRowSchema,
+  OpenBBAuditRowSchema,
+  HighchartsConfigSchema,
   SSRMQuerySchema,
   SSRMResponseSchema,
 } from './schemas.js';
 import { PendingOrderSchema } from '../../trading/schemas.js';
 import { SymbolInfoVOSchema } from '../../shared/domain/account.js';
 import { applySSRM, type SSRMParams } from '../../shared/lib/ssrm.js';
+import type { SignalEvent } from '../../shared/services/event-map.js';
+
+// ─── Signal ring buffer ─────────────────────────────────────────────────────
+
+interface SignalRow {
+  strategy: string;
+  symbol: string;
+  action: 'BUY' | 'SELL' | 'HOLD';
+  confidence: number;
+  timestamp: string;
+}
+
+class SignalBuffer {
+  private readonly buf: SignalRow[] = [];
+  constructor(private readonly max = 200) {}
+
+  push(event: SignalEvent): void {
+    this.buf.push({
+      strategy: event.serviceId,
+      symbol: event.symbol,
+      action: event.action,
+      confidence: event.confidence,
+      timestamp: event.timestamp,
+    });
+    if (this.buf.length > this.max) this.buf.shift();
+  }
+
+  getAll(): SignalRow[] {
+    return [...this.buf];
+  }
+}
 
 // ─── Discovery configs ───────────────────────────────────────────────────────
 
@@ -100,6 +134,54 @@ const WIDGETS_CONFIG = {
     type: 'table',
     params: [],
   },
+  tradingview_chart: {
+    name: 'TradingView Chart',
+    description: 'Interactive candlestick chart with indicators',
+    category: 'Market Data',
+    type: 'advanced-chart',
+    endpoint: '/udf',
+    gridDimensions: { w: 20, h: 12 },
+    data: { defaultSymbol: 'EURUSD' },
+    parameters: [],
+  },
+  equity_curve: {
+    name: 'Equity Curve',
+    description: 'Historical equity and balance over time',
+    category: 'Account',
+    type: 'chart-highcharts',
+    endpoint: '/openbb/equity-curve',
+    gridDimensions: { w: 10, h: 6 },
+    parameters: [
+      { paramName: 'from', label: 'From', type: 'date', show: true, optional: true, value: '' },
+      { paramName: 'to',   label: 'To',   type: 'date', show: true, optional: true, value: '' },
+      { paramName: 'strategy', label: 'Strategy', type: 'text', show: true, optional: true, value: '' },
+      { paramName: 'assetType', label: 'Asset Type', type: 'text', show: true, optional: true, value: '' },
+    ],
+  },
+  audit_events: {
+    name: 'Audit Trail',
+    description: 'Event audit log from RabbitMQ bridge',
+    category: 'Infrastructure',
+    type: 'table',
+    endpoint: '/openbb/audit',
+    gridDimensions: { w: 10, h: 6 },
+    ssrm: true,
+    refetchInterval: 5000,
+    parameters: [
+      { paramName: 'type', label: 'Event Type', type: 'text', show: true, optional: true, value: '' },
+    ],
+  },
+  signal_feed: {
+    name: 'Strategy Signals',
+    description: 'Live feed of strategy signal evaluations',
+    category: 'Analysis',
+    type: 'live_grid',
+    endpoint: '/openbb/signals',
+    gridDimensions: { w: 8, h: 5 },
+    refetchInterval: 3000,
+    ssrm: true,
+    parameters: [],
+  },
 };
 
 const APPS_CONFIG = {
@@ -109,17 +191,25 @@ const APPS_CONFIG = {
     tabs: {
       Overview: {
         layout: [
-          { i: 'account_equity',   x: 0, y: 0, w: 2, h: 2 },
-          { i: 'account_balance',  x: 2, y: 0, w: 2, h: 2 },
-          { i: 'engine_positions', x: 0, y: 2, w: 8, h: 5 },
-          { i: 'pending_orders',   x: 8, y: 0, w: 6, h: 4 },
-          { i: 'engine_config',    x: 8, y: 4, w: 4, h: 4 },
+          { i: 'account_equity',    x: 0,  y: 0, w: 2,  h: 2 },
+          { i: 'account_balance',   x: 2,  y: 0, w: 2,  h: 2 },
+          { i: 'engine_positions',  x: 0,  y: 2, w: 8,  h: 5 },
+          { i: 'pending_orders',    x: 8,  y: 0, w: 6,  h: 4 },
+          { i: 'engine_config',     x: 8,  y: 4, w: 4,  h: 4 },
+          { i: 'tradingview_chart', x: 0,  y: 7, w: 20, h: 12 },
         ],
       },
       History: {
         layout: [
-          { i: 'deal_history', x: 0, y: 0, w: 8, h: 5 },
-          { i: 'symbol_info',  x: 8, y: 0, w: 6, h: 3 },
+          { i: 'deal_history',  x: 0, y: 0, w: 8,  h: 5 },
+          { i: 'symbol_info',   x: 8, y: 0, w: 6,  h: 3 },
+          { i: 'equity_curve',  x: 0, y: 5, w: 10, h: 6 },
+        ],
+      },
+      Signals: {
+        layout: [
+          { i: 'signal_feed',   x: 0, y: 0, w: 8,  h: 5 },
+          { i: 'audit_events',  x: 8, y: 0, w: 10, h: 6 },
         ],
       },
     },
@@ -416,6 +506,112 @@ const openbbRoute: FastifyPluginAsync = async (fastify) => {
     }));
 
     return reply.send({ rows: mapped, lastRow });
+  });
+
+  // ── Equity Curve (Highcharts) ─────────────────────────────────────────────
+
+  const EquityCurveQuerySchema = Type.Object({
+    from:      Type.Optional(Type.String()),
+    to:        Type.Optional(Type.String()),
+    strategy:  Type.Optional(Type.String()),
+    assetType: Type.Optional(Type.String()),
+    apiKey:    Type.Optional(Type.String()),
+  });
+
+  fastify.get('/openbb/equity-curve', {
+    schema: {
+      querystring: EquityCurveQuerySchema,
+      response: { 200: HighchartsConfigSchema },
+    },
+  }, async (req, reply) => {
+    reply.header('Cache-Control', 'private, max-age=30');
+    const { from, to, strategy, assetType } = req.query as {
+      from?: string; to?: string; strategy?: string; assetType?: string;
+    };
+    const sw = fastify.snapshotWriter;
+    if (!sw) {
+      return reply.send({
+        chart: { type: 'area' },
+        title: { text: 'Equity Curve (no DATABASE_URL)' },
+        xAxis: { type: 'datetime' },
+        series: [],
+      });
+    }
+    const snapshots = await sw.getSnapshots({
+      from: from ? new Date(from) : undefined,
+      to: to ? new Date(to) : undefined,
+      strategy: strategy || undefined,
+      assetType: assetType || undefined,
+    });
+    const equityData = snapshots.map(s => [s.timestamp.getTime(), s.equity]);
+    const balanceData = snapshots.map(s => [s.timestamp.getTime(), s.balance]);
+    return reply.send({
+      chart: { type: 'area' },
+      title: { text: 'Equity Curve' },
+      xAxis: { type: 'datetime' },
+      series: [
+        { name: 'Equity', data: equityData },
+        { name: 'Balance', data: balanceData },
+      ],
+    });
+  });
+
+  // ── Audit Events ──────────────────────────────────────────────────────────
+
+  const AuditQuerySchema = Type.Intersect([
+    SSRMQuerySchema,
+    Type.Object({
+      type:   Type.Optional(Type.String()),
+      apiKey: Type.Optional(Type.String()),
+    }),
+  ]);
+
+  fastify.get('/openbb/audit', {
+    schema: {
+      querystring: AuditQuerySchema,
+      response: { 200: Type.Union([Type.Array(OpenBBAuditRowSchema), SSRMResponseSchema(OpenBBAuditRowSchema)]) },
+    },
+  }, async (req, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    const { type } = req.query as { type?: string };
+    const consumer = fastify.auditConsumer;
+    if (!consumer) return reply.send([]);
+    const events = consumer.query({ type: type || undefined, limit: 500 });
+    const rows = events.map(e => ({
+      type: e.type,
+      payload: e.payload,
+      timestamp: e.timestamp,
+    }));
+    const q = req.query as SSRMParams;
+    if (q.startRow != null || q.endRow != null || q.sortModel || q.filterModel) {
+      return reply.send(applySSRM(rows as Record<string, unknown>[], q));
+    }
+    return reply.send(rows);
+  });
+
+  // ── Strategy Signals ──────────────────────────────────────────────────────
+
+  const signalBuffer = new SignalBuffer(200);
+  fastify.emitter.on('signal', (event) => signalBuffer.push(event));
+
+  const SignalsQuerySchema = Type.Intersect([
+    SSRMQuerySchema,
+    Type.Object({ apiKey: Type.Optional(Type.String()) }),
+  ]);
+
+  fastify.get('/openbb/signals', {
+    schema: {
+      querystring: SignalsQuerySchema,
+      response: { 200: Type.Union([Type.Array(OpenBBSignalRowSchema), SSRMResponseSchema(OpenBBSignalRowSchema)]) },
+    },
+  }, async (req, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    const rows = signalBuffer.getAll();
+    const q = req.query as SSRMParams;
+    if (q.startRow != null || q.endRow != null || q.sortModel || q.filterModel) {
+      return reply.send(applySSRM(rows as unknown as Record<string, unknown>[], q));
+    }
+    return reply.send(rows);
   });
 };
 

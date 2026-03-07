@@ -8,7 +8,11 @@ import { SymbolInfoForex } from '../trading-engine.js';
 import { PaperBroker } from './broker/paper/paper-broker.js';
 import { InMemoryBarCache } from './market-data/bar-cache.js';
 import { RedisBarCache } from './market-data/redis-bar-cache.js';
+import { PostgresBarCache } from './market-data/pg-bar-cache.js';
 import type { IBarCache } from './market-data/data-provider-types.js';
+import { createDatabase } from './shared/db/client.js';
+import { DealWriter } from './shared/db/deal-writer.js';
+import { SnapshotWriter } from './shared/db/snapshot-writer.js';
 import { InternalProvider } from './market-data/internal-provider.js';
 import { toLogger } from './shared/lib/logger.js';
 import { createRedisClient } from './shared/lib/redis-client.js';
@@ -156,7 +160,7 @@ export async function buildApp(
   await primaryBrokerService.start();
   serviceRegistry.register(primaryBrokerService);
 
-  // 1c. Bar cache — Redis-backed if REDIS_URL is set, otherwise in-memory
+  // 1c. Bar cache — Postgres > Redis > in-memory cascade
   const logger = toLogger(app.log);
 
   // 1c.0 PostgreSQL persistence — wires OrderWriter when DATABASE_URL is set
@@ -166,14 +170,23 @@ export async function buildApp(
   }
 
   const redis = createRedisClient(logger);
-  const barCache: IBarCache = redis ? new RedisBarCache(redis, logger) : new InMemoryBarCache();
-  app.decorate('barCache', barCache);
+  const database = createDatabase(logger);
 
-  // If Redis available, hydrate cache from previous session
-  if (barCache instanceof RedisBarCache) {
-    const count = await barCache.hydrate(pair, 'M1');
+  let barCache: IBarCache;
+  if (database) {
+    const pgCache = new PostgresBarCache(database.db, logger);
+    const count = await pgCache.hydrate(pair, 'M1');
+    if (count > 0) app.log.info(`Hydrated ${count} bars from Postgres for ${pair}:M1`);
+    barCache = pgCache;
+  } else if (redis) {
+    const redisCache = new RedisBarCache(redis, logger);
+    const count = await redisCache.hydrate(pair, 'M1');
     if (count > 0) app.log.info(`Hydrated ${count} bars from Redis for ${pair}:M1`);
+    barCache = redisCache;
+  } else {
+    barCache = new InMemoryBarCache();
   }
+  app.decorate('barCache', barCache);
 
   // 1c.2 Internal data provider (bridges bar → normalized_bar)
   const internalProvider = new InternalProvider(pair, 'M1', barCache, emitter, logger);
@@ -211,10 +224,19 @@ export async function buildApp(
 
     // Dedicated channel for audit consumer — channel failures are isolated per concern
     const auditChannel = await amqpClient.connection.createConfirmChannel();
-    auditConsumer = new AuditConsumer(auditChannel, logger);
+    auditConsumer = new AuditConsumer(auditChannel, logger, { db: database?.db });
     await auditConsumer.start();
   }
   app.decorate('auditConsumer', auditConsumer);
+
+  // 1c.3b. PostgreSQL persistence (optional — falls back to in-memory when DATABASE_URL unset)
+  let snapshotWriter: SnapshotWriter | null = null;
+  if (database) {
+    new DealWriter(database.db, emitter, logger);
+    snapshotWriter = new SnapshotWriter(database.db, broker, logger);
+    snapshotWriter.start(60_000, emitter);
+  }
+  app.decorate('snapshotWriter', snapshotWriter);
 
   // 1c.4 Manager services (risk → saga → order-manager)
   const riskManager = new RiskManagerService(
@@ -247,9 +269,11 @@ export async function buildApp(
     if (redisBridge) await redisBridge.stop();
     if (amqpBridge) await amqpBridge.stop();
     if (auditConsumer) await auditConsumer.stop();
+    if (snapshotWriter) snapshotWriter.stop();
     await serviceRegistry.stopAll();
     if (amqpClient) await closeAmqpClient(amqpClient, logger);
     if (redis) redis.disconnect();
+    if (database) await database.pool.end();
   });
 
   // 4. Global error handler
