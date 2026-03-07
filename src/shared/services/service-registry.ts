@@ -21,10 +21,7 @@ export class ServiceRegistry {
   get(id: string): Result<IService, DomainError> {
     const svc = this.services.get(id);
     if (!svc) {
-      return err(notFound(
-        `Service '${id}' not found. Available: [${[...this.services.keys()].join(', ')}]`,
-        id,
-      ));
+      return err(notFound(`Service '${id}' not found`, id));
     }
     return ok(svc);
   }

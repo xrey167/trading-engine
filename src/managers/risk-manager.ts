@@ -48,10 +48,12 @@ export class RiskManagerService extends BaseService {
 
   protected async onStart(): Promise<void> {
     this.eventBus.on('order', this.handleOrder);
+    this.eventBus.on('close', this.handleClose);
   }
 
   protected async onStop(): Promise<void> {
     this.eventBus.off('order', this.handleOrder);
+    this.eventBus.off('close', this.handleClose);
   }
 
   private handleOrder = (event: AppEventMap['order']): void => {
@@ -59,9 +61,11 @@ export class RiskManagerService extends BaseService {
       this.openPositionCount++;
       const current = this.symbolPositions.get(event.symbol) ?? 0;
       this.symbolPositions.set(event.symbol, current + 1);
-    } else if (event.action === 'CANCELLED' || event.action === 'REJECTED') {
-      // No position change
     }
+  };
+
+  private handleClose = (_event: AppEventMap['close']): void => {
+    if (this.openPositionCount > 0) this.openPositionCount--;
   };
 
   validateOrder(request: OrderValidationRequest): Result<RiskValidationResult, DomainError> {

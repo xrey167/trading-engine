@@ -2832,11 +2832,11 @@ paths:
                 items:
                   $ref: '#/components/schemas/ServiceSummary'
               example:
-                - id: paper-broker
+                - id: "broker:paper:primary"
                   kind: BROKER
-                  name: Paper Broker
+                  name: paper-primary
                   status: RUNNING
-                - id: mt5-data
+                - id: "data:mt5"
                   kind: DATA_PROVIDER
                   name: MT5 Data Feed
                   status: STOPPED
@@ -2874,10 +2874,10 @@ paths:
                 error: 0
                 degraded: 0
                 services:
-                  - id: paper-broker
+                  - id: "broker:paper:primary"
                     status: RUNNING
                     error: null
-                  - id: mt5-data
+                  - id: "data:mt5"
                     status: STOPPED
                     error: null
 
@@ -2898,7 +2898,7 @@ paths:
           description: Service identifier (as returned by `GET /services`)
           schema:
             type: string
-          example: paper-broker
+          example: "broker:paper:primary"
       responses:
         '200':
           description: Service detail with health
@@ -2907,9 +2907,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/ServiceDetail'
               example:
-                id: paper-broker
+                id: "broker:paper:primary"
                 kind: BROKER
-                name: Paper Broker
+                name: paper-primary
                 health:
                   status: RUNNING
                   lastHeartbeat: "2026-03-07T12:00:00.000Z"
@@ -2930,7 +2930,8 @@ paths:
         no-op (implementation-defined).
 
         Returns `500` if `svc.start()` throws.
-      security: []
+      security:
+        - ApiKeyAuth: []
       parameters:
         - name: id
           in: path
@@ -2938,7 +2939,7 @@ paths:
           description: Service identifier
           schema:
             type: string
-          example: mt5-data
+          example: "data:mt5"
       responses:
         '200':
           description: Service started — returns updated detail
@@ -2968,7 +2969,8 @@ paths:
         no-op (implementation-defined).
 
         Returns `500` if `svc.stop()` throws.
-      security: []
+      security:
+        - ApiKeyAuth: []
       parameters:
         - name: id
           in: path
@@ -2976,7 +2978,7 @@ paths:
           description: Service identifier
           schema:
             type: string
-          example: mt5-data
+          example: "data:mt5"
       responses:
         '200':
           description: Service stopped — returns updated detail
@@ -3007,7 +3009,8 @@ paths:
 
         The strategy must be registered in the service registry with
         `kind: STRATEGY`. Returns `400` if the service is not a strategy.
-      security: []
+      security:
+        - ApiKeyAuth: []
       parameters:
         - name: id
           in: path
@@ -3048,7 +3051,8 @@ paths:
         matches. The screener must be registered with `kind: SCREENER`.
 
         Returns `400` if the service is not a screener.
-      security: []
+      security:
+        - ApiKeyAuth: []
       parameters:
         - name: id
           in: path
@@ -3104,7 +3108,8 @@ paths:
         the order would be approved or rejected, along with the reason.
 
         Requires at least one `RISK_MANAGER` service to be registered.
-      security: []
+      security:
+        - ApiKeyAuth: []
       requestBody:
         required: true
         content:
@@ -4008,7 +4013,7 @@ components:
         id:
           type: string
           description: Unique service identifier
-          example: paper-broker
+          example: "broker:paper:primary"
         kind:
           $ref: '#/components/schemas/ServiceKind'
         name:
@@ -4050,7 +4055,7 @@ components:
       properties:
         id:
           type: string
-          example: paper-broker
+          example: "broker:paper:primary"
         kind:
           $ref: '#/components/schemas/ServiceKind'
         name:
@@ -4093,7 +4098,7 @@ components:
             properties:
               id:
                 type: string
-                example: paper-broker
+                example: "broker:paper:primary"
               status:
                 $ref: '#/components/schemas/ServiceStatus'
               error:

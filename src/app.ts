@@ -6,6 +6,7 @@ import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastif
 import websocket from '@fastify/websocket';
 import { SymbolInfo } from '../trading-engine.js';
 import { PaperBroker } from './broker/paper/paper-broker.js';
+import { toLogger } from './shared/lib/logger.js';
 import { TypedEventBus } from './shared/event-bus.js';
 import type { AppEventMap } from './shared/services/event-map.js';
 import { ServiceRegistry } from './shared/services/service-registry.js';
@@ -133,7 +134,7 @@ export async function buildApp(
   const primaryBrokerService = new BrokerService(
     { id: 'broker:paper:primary', name: 'paper-primary', broker, symbol, hedging: cfg.hedging ?? true, engine: app.engine, engineMutex: app.engineMutex },
     emitter,
-    app.log as never,
+    toLogger(app.log),
   );
   // Start the broker service — PaperBroker.connect() is idempotent
   await primaryBrokerService.start();

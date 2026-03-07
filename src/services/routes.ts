@@ -8,6 +8,7 @@ import {
 } from './schemas.js';
 import { Type } from '@sinclair/typebox';
 import { ErrorResponseSchema } from '../shared/schemas/common.js';
+import { apiKeyPreHandler } from '../shared/lib/api-utils.js';
 import { ServiceKind } from '../shared/services/types.js';
 import { StrategyService } from '../analysis/strategy-service.js';
 import { ScreenerService } from '../analysis/screener-service.js';
@@ -32,16 +33,16 @@ const serviceRoutes: FastifyPluginAsync = async (fastify) => {
     },
   }, async () => {
     const all = serviceRegistry.healthAll();
+    const list = serviceRegistry.list();
     return {
       total:    all.length,
       running:  all.filter(h => h.status === 'RUNNING').length,
       stopped:  all.filter(h => h.status === 'STOPPED').length,
       error:    all.filter(h => h.status === 'ERROR').length,
       degraded: all.filter(h => h.status === 'DEGRADED').length,
-      services: all.map((h, i) => {
-        const list = serviceRegistry.list();
-        return { id: list[i].id, status: h.status, error: h.error };
-      }),
+      services: all.map((h, i) => ({
+        id: list[i].id, status: h.status, error: h.error,
+      })),
     };
   });
 
@@ -70,6 +71,7 @@ const serviceRoutes: FastifyPluginAsync = async (fastify) => {
 
   // POST /services/:id/start — start a service
   fastify.post<{ Params: ServiceIdParams }>('/services/:id/start', {
+    preHandler: [apiKeyPreHandler],
     schema: {
       params: ServiceIdParamsSchema,
       response: {
@@ -99,6 +101,7 @@ const serviceRoutes: FastifyPluginAsync = async (fastify) => {
 
   // POST /services/:id/stop — stop a service
   fastify.post<{ Params: ServiceIdParams }>('/services/:id/stop', {
+    preHandler: [apiKeyPreHandler],
     schema: {
       params: ServiceIdParamsSchema,
       response: {
@@ -127,6 +130,7 @@ const serviceRoutes: FastifyPluginAsync = async (fastify) => {
   });
   // POST /services/strategies/:id/evaluate — on-demand strategy evaluation
   fastify.post<{ Params: ServiceIdParams }>('/services/strategies/:id/evaluate', {
+    preHandler: [apiKeyPreHandler],
     schema: {
       params: ServiceIdParamsSchema,
       response: {
@@ -158,6 +162,7 @@ const serviceRoutes: FastifyPluginAsync = async (fastify) => {
 
   // POST /services/screeners/:id/scan — on-demand screener scan
   fastify.post<{ Params: ServiceIdParams }>('/services/screeners/:id/scan', {
+    preHandler: [apiKeyPreHandler],
     schema: {
       params: ServiceIdParamsSchema,
       response: {
@@ -178,6 +183,7 @@ const serviceRoutes: FastifyPluginAsync = async (fastify) => {
   });
   // POST /services/risk/validate — on-demand risk validation
   fastify.post<{ Body: { symbol: string; direction: 'BUY' | 'SELL'; lots: number } }>('/services/risk/validate', {
+    preHandler: [apiKeyPreHandler],
     schema: {
       body: Type.Object({
         symbol: Type.String(),
@@ -185,7 +191,12 @@ const serviceRoutes: FastifyPluginAsync = async (fastify) => {
         lots: Type.Number({ minimum: 0 }),
       }),
       response: {
+        200: Type.Object({
+          approved: Type.Boolean(),
+          reason: Type.String(),
+        }),
         404: ErrorResponseSchema,
+        500: ErrorResponseSchema,
       },
     },
   }, async (_request, reply) => {

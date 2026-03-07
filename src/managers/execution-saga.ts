@@ -56,7 +56,7 @@ export class ExecutionSaga {
 
       // 3. Execute order via broker adapter
       const price = svc.broker.getPrice();
-      await svc.broker.placeOrder({
+      const orderResult = await svc.broker.placeOrder({
         userId: 'system',
         symbol: signal.symbol,
         direction: signal.action,
@@ -71,6 +71,22 @@ export class ExecutionSaga {
         filling: 'FOK',
         asyncMode: false,
       });
+
+      if (!orderResult.ok) {
+        this.riskManager.releaseCapacity(signal.symbol);
+        this.eventBus.emit('order', {
+          action: 'REJECTED',
+          brokerId,
+          symbol: signal.symbol,
+          direction: signal.action,
+          lots: 1,
+          price: 0,
+          metadata: { error: orderResult.error.message },
+          timestamp: new Date().toISOString(),
+        });
+        this.logger.error(`ExecutionSaga order rejected by broker: ${orderResult.error.message}`);
+        return;
+      }
 
       // 4. Emit success
       this.eventBus.emit('order', {

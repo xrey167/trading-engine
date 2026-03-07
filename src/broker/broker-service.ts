@@ -47,7 +47,10 @@ export class BrokerService extends BaseService {
   async processBar(bar: Candle, bars: Bars): Promise<void> {
     const release = await this.engineMutex.acquire();
     try {
-      this.engine.onBar(bar, bars);
+      await this.circuitBreaker.call(() => {
+        this.engine.onBar(bar, bars);
+        return Promise.resolve();
+      });
     } finally {
       release();
     }
