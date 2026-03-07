@@ -23,6 +23,7 @@ import signalRoute from './routes/signal/index.js';
 import v1PositionsRoute from './routes/v1-positions/index.js';
 import moneyManagementRoute from './routes/money-management/index.js';
 import openbbRoute from './routes/openbb/index.js';
+import skillsRoute from './routes/skills/index.js';
 import './types/index.js';
 
 const SWAGGER_UI_HTML = `<!DOCTYPE html>
@@ -90,6 +91,21 @@ export async function buildApp(
   // 5. AtrModule plugin (decorates app.atrModule + app.atrConfig)
   await app.register(atrPlugin);
 
+  // 5b. Global error handler — sanitised responses, no stack traces in production
+  app.setErrorHandler((err: Error & { statusCode?: number }, _request, reply) => {
+    app.log.error(err);
+    const statusCode = err.statusCode ?? 500;
+    const response: Record<string, unknown> = {
+      error: statusCode >= 500 ? 'Internal Server Error' : err.name,
+      message: statusCode >= 500 ? 'An internal error occurred' : err.message,
+      statusCode,
+    };
+    if (process.env.NODE_ENV !== 'production') {
+      response.stack = err.stack;
+    }
+    return reply.status(statusCode).send(response);
+  });
+
   // 6. Routes
   await app.register(positionsRoute);
   await app.register(ordersRoute);
@@ -109,7 +125,10 @@ export async function buildApp(
   // 8. OpenBB Workspace integration (widgets.json, apps.json, /openbb/* data routes)
   await app.register(openbbRoute);
 
-  // 9. API docs — /openapi.yaml (raw spec) + /docs (Swagger UI via CDN)
+  // 9. Agent SDK skills (SSE streaming, auth-gated)
+  await app.register(skillsRoute);
+
+  // 10. API docs — /openapi.yaml (raw spec) + /docs (Swagger UI via CDN)
   const __dirname = dirname(fileURLToPath(import.meta.url));
   const specPath = join(__dirname, '../../openapi.yaml');
   let specContent = '';
