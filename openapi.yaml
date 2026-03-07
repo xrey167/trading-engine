@@ -123,6 +123,40 @@ tags:
       3. The trading dashboard will appear with live position/order grids
 
       Optionally protect with an API key via `OPENBB_API_KEY` env var.
+  - name: Skills
+    description: |
+      Agent SDK skills integration — run 56+ AI-powered financial analysis and
+      research skills via HTTP. Each skill wraps a Claude Agent SDK session with
+      sandboxed permissions (`permissionMode: dontAsk`, restricted tool access).
+
+      **Authentication:** All skills routes require an `x-api-key` header. Set the
+      `API_KEY` environment variable on the server. When `API_KEY` is not set, the
+      auth check is a no-op (useful for local development).
+
+      **Streaming:** `POST /skills/{path}` returns Server-Sent Events (SSE). The
+      stream emits typed events (`init`, `text`, `tool_use`, `tool_result`,
+      `assistant`, `result`, `error`, `done`) as the agent executes.
+
+      **Rate limit:** 5 requests/minute per client on skill execution.
+
+      **Concurrency:** Each `sessionId` can only have one in-flight request. A
+      second request with the same `sessionId` returns `409 Conflict`.
+
+      **Available skill categories:**
+      - `data` — SQL, visualization, data profiling
+      - `equity-research` — earnings, coverage, screening
+      - `financial-analysis` — DCF, LBO, comps, 3-statement models
+      - `investment-banking` — CIM, deal tracking, merger models
+      - `lseg` — fixed income, FX, options, macro analysis
+      - `private-equity` — deal sourcing, returns, portfolio review
+      - `wealth-management` — financial plans, rebalancing, tax-loss harvesting
+      - `sp-global` — earnings previews, funding digests
+      - `legal` — vendor agreement checks
+      - `tools` — browser automation, model info
+
+      **Prerequisites:** The server must have `CLAUDE_CODE_OAUTH_TOKEN` or
+      `ANTHROPIC_API_KEY` set. If neither is configured, skills routes are not
+      registered and return 404.
 
 paths:
 
@@ -1908,6 +1942,230 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+  # ─────────────────────────────────────────────────────────────
+  # Skills (Agent SDK)
+  # ─────────────────────────────────────────────────────────────
+
+  /skills:
+    get:
+      tags: [Skills]
+      summary: List all available skills
+      operationId: listSkills
+      description: |
+        Returns the full catalog of available Agent SDK skills. Each entry includes
+        the REST path, the underlying skill command, its category, and a short
+        description.
+
+        Use this to discover available skills before calling `POST /skills/{path}`.
+
+        ### Authentication
+        Requires `x-api-key` header matching the server's `API_KEY` env var.
+
+        ### Code Examples
+
+        **curl:**
+        ```bash
+        curl -H 'x-api-key: your-key' http://localhost:3000/skills | jq
+        ```
+
+        **JavaScript:**
+        ```javascript
+        const res = await fetch('http://localhost:3000/skills', {
+          headers: { 'x-api-key': 'your-key' },
+        });
+        const skills = await res.json();
+        console.log(skills.map(s => `${s.path} — ${s.description}`));
+        ```
+      security:
+        - ApiKeyHeader: []
+      responses:
+        '200':
+          description: Array of available skills
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SkillListItem'
+              example:
+                - path: /skills/data/analyze
+                  command: "data:analyze"
+                  category: data
+                  description: Answer data questions
+                - path: /skills/equity-research/earnings
+                  command: "equity-research:earnings"
+                  category: equity-research
+                  description: Analyze quarterly earnings
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /skills/{path}:
+    post:
+      tags: [Skills]
+      summary: Execute a skill via SSE stream
+      operationId: runSkill
+      description: |
+        Runs an Agent SDK skill and streams the execution as Server-Sent Events.
+        The agent operates in a sandboxed environment with restricted tool access
+        (`permissionMode: dontAsk`) and limited allowed tools per skill.
+
+        ### Path Parameter
+        The `{path}` corresponds to a skill key from `GET /skills` (without the
+        `/skills/` prefix). For example, to run the earnings analysis skill, call
+        `POST /skills/equity-research/earnings`.
+
+        ### Session Management
+        - Omit `sessionId` to start a new session (the `init` event returns the ID)
+        - Pass a previous `sessionId` to resume a conversation
+        - Only one request per `sessionId` can be in-flight at a time (409 on conflict)
+
+        ### SSE Event Types
+
+        | Event          | Data Shape                                         | Description                                     |
+        |----------------|----------------------------------------------------|-------------------------------------------------|
+        | `init`         | `{ sessionId, tools }`                             | Session initialized, lists available tools       |
+        | `text`         | `{ text }`                                         | Incremental text delta from the assistant        |
+        | `tool_input`   | `{ partial_json }`                                 | Streaming tool input JSON delta                  |
+        | `tool_use`     | `[{ tool, input }]`                                | Complete tool invocation(s) in this turn         |
+        | `tool_result`  | `[{ toolUseId, output }]`                          | Tool execution results (truncated to 2000 chars) |
+        | `assistant`    | `{ text }`                                         | Complete assistant text response for a turn      |
+        | `result`       | `{ result, cost, turns, sessionId }`               | Final result with usage stats                    |
+        | `error`        | `{ error }`                                        | Agent or execution error                         |
+        | `done`         | `{}`                                               | Stream complete — no more events                 |
+
+        A `:keepalive` comment is sent every 15 seconds to prevent proxy timeouts.
+        The server enforces a 5-minute maximum execution time.
+
+        ### Rate Limit
+        5 requests/minute per client.
+
+        ### Security Model
+        The agent subprocess receives only `CLAUDE_CODE_OAUTH_TOKEN` or
+        `ANTHROPIC_API_KEY`, `PATH`, and `HOME` — no other server env vars leak.
+        Tools are restricted per skill (default: `Skill`, `Read`, `Glob`, `Grep`).
+
+        ### Code Examples
+
+        **curl:**
+        ```bash
+        curl -N -X POST http://localhost:3000/skills/equity-research/earnings \
+          -H 'Content-Type: application/json' \
+          -H 'x-api-key: your-key' \
+          -d '{"prompt": "Analyze AAPL Q4 2024 earnings", "stream": true}'
+        ```
+
+        **JavaScript (EventSource):**
+        ```javascript
+        const res = await fetch('http://localhost:3000/skills/data/analyze', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': 'your-key',
+          },
+          body: JSON.stringify({
+            prompt: 'Summarize revenue trends',
+            stream: true,
+            maxTurns: 10,
+          }),
+        });
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const text = decoder.decode(value);
+          // Parse SSE frames: "event: <type>\ndata: <json>\n\n"
+          for (const line of text.split('\n')) {
+            if (line.startsWith('data: ')) {
+              console.log(JSON.parse(line.slice(6)));
+            }
+          }
+        }
+        ```
+      security:
+        - ApiKeyHeader: []
+      parameters:
+        - name: path
+          in: path
+          required: true
+          schema:
+            type: string
+          description: |
+            Skill path key (e.g., `data/analyze`, `equity-research/earnings`).
+            See `GET /skills` for the full list.
+          examples:
+            dataAnalyze:
+              value: data/analyze
+              summary: Data analysis skill
+            earnings:
+              value: equity-research/earnings
+              summary: Quarterly earnings analysis
+            dcf:
+              value: financial-analysis/dcf
+              summary: DCF valuation model
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillRunBody'
+            examples:
+              minimal:
+                summary: Run with defaults
+                value:
+                  prompt: "Analyze AAPL earnings"
+              streaming:
+                summary: Stream with session resume
+                value:
+                  prompt: "Continue the analysis"
+                  sessionId: "550e8400-e29b-41d4-a716-446655440000"
+                  stream: true
+                  maxTurns: 15
+              budgetCapped:
+                summary: With budget cap
+                value:
+                  prompt: "Build a DCF model for MSFT"
+                  maxBudgetUsd: 5.00
+                  maxTurns: 30
+      responses:
+        '200':
+          description: |
+            SSE event stream. The response uses `text/event-stream` content type
+            and streams events until `done` or `error` is emitted.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: |
+                  SSE-formatted stream. Each frame follows the format:
+                  ```
+                  event: <event_type>
+                  data: <json_payload>
+
+                  ```
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: |
+            Session conflict — another request is already in-flight for the
+            specified `sessionId`. Wait for the previous request to complete
+            or use a different session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "Session already in use"
+        '429':
+          description: Rate limit exceeded (5 requests/minute)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "Rate limit exceeded, retry in 60 seconds"
+
 # ─────────────────────────────────────────────────────────────
 # Components
 # ─────────────────────────────────────────────────────────────
@@ -2456,6 +2714,82 @@ components:
         maxLot:    { type: number, example: 100, description: "Maximum trade size in lots" }
         lotStep:   { type: number, example: 0.01, description: "Lot size increment step" }
 
+    # ── Skills (Agent SDK) ─────────────────────────────────────
+
+    SkillListItem:
+      type: object
+      required: [path, command, category, description]
+      description: |
+        A single skill entry from the catalog. Use the `path` value (without the
+        leading `/skills/`) as the `{path}` parameter when calling `POST /skills/{path}`.
+      properties:
+        path:
+          type: string
+          example: /skills/data/analyze
+          description: "Full REST path for this skill"
+        command:
+          type: string
+          example: "data:analyze"
+          description: "Internal skill command identifier"
+        category:
+          type: string
+          example: data
+          description: "Skill category (data, equity-research, financial-analysis, etc.)"
+        description:
+          type: string
+          example: Answer data questions
+          description: "Short human-readable description of the skill"
+
+    SkillRunBody:
+      type: object
+      additionalProperties: false
+      description: |
+        Request body for executing a skill. All fields are optional — calling with
+        an empty body `{}` runs the skill's default command with no additional prompt.
+
+        **Session lifecycle:**
+        - First call: omit `sessionId` → the `init` SSE event returns one
+        - Subsequent calls: pass the `sessionId` to resume the conversation
+        - Each session maintains context across turns
+      properties:
+        prompt:
+          type: string
+          description: |
+            Additional prompt text appended after the skill command. For example,
+            if the skill command is `data:analyze`, passing `prompt: "revenue by quarter"`
+            results in the agent receiving `"/data:analyze revenue by quarter"`.
+          example: "Analyze AAPL Q4 2024 earnings"
+        sessionId:
+          type: string
+          format: uuid
+          description: |
+            Session ID from a previous `init` event. Pass this to resume a
+            conversation with the agent. Only one in-flight request per session
+            is allowed (409 on conflict).
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        stream:
+          type: boolean
+          default: false
+          description: |
+            When `true`, the agent emits incremental `text` and `tool_input` delta
+            events as content is generated. When `false`, only complete `assistant`
+            and `tool_use` events are emitted.
+        maxTurns:
+          type: number
+          minimum: 1
+          maximum: 100
+          default: 20
+          description: |
+            Maximum number of agent turns (tool use → result cycles) before the
+            agent is forced to return a final result.
+        maxBudgetUsd:
+          type: number
+          minimum: 0.01
+          maximum: 10
+          description: |
+            Maximum spend in USD for this agent execution. The agent will stop
+            and return a result when the budget is exhausted.
+
     DealRow:
       type: object
       description: |
@@ -2471,3 +2805,13 @@ components:
         swap:       { type: number, description: "Swap charges applied" }
         commission: { type: number, description: "Commission charged" }
         time:       { type: string, format: date-time, description: "Execution timestamp" }
+
+  securitySchemes:
+    ApiKeyHeader:
+      type: apiKey
+      in: header
+      name: x-api-key
+      description: |
+        API key for skills routes. Set the `API_KEY` environment variable on the
+        server. When `API_KEY` is not set, the auth check is skipped (useful for
+        local development). Uses timing-safe comparison to prevent timing attacks.
