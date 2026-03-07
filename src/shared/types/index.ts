@@ -6,6 +6,7 @@ import type { TypedEventBus } from '../event-bus.js';
 import type { AppEventMap } from '../services/event-map.js';
 import type { ServiceRegistry } from '../services/service-registry.js';
 import type { IBarCache } from '../../market-data/data-provider-types.js';
+import type { AuditConsumer } from '../../audit/audit-consumer.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -18,5 +19,6 @@ declare module 'fastify' {
     engineMutex:     Mutex;
     serviceRegistry: ServiceRegistry;
     barCache:        IBarCache;
+    auditConsumer:   AuditConsumer | null;
   }
 }

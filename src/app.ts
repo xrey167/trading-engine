@@ -13,6 +13,9 @@ import { InternalProvider } from './market-data/internal-provider.js';
 import { toLogger } from './shared/lib/logger.js';
 import { createRedisClient } from './shared/lib/redis-client.js';
 import { RedisEventBridge } from './shared/lib/redis-event-bridge.js';
+import { createAmqpClient, closeAmqpClient, type AmqpClient } from './shared/lib/amqp-client.js';
+import { AmqpEventBridge } from './shared/lib/amqp-event-bridge.js';
+import { AuditConsumer } from './audit/audit-consumer.js';
 import { TypedEventBus } from './shared/event-bus.js';
 import type { AppEventMap } from './shared/services/event-map.js';
 import { ServiceRegistry } from './shared/services/service-registry.js';
@@ -27,6 +30,7 @@ import mmModule from './money-management/module.js';
 import openbbModule from './integrations/openbb/index.js';
 import skillsModule from './integrations/skills/index.js';
 import servicesModule from './services/index.js';
+import auditModule from './audit/index.js';
 import './shared/types/index.js';
 
 const SWAGGER_UI_HTML = `<!DOCTYPE html>
@@ -174,11 +178,33 @@ export async function buildApp(
     }
   }
 
-  // 1d. Graceful shutdown — bridge first (prevent cross-instance propagation during teardown)
+  // 1e. AMQP — event bridge + audit consumer (conditional on RABBITMQ_URL)
+  let amqpClient: AmqpClient | null = null;
+  let amqpBridge: AmqpEventBridge | undefined;
+  let auditConsumer: AuditConsumer | null = null;
+
+  amqpClient = await createAmqpClient(logger);
+  if (amqpClient) {
+    amqpBridge = new AmqpEventBridge(
+      emitter, amqpClient.channel,
+      ['signal', 'order', 'risk', 'normalized_bar', 'screener', 'tick'],
+      logger,
+    );
+    await amqpBridge.start();
+
+    auditConsumer = new AuditConsumer(amqpClient.channel, logger);
+    await auditConsumer.start();
+  }
+  app.decorate('auditConsumer', auditConsumer);
+
+  // 1f. Graceful shutdown — bridges first (prevent cross-instance propagation during teardown)
   app.addHook('onClose', async () => {
     if (eventBridge) await eventBridge.stop();
+    if (amqpBridge) await amqpBridge.stop();
+    if (auditConsumer) await auditConsumer.stop();
     await serviceRegistry.stopAll();
     if (redis) redis.disconnect();
+    if (amqpClient) await closeAmqpClient(amqpClient, logger);
   });
 
   // 4. Global error handler
@@ -208,6 +234,9 @@ export async function buildApp(
 
   // 6b. Services module (health routes, service management)
   await app.register(servicesModule);
+
+  // 6c. Audit module (GET /audit/events)
+  await app.register(auditModule);
 
   // 7. API docs
   const __dirname = dirname(fileURLToPath(import.meta.url));

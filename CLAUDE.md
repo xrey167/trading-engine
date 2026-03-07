@@ -28,7 +28,7 @@ npm run dev                       # same with --watch
 ```
 shared/
   lib/              — Result<T,E>, DomainError, logger, mutex, circuit-breaker,
-                      redis-client, redis-event-bridge
+                      redis-client, redis-event-bridge, amqp-client, amqp-event-bridge
   domain/           — value objects, enums, trade-signal/trade-params, trading-calendar
   schemas/          — common TypeBox schemas (OHLC, enums, errors)
   services/         — IService, BaseService, ServiceRegistry, event-map (AppEventMap)
@@ -45,6 +45,7 @@ analysis/           — ATR, strategies, signals, backtest, strategy-service, sc
 managers/           — execution-saga, order-manager, risk-manager
 money-management/   — SL/TP calculators, lot sizing (composite pattern)
 services/           — /services/* health + management routes
+audit/              — AMQP audit trail consumer + /audit/events route
 integrations/
   openbb/           — OpenBB widget routes
   skills/           — Agent SDK skill execution via SSE
@@ -68,6 +69,7 @@ integrations/
 | `/v1/money-management` | POST | validate money management config |
 | `/openbb/*` | GET | widgets.json, positions, orders, account, deals |
 | `/skills` | GET, POST | Agent SDK skill execution via SSE streaming |
+| `/audit/events` | GET | audit trail query (type/since/limit filters); 503 when RABBITMQ_URL unset |
 | `/docs`, `/openapi.yaml` | GET | Swagger UI (dark theme) and raw spec |
 
 ### Key wiring (src/app.ts → buildApp())
@@ -84,6 +86,8 @@ integrations/
 - Skills routes use `@anthropic-ai/claude-agent-sdk` — `query()` streams via SSE to clients
 - `app.barCache` — `IBarCache` (in-memory or Redis write-through when `REDIS_URL` set)
 - `RedisEventBridge` — optional cross-instance pub/sub for `signal`, `order`, `normalized_bar` events
+- `AmqpEventBridge` — optional durable cross-instance pub/sub via RabbitMQ (topic exchange `te.events`, persistent delivery for `order`/`risk`); enabled when `RABBITMQ_URL` set
+- `AuditConsumer` — durable queue `te.audit` consuming all bridged events into a ring buffer; queryable via `GET /audit/events`
 
 ### Result type pattern
 
@@ -110,6 +114,7 @@ All gateway and use-case methods return `Result<T, DomainError>` (discriminated 
 | `ANTHROPIC_API_KEY` | For `/skills` | Agent SDK key (or use `CLAUDE_CODE_OAUTH_TOKEN`) |
 | `CLAUDE_CODE_OAUTH_TOKEN` | For `/skills` | OAuth alternative to `ANTHROPIC_API_KEY` |
 | `REDIS_URL` | No | Redis bar cache (write-through) + cross-instance pub/sub event bridge; falls back to in-memory when unset |
+| `RABBITMQ_URL` | No | AMQP event bridge (cross-instance pub/sub) + audit trail consumer; disabled when unset |
 | `NODE_ENV` | No | `production` hides stack traces in error responses |
 
 No `.env` file is committed. Node 18+ required (ES2022 target).
