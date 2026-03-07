@@ -33,8 +33,52 @@ const SWAGGER_UI_HTML = `<!DOCTYPE html>
   <title>Trading Engine API Docs</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+  <style>
+    body { margin: 0; background: #1a1a2e; }
+    .swagger-ui .topbar { display: none; }
+    .swagger-ui .info .title { color: #e2e8f0; }
+    .swagger-ui .info p, .swagger-ui .info li { color: #cbd5e1; }
+    .swagger-ui .scheme-container { background: #16213e; box-shadow: none; }
+    .swagger-ui .opblock-tag { color: #e2e8f0; border-bottom-color: #334155; }
+    .swagger-ui .opblock-tag:hover { color: #38bdf8; }
+    .swagger-ui .filter .operation-filter-input {
+      background: #0f3460; color: #e2e8f0; border: 1px solid #334155;
+    }
+    .swagger-ui .filter .operation-filter-input::placeholder { color: #64748b; }
+    .swagger-ui .opblock.opblock-get { background: rgba(56,189,248,0.08); border-color: #38bdf8; }
+    .swagger-ui .opblock.opblock-get .opblock-summary { border-color: #38bdf8; }
+    .swagger-ui .opblock.opblock-post { background: rgba(52,211,153,0.08); border-color: #34d399; }
+    .swagger-ui .opblock.opblock-post .opblock-summary { border-color: #34d399; }
+    .swagger-ui .opblock.opblock-put { background: rgba(251,191,36,0.08); border-color: #fbbf24; }
+    .swagger-ui .opblock.opblock-put .opblock-summary { border-color: #fbbf24; }
+    .swagger-ui .opblock.opblock-delete { background: rgba(248,113,113,0.08); border-color: #f87171; }
+    .swagger-ui .opblock.opblock-delete .opblock-summary { border-color: #f87171; }
+    .swagger-ui .opblock.opblock-patch { background: rgba(168,85,247,0.08); border-color: #a855f7; }
+    .swagger-ui .opblock.opblock-patch .opblock-summary { border-color: #a855f7; }
+    .swagger-ui section.models { border-color: #334155; }
+    .swagger-ui .model-title { color: #e2e8f0; }
+    .swagger-ui .wrapper { max-width: 1400px; }
+    .swagger-ui .btn.execute { background: #38bdf8; border-color: #38bdf8; }
+    .swagger-ui .btn.execute:hover { background: #0ea5e9; }
+    #header-bar {
+      background: linear-gradient(135deg, #0f3460 0%, #1a1a2e 100%);
+      padding: 16px 24px; display: flex; align-items: center; gap: 12px;
+      border-bottom: 1px solid #334155;
+    }
+    #header-bar h1 { margin: 0; font: 700 20px/1.2 system-ui, sans-serif; color: #e2e8f0; }
+    #header-bar span { font: 400 13px/1 system-ui, sans-serif; color: #64748b; }
+    #header-bar .badge {
+      background: #34d399; color: #0f3460; font: 600 11px/1 system-ui, sans-serif;
+      padding: 3px 8px; border-radius: 4px; text-transform: uppercase;
+    }
+  </style>
 </head>
 <body>
+<div id="header-bar">
+  <h1>Trading Engine</h1>
+  <span class="badge">v1.0</span>
+  <span>REST + WebSocket API</span>
+</div>
 <div id="swagger-ui"></div>
 <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
 <script>
@@ -46,6 +90,12 @@ SwaggerUIBundle({
   deepLinking: true,
   displayRequestDuration: true,
   persistAuthorization: true,
+  filter: true,
+  tryItOutEnabled: true,
+  docExpansion: 'list',
+  defaultModelsExpandDepth: 1,
+  tagsSorter: 'alpha',
+  operationsSorter: 'method',
 });
 </script>
 </body>
