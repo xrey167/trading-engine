@@ -1,4 +1,4 @@
-import Redis from 'ioredis';
+import type Redis from 'ioredis';
 import { randomUUID } from 'node:crypto';
 import type { TypedEventBus } from '../event-bus.js';
 import type { AppEventMap } from '../services/event-map.js';
@@ -21,25 +21,25 @@ interface RedisEnvelope {
  * - **Subscribe**: listens on Redis channels and re-emits on the local bus
  * - **Echo prevention**: each instance has a unique `instanceId`; messages
  *   from self are ignored on the subscribe side
+ * - **Type validation**: only events in the configured allow-list are re-emitted
  *
  * Channel naming: `te:{eventType}` (e.g. `te:signal`, `te:normalized_bar`)
  */
 export class RedisEventBridge {
   private readonly instanceId = randomUUID();
-  private readonly pub: Redis;
-  private readonly sub: Redis;
+  private readonly allowedEvents: ReadonlySet<string>;
   private readonly localHandlers = new Map<string, (payload: unknown) => void>();
+  private messageHandler: ((_channel: string, message: string) => void) | null = null;
   private started = false;
 
   constructor(
     private readonly eventBus: TypedEventBus<AppEventMap>,
-    redisUrl: string,
+    private readonly pub: Redis,
+    private readonly sub: Redis,
     private readonly events: readonly BridgeableEvent[],
     private readonly logger: Logger,
   ) {
-    // Pub/Sub requires separate connections
-    this.pub = new Redis(redisUrl, { lazyConnect: true, maxRetriesPerRequest: 3 });
-    this.sub = new Redis(redisUrl, { lazyConnect: true, maxRetriesPerRequest: 3 });
+    this.allowedEvents = new Set(events);
   }
 
   async start(): Promise<void> {
@@ -52,17 +52,19 @@ export class RedisEventBridge {
       await this.sub.subscribe(...channels);
     }
 
-    // On Redis message → re-emit locally (skip own messages)
-    this.sub.on('message', (_channel: string, message: string) => {
+    // On Redis message → re-emit locally (skip own messages, validate type)
+    this.messageHandler = (_channel: string, message: string) => {
       try {
         const envelope: RedisEnvelope = JSON.parse(message);
         if (envelope.instanceId === this.instanceId) return; // echo prevention
+        if (!this.allowedEvents.has(envelope.type)) return; // type validation
         const eventType = envelope.type as BridgeableEvent;
         this.eventBus.emit(eventType, envelope.payload as AppEventMap[typeof eventType]);
       } catch (err) {
         this.logger.error(`Redis bridge parse error: ${(err as Error).message}`);
       }
-    });
+    };
+    this.sub.on('message', this.messageHandler);
 
     // Local bus → publish to Redis
     for (const event of this.events) {
@@ -93,8 +95,14 @@ export class RedisEventBridge {
     }
     this.localHandlers.clear();
 
-    // Unsubscribe and disconnect
-    await this.sub.unsubscribe();
+    // Remove Redis message handler to prevent listener leak on restart
+    if (this.messageHandler) {
+      this.sub.off('message', this.messageHandler);
+      this.messageHandler = null;
+    }
+
+    // Unsubscribe and disconnect (try/catch: Redis may already be disconnected)
+    try { await this.sub.unsubscribe(); } catch { /* already disconnected */ }
     this.sub.disconnect();
     this.pub.disconnect();
 

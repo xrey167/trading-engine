@@ -165,15 +165,19 @@ export async function buildApp(
 
   // 1c.3 Redis event bridge — cross-instance pub/sub
   let eventBridge: RedisEventBridge | undefined;
-  if (process.env.REDIS_URL) {
-    eventBridge = new RedisEventBridge(emitter, process.env.REDIS_URL, ['signal', 'order', 'normalized_bar'], logger);
-    await eventBridge.start();
+  if (redis) {
+    const pubClient = createRedisClient(logger, { url: process.env.REDIS_URL, lazyConnect: true });
+    const subClient = createRedisClient(logger, { url: process.env.REDIS_URL, lazyConnect: true });
+    if (pubClient && subClient) {
+      eventBridge = new RedisEventBridge(emitter, pubClient, subClient, ['signal', 'order', 'normalized_bar'], logger);
+      await eventBridge.start();
+    }
   }
 
-  // 1d. Graceful shutdown — stop all registered services + Redis
+  // 1d. Graceful shutdown — bridge first (prevent cross-instance propagation during teardown)
   app.addHook('onClose', async () => {
-    await serviceRegistry.stopAll();
     if (eventBridge) await eventBridge.stop();
+    await serviceRegistry.stopAll();
     if (redis) redis.disconnect();
   });
 

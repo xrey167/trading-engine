@@ -12,7 +12,7 @@ import { InMemoryBarCache } from './bar-cache.js';
  * - Writes go to both in-memory and Redis (async, fire-and-forget)
  * - On {@link hydrate}, loads existing bars from Redis into memory
  *
- * Key schema: `bars:{symbol}:{timeframe}` → Redis List (newest at head via LPUSH)
+ * Key schema: `bars:{symbol}:{timeframe}` → Redis List (oldest→newest via RPUSH)
  */
 export class RedisBarCache implements IBarCache {
   private readonly local: InMemoryBarCache;
@@ -63,11 +63,18 @@ export class RedisBarCache implements IBarCache {
     const k = this.key(symbol, timeframe);
     try {
       const raw = await this.redis.lrange(k, 0, -1);
+      let loaded = 0;
       for (const json of raw) {
-        const bar: OHLCBody = JSON.parse(json);
-        this.local.push(symbol, timeframe, bar);
+        try {
+          const bar: OHLCBody = JSON.parse(json);
+          this.local.push(symbol, timeframe, bar);
+          loaded++;
+        } catch {
+          // Skip malformed entries — per-entry error isolation
+          this.logger.warn(`Redis hydrate: skipping malformed bar entry in ${k}`);
+        }
       }
-      return raw.length;
+      return loaded;
     } catch (err) {
       this.logger.error(`Redis hydrate error: ${(err as Error).message}`);
       return 0;

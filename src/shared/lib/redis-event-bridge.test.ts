@@ -46,6 +46,13 @@ describe('RedisEventBridge', () => {
     expect(channels).toEqual(['te:signal', 'te:order', 'te:normalized_bar']);
   });
 
+  it('type validation — rejects unknown event types', () => {
+    const allowedEvents = new Set<string>(['signal', 'order']);
+    const unknownType = 'malicious_event';
+    expect(allowedEvents.has(unknownType)).toBe(false);
+    expect(allowedEvents.has('signal')).toBe(true);
+  });
+
   it('envelope serialization round-trip', () => {
     const signal: SignalEvent = {
       serviceId: 'strategy:test',

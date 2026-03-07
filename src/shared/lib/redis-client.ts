@@ -23,7 +23,7 @@ export function createRedisClient(
     lazyConnect: opts.lazyConnect ?? false,
     maxRetriesPerRequest: 3,
     retryStrategy(times) {
-      // Exponential backoff: 100ms, 200ms, 400ms… capped at 5s
+      // Linear backoff: 100ms, 200ms, 300ms… capped at 5s
       return Math.min(times * 100, 5000);
     },
   });
