@@ -35,6 +35,10 @@ export class InMemoryBarCache implements IBarCache {
     return [...bars];
   }
 
+  latest(symbol: string, timeframe: string): OHLCBody | undefined {
+    return this.cache.get(this.key(symbol, timeframe))?.at(-1);
+  }
+
   clear(symbol: string, timeframe: string): void {
     this.cache.delete(this.key(symbol, timeframe));
   }

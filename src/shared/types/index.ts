@@ -5,6 +5,7 @@ import type { Mutex } from '../lib/mutex.js';
 import type { TypedEventBus } from '../event-bus.js';
 import type { AppEventMap } from '../services/event-map.js';
 import type { ServiceRegistry } from '../services/service-registry.js';
+import type { IBarCache } from '../../market-data/data-provider-types.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -16,5 +17,6 @@ declare module 'fastify' {
     atrConfig:       MutableAtrConfig;
     engineMutex:     Mutex;
     serviceRegistry: ServiceRegistry;
+    barCache:        IBarCache;
   }
 }
