@@ -23,6 +23,7 @@ import { BrokerService } from './broker/broker-service.js';
 import { RiskManagerService } from './managers/risk-manager.js';
 import { ExecutionSaga } from './managers/execution-saga.js';
 import { OrderManagerService } from './managers/order-manager.js';
+import { TickIngestionService } from './market-data/tick-ingestion-service.js';
 import rateLimitPlugin from './shared/plugins/rate-limit.js';
 import corsPlugin from './shared/plugins/cors.js';
 import engineModule from './engine/index.js';
@@ -212,6 +213,17 @@ export async function buildApp(
   serviceRegistry.register(riskManager);
   serviceRegistry.register(executionSaga);
   serviceRegistry.register(orderManager);
+
+  // 1c.5 Tick ingestion (bridges tick events → engine.onTick via mutex)
+  const mutexAdapter = {
+    async runExclusive<T>(fn: () => Promise<T>): Promise<T> {
+      const release = await app.engineMutex.acquire();
+      try { return await fn(); } finally { release(); }
+    },
+  };
+  const tickIngestion = new TickIngestionService(app.engine, mutexAdapter, emitter, logger);
+  await tickIngestion.start();
+  serviceRegistry.register(tickIngestion);
 
   // 1d. Graceful shutdown — bridges first (prevent cross-instance propagation during teardown)
   app.addHook('onClose', async () => {

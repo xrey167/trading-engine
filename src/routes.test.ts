@@ -1883,3 +1883,20 @@ describe('R30 – WebSocket /stream', () => {
     ws2.close();
   });
 });
+
+describe('TickIngestionService wiring', () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    const { buildApp } = await import('./app.js');
+    app = await buildApp({ logger: false });
+  });
+  afterEach(() => app.close());
+
+  it('includes tick-ingestion in /services list', async () => {
+    const res = await app.inject({ method: 'GET', url: '/services' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json<{ id: string }[]>();
+    expect(body.some(s => s.id === 'ingestion:tick')).toBe(true);
+  });
+});
