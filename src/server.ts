@@ -1,6 +1,6 @@
 import { buildApp } from './app.js';
 
-const app = await buildApp({ logger: true });
+const app = await buildApp({ logger: true, ignoreTrailingSlash: true });
 
 await app.listen({ port: 3000, host: '0.0.0.0' });
 
