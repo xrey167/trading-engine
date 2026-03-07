@@ -2,8 +2,11 @@ import type { FastifyPluginAsync } from 'fastify';
 import { SKILL_CATALOG, type SkillDef } from './catalog.js';
 import { streamAgentQuery } from './sse.js';
 import { SkillRunSchema, type SkillRunBody } from '../../schemas/index.js';
+import { apiKeyPreHandler } from '../../lib/api-utils.js';
 
-// Prevent concurrent resume of the same session
+// Prevent concurrent resume of the same session.
+// NOTE: This is process-local. In a multi-process deployment (pm2 cluster,
+// multiple containers), use a distributed lock (e.g. Redis SETNX) instead.
 const inFlightSessions = new Set<string>();
 
 const skillsRoute: FastifyPluginAsync = async (fastify) => {
@@ -25,8 +28,10 @@ const skillsRoute: FastifyPluginAsync = async (fastify) => {
     HOME: process.env.HOME ?? '',
   };
 
-  // GET /skills — list all available skills
-  fastify.get('/skills', async () =>
+  // GET /skills — list all available skills (auth-gated via x-api-key)
+  fastify.get('/skills', {
+    preHandler: [apiKeyPreHandler],
+  }, async () =>
     Object.entries(SKILL_CATALOG).map(([path, def]) => ({
       path: `/skills/${path}`,
       command: def.command,
@@ -39,6 +44,7 @@ const skillsRoute: FastifyPluginAsync = async (fastify) => {
   for (const [path, def] of Object.entries(SKILL_CATALOG) as [string, SkillDef][]) {
     fastify.post<{ Body: SkillRunBody }>(`/skills/${path}`, {
       schema: { body: SkillRunSchema },
+      preHandler: [apiKeyPreHandler],
       config: { rateLimit: { max: 5, timeWindow: '1 minute' } },
     }, async (req, reply) => {
       // Prevent concurrent resume of same session
@@ -53,6 +59,9 @@ const skillsRoute: FastifyPluginAsync = async (fastify) => {
       req.raw.on('close', () => controller.abort());
 
       try {
+        // The user prompt is appended after the skill command. The agent is
+        // sandboxed via read-only allowedTools + dontAsk permissionMode, so
+        // prompt injection cannot escalate beyond the allowed tool surface.
         await streamAgentQuery(reply, controller, {
           prompt: req.body.prompt
             ? `/${def.command} ${req.body.prompt}`
@@ -69,6 +78,7 @@ const skillsRoute: FastifyPluginAsync = async (fastify) => {
             includePartialMessages: req.body.stream ?? false,
             resume: req.body.sessionId,
             maxTurns: req.body.maxTurns ?? 20,
+            maxBudgetUsd: req.body.maxBudgetUsd,
           },
         });
       } finally {

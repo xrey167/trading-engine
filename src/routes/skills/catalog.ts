@@ -13,13 +13,11 @@ export const SKILL_CATALOG = {
   'data/write-query':       { command: 'data:write-query',           category: 'data', description: 'Write optimized SQL' },
   'data/create-viz':        { command: 'data:create-viz',            category: 'data', description: 'Create publication-quality visualizations' },
   'data/context-extractor': { command: 'data:data-context-extractor',category: 'data', description: 'Generate data context file' },
-  'data/visualization':     { command: 'data:data-visualization',    category: 'data', description: 'Create data visualizations' },
-  'data/exploration':       { command: 'data:data-exploration',      category: 'data', description: 'Profile and explore data' },
-  'data/validation':        { command: 'data:data-validation',       category: 'data', description: 'Validate data quality' },
 
   // ── Equity Research ───────────────────────────────
   'equity-research/earnings':          { command: 'equity-research:earnings',          category: 'equity-research', description: 'Analyze quarterly earnings' },
   'equity-research/earnings-preview':  { command: 'equity-research:earnings-preview',  category: 'equity-research', description: 'Pre-earnings preview note' },
+  'equity-research/earnings-analysis': { command: 'equity-research:earnings-analysis', category: 'equity-research', description: 'Earnings analysis' },
   'equity-research/initiate':          { command: 'equity-research:initiate',          category: 'equity-research', description: 'Initiating coverage report' },
   'equity-research/model-update':      { command: 'equity-research:model-update',      category: 'equity-research', description: 'Update financial model' },
   'equity-research/morning-note':      { command: 'equity-research:morning-note',      category: 'equity-research', description: 'Morning meeting note' },
@@ -29,8 +27,6 @@ export const SKILL_CATALOG = {
   'equity-research/catalysts':         { command: 'equity-research:catalysts',         category: 'equity-research', description: 'Catalyst calendar' },
   'equity-research/idea-generation':   { command: 'equity-research:idea-generation',   category: 'equity-research', description: 'Idea generation' },
   'equity-research/thesis-tracker':    { command: 'equity-research:thesis-tracker',    category: 'equity-research', description: 'Thesis tracker' },
-  'equity-research/sector-overview':   { command: 'equity-research:sector-overview',   category: 'equity-research', description: 'Sector overview (detailed)' },
-  'equity-research/catalyst-calendar': { command: 'equity-research:catalyst-calendar', category: 'equity-research', description: 'Catalyst calendar (detailed)' },
 
   // ── Financial Analysis ────────────────────────────
   'financial-analysis/3-statements':   { command: 'financial-analysis:3-statements',       category: 'financial-analysis', description: '3-statement model' },
@@ -41,9 +37,6 @@ export const SKILL_CATALOG = {
   'financial-analysis/debug-model':    { command: 'financial-analysis:debug-model',         category: 'financial-analysis', description: 'Debug financial model' },
   'financial-analysis/lbo':            { command: 'financial-analysis:lbo',                 category: 'financial-analysis', description: 'LBO model' },
   'financial-analysis/ppt-template':   { command: 'financial-analysis:ppt-template',        category: 'financial-analysis', description: 'Reusable PPT template' },
-  'financial-analysis/comps-analysis': { command: 'financial-analysis:comps-analysis',      category: 'financial-analysis', description: 'Institutional-grade comps' },
-  'financial-analysis/dcf-model':      { command: 'financial-analysis:dcf-model',           category: 'financial-analysis', description: 'DCF model (standalone)' },
-  'financial-analysis/lbo-model':      { command: 'financial-analysis:lbo-model',           category: 'financial-analysis', description: 'LBO model (standalone)' },
 
   // ── Finance ───────────────────────────────────────
   'finance/statements':                { command: 'finance:financial-statements',  category: 'finance', description: 'Generate financial statements' },
@@ -68,14 +61,11 @@ export const SKILL_CATALOG = {
   'lseg/swap-curve':          { command: 'lseg:analyze-swap-curve',     category: 'lseg', description: 'Swap curve analysis' },
   'lseg/fixed-income':        { command: 'lseg:fixed-income-portfolio', category: 'lseg', description: 'Fixed income portfolio review' },
   'lseg/macro-rates':         { command: 'lseg:macro-rates-monitor',    category: 'lseg', description: 'Macro rates dashboard' },
-  'lseg/option-vol-analysis': { command: 'lseg:option-vol-analysis',    category: 'lseg', description: 'Option vol analysis (detailed)' },
-  'lseg/fx-carry-trade':      { command: 'lseg:fx-carry-trade',         category: 'lseg', description: 'FX carry trade (detailed)' },
 
   // ── Private Equity ────────────────────────────────
   'private-equity/portfolio':         { command: 'private-equity:portfolio',          category: 'private-equity', description: 'Portfolio review' },
   'private-equity/portfolio-monitor': { command: 'private-equity:portfolio-monitoring',category: 'private-equity', description: 'Portfolio monitoring' },
   'private-equity/returns':           { command: 'private-equity:returns',            category: 'private-equity', description: 'IRR/MOIC sensitivity' },
-  'private-equity/returns-analysis':  { command: 'private-equity:returns-analysis',   category: 'private-equity', description: 'Returns analysis' },
   'private-equity/screen-deal':       { command: 'private-equity:screen-deal',        category: 'private-equity', description: 'Screen inbound deal' },
   'private-equity/source':            { command: 'private-equity:source',             category: 'private-equity', description: 'Source deals' },
   'private-equity/unit-economics':    { command: 'private-equity:unit-economics',     category: 'private-equity', description: 'Unit economics analysis' },
@@ -97,7 +87,6 @@ export const SKILL_CATALOG = {
   // ── Misc ──────────────────────────────────────────
   'chrome':                           { command: 'chrome',                           category: 'tools', description: 'Chrome browser automation' },
   'check-model':                      { command: 'check-model',                      category: 'tools', description: 'Check model info' },
-  'earnings-analysis':                { command: 'equity-research:earnings-analysis', category: 'equity-research', description: 'Earnings analysis' },
 } as const satisfies Record<string, SkillDef>;
 
 export type SkillKey = keyof typeof SKILL_CATALOG;

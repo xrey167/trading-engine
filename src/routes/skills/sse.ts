@@ -52,9 +52,29 @@ export async function streamAgentQuery(
   }
 }
 
-// Helper: safely access properties on loosely-typed SDK message internals
-function prop(obj: unknown, key: string): unknown {
-  return (obj as Record<string, unknown>)?.[key];
+// ── Type guards for SDK message content blocks ──────────────
+
+interface TextBlock { type: 'text'; text: string }
+interface ToolUseBlock { type: 'tool_use'; name: string; input: unknown }
+interface ToolResultBlock { type: 'tool_result'; tool_use_id?: string; content?: unknown }
+
+function isTextBlock(b: unknown): b is TextBlock {
+  return typeof b === 'object' && b !== null && 'type' in b && (b as TextBlock).type === 'text';
+}
+function isToolUseBlock(b: unknown): b is ToolUseBlock {
+  return typeof b === 'object' && b !== null && 'type' in b && (b as ToolUseBlock).type === 'tool_use';
+}
+function isToolResultBlock(b: unknown): b is ToolResultBlock {
+  return typeof b === 'object' && b !== null && 'type' in b && (b as ToolResultBlock).type === 'tool_result';
+}
+
+interface ContentBlockDelta {
+  type: 'content_block_delta';
+  delta: { type: string; text?: string; partial_json?: string };
+}
+function isContentBlockDelta(evt: unknown): evt is ContentBlockDelta {
+  return typeof evt === 'object' && evt !== null && 'type' in evt
+    && (evt as ContentBlockDelta).type === 'content_block_delta';
 }
 
 function mapToSSE(message: SDKMessage): { event: string; data: unknown } | null {
@@ -70,14 +90,13 @@ function mapToSSE(message: SDKMessage): { event: string; data: unknown } | null 
 
     case 'stream_event': {
       // Raw Claude API streaming event — forward text deltas and tool input deltas
-      const evt = prop(message, 'event') as Record<string, unknown> | undefined;
-      if (evt?.type === 'content_block_delta') {
-        const delta = evt.delta as Record<string, unknown> | undefined;
-        if (delta?.type === 'text_delta') {
-          return { event: 'text', data: { text: delta.text } };
+      const evt = ('event' in message) ? message.event : undefined;
+      if (isContentBlockDelta(evt)) {
+        if (evt.delta.type === 'text_delta') {
+          return { event: 'text', data: { text: evt.delta.text } };
         }
-        if (delta?.type === 'input_json_delta') {
-          return { event: 'tool_input', data: { partial_json: delta.partial_json } };
+        if (evt.delta.type === 'input_json_delta') {
+          return { event: 'tool_input', data: { partial_json: evt.delta.partial_json } };
         }
       }
       return null;
@@ -87,42 +106,34 @@ function mapToSSE(message: SDKMessage): { event: string; data: unknown } | null 
       const content = (message as { message?: { content?: unknown[] } }).message?.content;
       if (!Array.isArray(content)) return null;
 
-      // Emit tool_use blocks
-      const toolUseBlocks = content.filter((b) => prop(b, 'type') === 'tool_use');
+      const toolUseBlocks = content.filter(isToolUseBlock);
       if (toolUseBlocks.length > 0) {
         return {
           event: 'tool_use',
-          data: toolUseBlocks.map((b) => ({
-            tool: prop(b, 'name'),
-            input: prop(b, 'input'),
-          })),
+          data: toolUseBlocks.map((b) => ({ tool: b.name, input: b.input })),
         };
       }
 
-      // Emit text blocks
-      const textBlocks = content.filter((b) => prop(b, 'type') === 'text');
+      const textBlocks = content.filter(isTextBlock);
       if (textBlocks.length > 0) {
         return {
           event: 'assistant',
-          data: {
-            text: textBlocks.map((b) => prop(b, 'text') ?? '').join(''),
-          },
+          data: { text: textBlocks.map((b) => b.text).join('') },
         };
       }
       return null;
     }
 
     case 'user': {
-      // tool_result messages — truncate large outputs
       const content = (message as { message?: { content?: unknown[] } }).message?.content;
       if (!Array.isArray(content)) return null;
-      const results = content.filter((b) => prop(b, 'type') === 'tool_result');
+      const results = content.filter(isToolResultBlock);
       if (results.length === 0) return null;
       return {
         event: 'tool_result',
         data: results.map((b) => ({
-          toolUseId: prop(b, 'tool_use_id'),
-          output: truncate(JSON.stringify(prop(b, 'content')), 2000),
+          toolUseId: b.tool_use_id,
+          output: truncate(String(JSON.stringify(b.content) ?? ''), 2000),
         })),
       };
     }

@@ -1439,3 +1439,124 @@ describe('R25 – OPENBB_API_KEY auth guard', () => {
     expect(res.statusCode).toBe(200);
   });
 });
+
+// ─────────────────────────────────────────────────────────────
+// R26 — Skills routes
+// ─────────────────────────────────────────────────────────────
+
+describe('R26 – /skills routes disabled without auth', () => {
+  let app: FastifyInstance;
+  const savedOAuth = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  const savedApiKey = process.env.ANTHROPIC_API_KEY;
+
+  beforeEach(async () => {
+    delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    delete process.env.ANTHROPIC_API_KEY;
+    app = await buildApp({ logger: false });
+    await app.ready();
+  });
+  afterEach(async () => {
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = savedOAuth;
+    process.env.ANTHROPIC_API_KEY = savedApiKey;
+    await app.close();
+  });
+
+  it('GET /skills returns 404 when no Claude auth configured', async () => {
+    const res = await app.inject({ method: 'GET', url: '/skills' });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('POST /skills/data/analyze returns 404 when no Claude auth configured', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/skills/data/analyze',
+      payload: { prompt: 'test' },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+describe('R26 – /skills routes enabled with auth', () => {
+  let app: FastifyInstance;
+  const savedOAuth = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  const savedApiKey = process.env.ANTHROPIC_API_KEY;
+  const savedKey = process.env.API_KEY;
+
+  beforeEach(async () => {
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'test-token';
+    delete process.env.API_KEY; // disable x-api-key guard for catalog tests
+    app = await buildApp({ logger: false });
+    await app.ready();
+  });
+  afterEach(async () => {
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = savedOAuth;
+    process.env.ANTHROPIC_API_KEY = savedApiKey;
+    process.env.API_KEY = savedKey;
+    await app.close();
+  });
+
+  it('GET /skills returns catalog array', async () => {
+    const res = await app.inject({ method: 'GET', url: '/skills' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(Array.isArray(body)).toBe(true);
+    expect(body.length).toBeGreaterThan(0);
+    expect(body[0]).toMatchObject({
+      path: expect.stringContaining('/skills/'),
+      command: expect.any(String),
+      category: expect.any(String),
+      description: expect.any(String),
+    });
+  });
+
+  it('GET /skills returns 401 when API_KEY is set and no x-api-key header', async () => {
+    process.env.API_KEY = 'secret';
+    const guarded = await buildApp({ logger: false });
+    await guarded.ready();
+    const res = await guarded.inject({ method: 'GET', url: '/skills' });
+    expect(res.statusCode).toBe(401);
+    await guarded.close();
+  });
+
+  it('POST /skills/data/analyze rejects invalid body', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/skills/data/analyze',
+      payload: { sessionId: 'not-a-uuid' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('POST /skills/data/analyze accepts valid body with prompt only', async () => {
+    // We can't test the full SSE flow without a real Claude auth token,
+    // but we verify the route exists and accepts a valid body schema.
+    const res = await app.inject({
+      method: 'POST',
+      url: '/skills/data/analyze',
+      payload: { prompt: 'test' },
+    });
+    // Route exists (not 404) and body validates (not 400)
+    expect(res.statusCode).not.toBe(404);
+    expect(res.statusCode).not.toBe(400);
+  });
+
+  it('POST /skills/nonexistent returns 404', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/skills/nonexistent/route',
+      payload: { prompt: 'test' },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('each catalog entry has unique path and valid structure', async () => {
+    const res = await app.inject({ method: 'GET', url: '/skills' });
+    const skills = res.json() as { path: string; command: string; category: string }[];
+    const paths = skills.map((s) => s.path);
+    expect(new Set(paths).size).toBe(paths.length); // no duplicates
+    for (const skill of skills) {
+      expect(skill.command).toBeTruthy();
+      expect(skill.category).toBeTruthy();
+    }
+  });
+});
