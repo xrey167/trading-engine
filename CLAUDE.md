@@ -28,7 +28,7 @@ npm run dev                       # same with --watch
 ```
 shared/
   lib/              — Result<T,E>, DomainError, logger, mutex, circuit-breaker,
-                      redis-client, redis-event-bridge
+                      redis-client, redis-event-bridge, amqp-client, amqp-event-bridge
   domain/           — value objects, enums, trade-signal/trade-params, trading-calendar
   schemas/          — common TypeBox schemas (OHLC, enums, errors)
   services/         — IService, BaseService, ServiceRegistry, event-map (AppEventMap)
@@ -83,7 +83,9 @@ integrations/
 - `app.emitter.setMaxListeners(0)` — unbounded; each WS client adds 3 listeners
 - Skills routes use `@anthropic-ai/claude-agent-sdk` — `query()` streams via SSE to clients
 - `app.barCache` — `IBarCache` (in-memory or Redis write-through when `REDIS_URL` set)
-- `RedisEventBridge` — optional cross-instance pub/sub for `signal`, `order`, `normalized_bar` events
+- `RedisEventBridge` — optional cross-instance pub/sub for `signal`, `normalized_bar` events (ephemeral)
+- `AmqpEventBridge` — optional durable cross-instance pub/sub via RabbitMQ for `order`, `risk` events; enabled when `RABBITMQ_URL` set
+- When both bridges active, events are split to prevent duplicate delivery
 
 ### Result type pattern
 
@@ -110,6 +112,7 @@ All gateway and use-case methods return `Result<T, DomainError>` (discriminated 
 | `ANTHROPIC_API_KEY` | For `/skills` | Agent SDK key (or use `CLAUDE_CODE_OAUTH_TOKEN`) |
 | `CLAUDE_CODE_OAUTH_TOKEN` | For `/skills` | OAuth alternative to `ANTHROPIC_API_KEY` |
 | `REDIS_URL` | No | Redis bar cache (write-through) + cross-instance pub/sub event bridge; falls back to in-memory when unset |
+| `RABBITMQ_URL` | No | AMQP event bridge (durable order/risk events) + audit trail consumer; disabled when unset |
 | `NODE_ENV` | No | `production` hides stack traces in error responses |
 
 No `.env` file is committed. Node 18+ required (ES2022 target).
@@ -130,4 +133,4 @@ Use these skills **when the task involves their domain**:
 - **fastify-typescript** — Fastify plugin patterns, route schemas, lifecycle hooks
 - **microservices-patterns** — if adding inter-service communication
 - **redis-development** — Redis bar cache (`RedisBarCache`) and pub/sub event bridge (`RedisEventBridge`)
-- **rabbitmq-expert** — if adding message queues (not currently used)
+- **rabbitmq-expert** — AMQP event bridge (`AmqpEventBridge`) for durable order/risk events

@@ -13,6 +13,9 @@ import { InternalProvider } from './market-data/internal-provider.js';
 import { toLogger } from './shared/lib/logger.js';
 import { createRedisClient } from './shared/lib/redis-client.js';
 import { RedisEventBridge } from './shared/lib/redis-event-bridge.js';
+import type { BridgeableEvent } from './shared/lib/redis-event-bridge.js';
+import { createAmqpClient, closeAmqpClient, type AmqpClient } from './shared/lib/amqp-client.js';
+import { AmqpEventBridge } from './shared/lib/amqp-event-bridge.js';
 import { TypedEventBus } from './shared/event-bus.js';
 import type { AppEventMap } from './shared/services/event-map.js';
 import { ServiceRegistry } from './shared/services/service-registry.js';
@@ -166,15 +169,33 @@ export async function buildApp(
   await internalProvider.start();
   serviceRegistry.register(internalProvider);
 
-  // 1c.3 Redis event bridge — cross-instance pub/sub
-  let eventBridge: RedisEventBridge | undefined;
+  // 1c.3 Event bridges — cross-instance pub/sub
+  // When both REDIS_URL and RABBITMQ_URL are set, split events to prevent duplicate delivery:
+  //   AMQP  → order, risk (persistent, durable — reliability matters)
+  //   Redis → signal, normalized_bar (ephemeral, high-frequency — speed matters)
+  // When only one bridge is configured, it handles all events.
+  const ALL_BRIDGE_EVENTS: readonly BridgeableEvent[] = ['signal', 'order', 'risk', 'normalized_bar'];
+  const AMQP_EVENTS: readonly BridgeableEvent[] = ['order', 'risk'];
+  const REDIS_EVENTS: readonly BridgeableEvent[] = ['signal', 'normalized_bar'];
+
+  let redisBridge: RedisEventBridge | undefined;
+  let amqpBridge: AmqpEventBridge | undefined;
+  const amqpClient = await createAmqpClient(logger);
+
   if (redis) {
     const pubClient = createRedisClient(logger, { url: process.env.REDIS_URL, lazyConnect: true });
     const subClient = createRedisClient(logger, { url: process.env.REDIS_URL, lazyConnect: true });
     if (pubClient && subClient) {
-      eventBridge = new RedisEventBridge(emitter, pubClient, subClient, ['signal', 'order', 'normalized_bar'], logger);
-      await eventBridge.start();
+      const redisEvents = amqpClient ? REDIS_EVENTS : ALL_BRIDGE_EVENTS;
+      redisBridge = new RedisEventBridge(emitter, pubClient, subClient, redisEvents, logger);
+      await redisBridge.start();
     }
+  }
+
+  if (amqpClient) {
+    const amqpEvents = redisBridge ? AMQP_EVENTS : ALL_BRIDGE_EVENTS;
+    amqpBridge = new AmqpEventBridge(emitter, amqpClient.channel, amqpEvents, logger);
+    await amqpBridge.start();
   }
 
   // 1c.4 Manager services (risk → saga → order-manager)
@@ -192,10 +213,12 @@ export async function buildApp(
   serviceRegistry.register(executionSaga);
   serviceRegistry.register(orderManager);
 
-  // 1d. Graceful shutdown — bridge first (prevent cross-instance propagation during teardown)
+  // 1d. Graceful shutdown — bridges first (prevent cross-instance propagation during teardown)
   app.addHook('onClose', async () => {
-    if (eventBridge) await eventBridge.stop();
+    if (amqpBridge) await amqpBridge.stop();
+    if (redisBridge) await redisBridge.stop();
     await serviceRegistry.stopAll();
+    if (amqpClient) await closeAmqpClient(amqpClient, logger);
     if (redis) redis.disconnect();
   });
 
