@@ -71,7 +71,7 @@ export async function buildApp(
   emitter.setMaxListeners(0); // each WS client adds 3 listeners; unbounded is intentional
   const { pair = 'EURUSD', digits = 5 } = cfg.symbol ?? {};
   const symbol  = new SymbolInfo(pair, digits);
-  const broker  = new PaperBroker(emitter);
+  const broker  = new PaperBroker(emitter, app.log);
 
   app.decorate('emitter', emitter);
 

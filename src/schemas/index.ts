@@ -296,3 +296,53 @@ export { TradeStatsSchema, TradeParamsSchema } from '../domain/trade-params.js';
 export { PositionInfoVOSchema, DealInfoVOSchema, HistoryOrderInfoVOSchema } from '../domain/position.js';
 export { AccountInfoVOSchema, SymbolInfoVOSchema, TickSchema } from '../domain/account.js';
 export { MoneyManagementFactoryConfigSchema } from '../money-management/types.js';
+
+// ─────────────────────────────────────────────────────────────
+// OpenBB response schemas
+// ─────────────────────────────────────────────────────────────
+
+export const OpenBBPositionRowSchema = Type.Object({
+  side:      Type.Union([Type.Literal('LONG'), Type.Literal('SHORT')]),
+  size:      Type.Number(),
+  openPrice: Type.Union([Type.Number(), Type.Null()]),
+  sl:        Type.Union([Type.Number(), Type.Null()]),
+  tp:        Type.Union([Type.Number(), Type.Null()]),
+  pl:        Type.Number(),
+  status:    Type.Union([Type.Literal('OPEN'), Type.Literal('FLAT')]),
+});
+
+export const OpenBBMetricSchema = Type.Object({
+  value: Type.Number(),
+  label: Type.String(),
+  delta: Type.Number(),
+});
+
+export const OpenBBDealRowSchema = Type.Object({
+  ticket:     Type.Number(),
+  symbol:     Type.String(),
+  type:       Type.String(),
+  volume:     Type.Number(),
+  price:      Type.Number(),
+  profit:     Type.Number(),
+  swap:       Type.Number(),
+  commission: Type.Number(),
+  time:       Type.String({ format: 'date-time' }),
+});
+
+export const OpenBBOmniContentSchema = Type.Object({
+  content: Type.String(),
+  type:    Type.String(),
+});
+
+// ─────────────────────────────────────────────────────────────
+// Agent SDK skill execution
+// ─────────────────────────────────────────────────────────────
+
+export const SkillRunSchema = Type.Object({
+  prompt: Type.Optional(Type.String()),
+  sessionId: Type.Optional(Type.String({ format: 'uuid' })),
+  stream: Type.Optional(Type.Boolean()),
+  maxTurns: Type.Optional(Type.Number({ minimum: 1, maximum: 100 })),
+  maxBudgetUsd: Type.Optional(Type.Number({ minimum: 0.01, maximum: 10 })),
+}, { additionalProperties: false });
+export type SkillRunBody = Static<typeof SkillRunSchema>;
