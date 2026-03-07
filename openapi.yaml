@@ -167,6 +167,35 @@ tags:
       The `MoneyManagementConfig` schema encodes the full factory configuration —
       `stopLossType`, `takeProfitType`, and `lotsType` each select a calculation
       strategy, while the corresponding value fields parameterise it.
+  - name: Events
+    description: |
+      Static economic event catalog — 250+ `EventDefinition` records spanning
+      11 domains: economic (US, EU, GB, JP, others), equity, pharma, commodity,
+      fixed-income, crypto, and news/geopolitical.
+
+      **Filtering** — all query parameters on `GET /v1/events` are ANDed.
+      Numeric enum fields accept comma-separated integer values.
+
+      **Enum reference:**
+
+      | Enum | Values |
+      |------|--------|
+      | `domain` | `0` Economic · `1` Equity · `2` Pharma · `3` Commodity · `4` Crypto · `5` FixedIncome · `6` News · `7` Custom |
+      | `importance` | `0` None · `1` Low · `2` Moderate · `3` High (filter is **minimum**, i.e. ≥) |
+      | `type` | `0` Event · `1` Indicator · `2` Holiday |
+      | `sector` | `0` None · `1` Market · `2` GDP · `3` Jobs · `4` Prices · `5` Money · `6` Trade · `7` Government · `8` Business · `9` Consumer · `10` Housing · `11` Taxes · `12` Holidays · `13` Elections · `14` Futures · `15` Calendar · `16` Equity · `17` Pharma · `18` Commodity · `19` FixedIncome · `20` Crypto · `21` Geopolitical · `22` Energy · `23` Sentiment |
+
+      **Example — all high-impact US economic events:**
+      ```
+      GET /v1/events?domain=0&importance=3&countryCode=US
+      ```
+
+      **Example — text search:**
+      ```
+      GET /v1/events?search=non-farm
+      GET /v1/events?search=Federal+Open+Market
+      ```
+
   - name: Services
     description: |
       Service lifecycle management — list, inspect, start, and stop registered
@@ -1777,6 +1806,119 @@ paths:
           $ref: '#/components/responses/BadRequest'
 
   # ─────────────────────────────────────────────────────────────
+  # Event Catalog
+  # ─────────────────────────────────────────────────────────────
+
+  /v1/events:
+    get:
+      tags: [Events]
+      summary: Query event definitions
+      description: |
+        Returns `EventDefinition` records matching the supplied filters.
+        All filters are ANDed; omit a filter to skip it.
+
+        Numeric enum fields (`domain`, `importance`, `type`, `sector`) accept
+        comma-separated integer values, e.g. `domain=0,1` returns Economic and Equity events.
+
+        The `importance` filter is a **minimum** — `importance=3` returns High only,
+        `importance=2` returns Moderate and High.
+      parameters:
+        - in: query
+          name: domain
+          schema: { type: string }
+          description: "Comma-separated EventDomain integers. `0`=Economic `1`=Equity `2`=Pharma `3`=Commodity `4`=Crypto `5`=FixedIncome `6`=News `7`=Custom"
+          example: "0"
+        - in: query
+          name: importance
+          schema: { type: string }
+          description: "Minimum EventImportance. `0`=None `1`=Low `2`=Moderate `3`=High"
+          example: "3"
+        - in: query
+          name: countryCode
+          schema: { type: string }
+          description: "Comma-separated ISO country codes, e.g. `US` or `US,GB`"
+          example: "US"
+        - in: query
+          name: currency
+          schema: { type: string }
+          description: "Comma-separated currency codes, e.g. `USD` or `USD,EUR`"
+          example: "USD"
+        - in: query
+          name: type
+          schema: { type: string }
+          description: "Comma-separated EventType integers. `0`=Event `1`=Indicator `2`=Holiday"
+          example: "0,1"
+        - in: query
+          name: sector
+          schema: { type: string }
+          description: "Comma-separated EventSector integers (0-23)"
+          example: "3"
+        - in: query
+          name: search
+          schema: { type: string }
+          description: "Case-insensitive substring match on `name` and `description`"
+          example: "non-farm"
+      responses:
+        200:
+          description: Array of matching EventDefinition records
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EventDefinition'
+              examples:
+                highImpactUS:
+                  summary: High-impact US economic events
+                  value:
+                    - id: "US.JOBS.NFP"
+                      name: "Non-Farm Payrolls"
+                      domain: 0
+                      importance: 3
+                      countryCode: "US"
+                      currency: "USD"
+                      type: 1
+                      sector: 3
+                      frequency: 2
+                      timeMode: 0
+                      unit: 4
+                      multiplier: 1
+                      digits: 0
+
+  /v1/events/{id}:
+    get:
+      tags: [Events]
+      summary: Get event definition by ID
+      description: |
+        Returns a single `EventDefinition` by its dot-notation ID.
+
+        IDs follow the pattern `{COUNTRY}.{SECTOR_CODE}.{NAME}`, for example:
+        - `US.JOBS.NFP` — Non-Farm Payrolls
+        - `EU.MONEY.ECB_RATE` — ECB interest rate decision
+        - `GB.MONEY.BOE_RATE` — Bank of England rate decision
+        - `US.MONEY.FOMC` — Federal Open Market Committee
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+          description: "EventDefinition ID in dot-notation"
+          example: "US.JOBS.NFP"
+      responses:
+        200:
+          description: The matching EventDefinition
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventDefinition'
+        404:
+          description: No event found with that ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # ─────────────────────────────────────────────────────────────
   # Gateway Positions (ticket-based, paper broker)
   # ─────────────────────────────────────────────────────────────
 
@@ -3244,6 +3386,79 @@ components:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
 
   schemas:
+
+    # ── Event Catalog ────────────────────────────────────────────
+
+    EventDefinition:
+      type: object
+      required: [id, name, type, sector, domain, importance, frequency, timeMode, currency, unit, multiplier, digits]
+      description: |
+        Static definition of a tradeable economic, corporate, or geopolitical event.
+        Used as the catalog record that `ScheduledEvent` instances reference via `definitionId`.
+      properties:
+        id:
+          type: string
+          description: "Dot-notation identifier: `{COUNTRY}.{SECTOR_CODE}.{NAME}`"
+          example: "US.JOBS.NFP"
+        name:
+          type: string
+          example: "Non-Farm Payrolls"
+        type:
+          type: integer
+          description: "EventType: 0=Event 1=Indicator 2=Holiday"
+          enum: [0, 1, 2]
+        sector:
+          type: integer
+          description: "EventSector (0-23): 0=None 1=Market 2=GDP 3=Jobs 4=Prices 5=Money 6=Trade …"
+        domain:
+          type: integer
+          description: "EventDomain: 0=Economic 1=Equity 2=Pharma 3=Commodity 4=Crypto 5=FixedIncome 6=News 7=Custom"
+          enum: [0, 1, 2, 3, 4, 5, 6, 7]
+        importance:
+          type: integer
+          description: "EventImportance: 0=None 1=Low 2=Moderate 3=High"
+          enum: [0, 1, 2, 3]
+        frequency:
+          type: integer
+          description: "EventFrequency: 0=None 1=Week 2=Month 3=Quarter 4=Year 5=Day"
+          enum: [0, 1, 2, 3, 4, 5]
+        timeMode:
+          type: integer
+          description: "EventTimeMode: 0=DateTime 1=Date 2=NoTime 3=Tentative"
+          enum: [0, 1, 2, 3]
+        currency:
+          type: string
+          description: "Primary affected currency code, or 'ALL' for multi-currency events"
+          example: "USD"
+        unit:
+          type: integer
+          description: "EventUnit (0-13): 0=None 1=Percent 2=Currency 3=Hour 4=Job …"
+        multiplier:
+          type: integer
+          description: "EventMultiplier: 0=None 1=Thousands 2=Millions 3=Billions 4=Trillions"
+          enum: [0, 1, 2, 3, 4]
+        digits:
+          type: integer
+          description: "Decimal precision for reported values"
+        countryCode:
+          type: string
+          description: "ISO 3166-1 alpha-2 country code, e.g. 'US', 'GB'"
+          example: "US"
+        countryId:
+          type: integer
+          description: "ISO 3166-1 numeric country code"
+          example: 840
+        description:
+          type: string
+          description: "Human-readable description of what the event measures"
+          example: "Monthly measure of employment change in the US non-farm sector"
+        externalIds:
+          type: object
+          description: "Optional third-party identifiers for data feed integration"
+          properties:
+            numericId: { type: integer }
+            slug:      { type: string }
+            eventCode: { type: string }
 
     # ── Primitives / enums ──────────────────────────────────────
 
