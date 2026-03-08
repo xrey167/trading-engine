@@ -28,6 +28,7 @@
     "src/shared/domain/events/types.ts",
     "src/shared/domain/events/catalog.ts",
     "src/shared/domain/events/scheduled.ts",
+    "src/shared/domain/sector.ts",
     "src/analysis/strategies/types.ts",
     "src/analysis/strategy-service.ts",
     "src/analysis/screener-service.ts",
