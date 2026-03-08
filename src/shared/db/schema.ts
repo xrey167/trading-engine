@@ -1,4 +1,4 @@
-import { pgTable, serial, text, doublePrecision, timestamp, jsonb, integer, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import { pgTable, serial, text, doublePrecision, real, timestamp, jsonb, integer, uniqueIndex, index } from 'drizzle-orm/pg-core';
 
 export const bars = pgTable('bars', {
   id:        serial('id').primaryKey(),
@@ -50,3 +50,24 @@ export const accountSnapshots = pgTable('account_snapshots', {
   index('snapshots_strategy_idx').on(t.strategy, t.timestamp),
   index('snapshots_asset_type_idx').on(t.assetType, t.timestamp),
 ]);
+
+export const orderEvents = pgTable('order_events', {
+  id:         serial('id').primaryKey(),
+  orderId:    integer('order_id').notNull(),
+  action:     text('action').notNull(),
+  orderType:  text('order_type').notNull(),
+  source:     text('source'),
+  symbol:     text('symbol').notNull(),
+  direction:  text('direction').notNull(),
+  lots:       real('lots').notNull(),
+  price:      real('price').notNull(),
+  limitPrice: real('limit_price'),
+  metadata:   jsonb('metadata'),
+  timestamp:  text('timestamp').notNull(),
+  createdAt:  timestamp('created_at').defaultNow().notNull(),
+}, (t) => [
+  index('order_events_order_id_idx').on(t.orderId),
+  index('order_events_action_ts_idx').on(t.action, t.createdAt),
+]);
+
+export type OrderEventRow = typeof orderEvents.$inferInsert;

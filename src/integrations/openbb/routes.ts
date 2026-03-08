@@ -3,11 +3,16 @@ import type { FastifyPluginAsync } from 'fastify';
 import { Type } from '@sinclair/typebox';
 import { Side } from '../../../trading-engine.js';
 import { ErrorResponseSchema } from '../../shared/schemas/common.js';
+import { desc, count } from 'drizzle-orm';
+import { createDatabase } from '../../shared/db/client.js';
+import { orderEvents } from '../../shared/db/schema.js';
+import { toLogger } from '../../shared/lib/logger.js';
 import {
   OpenBBPositionRowSchema,
   OpenBBMetricSchema,
   OpenBBDealRowSchema,
   OpenBBOmniContentSchema,
+  OpenBBOrderEventRowSchema,
   OpenBBSignalRowSchema,
   OpenBBAuditRowSchema,
   HighchartsConfigSchema,
@@ -120,6 +125,15 @@ const WIDGETS_CONFIG = {
     gridDimensions: { w: 4, h: 4 },
     parameters: [],
   },
+  order_history: {
+    id: 'order_history',
+    name: 'Order History',
+    description: 'Full order lifecycle — PLACED, FILLED, CANCELLED, REJECTED, EXPIRED, MODIFIED',
+    endpoint: '/openbb/order-history',
+    gridData: { w: 20, h: 9 },
+    type: 'table',
+    params: [],
+  },
   tradingview_chart: {
     name: 'TradingView Chart',
     description: 'Interactive candlestick chart with indicators',
@@ -222,6 +236,16 @@ const SymbolQuerySchema = Type.Object({
 });
 
 // ─── Plugin ──────────────────────────────────────────────────────────────────
+
+// Module-level DB singleton — resolved once at plugin registration time.
+// null when DATABASE_URL is not set; routes that need it return 503.
+let _dbConn: ReturnType<typeof createDatabase> | undefined;
+function getDb(fastify: Parameters<FastifyPluginAsync>[0]) {
+  if (_dbConn === undefined) {
+    _dbConn = createDatabase(toLogger(fastify.log));
+  }
+  return _dbConn;
+}
 
 // NOT fp()-wrapped — hooks and routes are scoped to this child only.
 const openbbRoute: FastifyPluginAsync = async (fastify) => {
@@ -419,6 +443,69 @@ const openbbRoute: FastifyPluginAsync = async (fastify) => {
         content: Object.entries(cfg).map(([key, value]) => ({ key, value })),
       },
     ]);
+  });
+
+  // ── Order History (SSRM) ───────────────────────────────────────────────────
+
+  const OrderHistoryQuerySchema = Type.Intersect([
+    SSRMQuerySchema,
+    Type.Object({ apiKey: Type.Optional(Type.String()) }),
+  ]);
+
+  fastify.get('/openbb/order-history', {
+    schema: {
+      querystring: OrderHistoryQuerySchema,
+      response: {
+        200: SSRMResponseSchema(OpenBBOrderEventRowSchema),
+        503: Type.Object({ error: Type.String(), message: Type.String(), statusCode: Type.Integer() }),
+      },
+    },
+  }, async (req, reply) => {
+    reply.header('Cache-Control', 'private, max-age=5');
+    const conn = getDb(fastify);
+    if (!conn) {
+      return reply.status(503).send({
+        error: 'Service Unavailable',
+        message: 'Order history requires DATABASE_URL',
+        statusCode: 503,
+      });
+    }
+
+    const q = req.query as SSRMParams;
+    const start = q.startRow ?? 0;
+    const end   = q.endRow   ?? start + 100;
+    const limit = Math.min(end - start, 1000);
+
+    const [rows, totalResult] = await Promise.all([
+      conn.db
+        .select()
+        .from(orderEvents)
+        .orderBy(desc(orderEvents.createdAt))
+        .limit(limit)
+        .offset(start),
+      conn.db
+        .select({ total: count() })
+        .from(orderEvents),
+    ]);
+
+    const lastRow = totalResult[0]?.total ?? 0;
+
+    const mapped = rows.map(r => ({
+      id:         r.id,
+      orderId:    r.orderId,
+      action:     r.action,
+      orderType:  r.orderType,
+      source:     r.source ?? null,
+      symbol:     r.symbol,
+      direction:  r.direction,
+      lots:       r.lots,
+      price:      r.price,
+      limitPrice: r.limitPrice ?? null,
+      timestamp:  r.timestamp,
+      createdAt:  r.createdAt.toISOString(),
+    }));
+
+    return reply.send({ rows: mapped, lastRow });
   });
 
   // ── Equity Curve (Highcharts) ─────────────────────────────────────────────

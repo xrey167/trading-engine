@@ -7,6 +7,8 @@ import { DealWriter } from './deal-writer.js';
 function makeOrderEvent(overrides: Partial<OrderEvent> = {}): OrderEvent {
   return {
     action: 'FILLED',
+    orderId: 0,
+    orderType: 'BUY_MARKET',
     brokerId: 'paper',
     symbol: 'EURUSD',
     direction: 'BUY',

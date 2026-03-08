@@ -1302,6 +1302,7 @@ export class TradingEngine {
   private _nextREV     = false;
   private _nextLimitConfirm: LimitConfirm = LimitConfirm.None;
   private _removeOrdersOnFlat = false;
+  onOrderExpired?: (orders: Order[]) => void;
 
   // Spread cache
   private _spreadAbs = 0;
@@ -1787,7 +1788,9 @@ export class TradingEngine {
     return {
       id, type, side, price,
       size: size ?? this._nextOrderSize,
-      time: new Date(),
+      // Use last bar time so order creation timestamps are deterministic during historical replay.
+      // Falls back to epoch (new Date(0)) before the first onBar call, which is acceptable.
+      time: this._lastBarTime,
       oco:  this._nextOCO  ? true : undefined,
       co:   this._nextCO   ? true : undefined,
       cs:   this._nextCS   ? true : undefined,
@@ -1988,7 +1991,12 @@ export class TradingEngine {
     this._recordDeal(slot, hit.exitPrice, hit.reason.toLowerCase(), bar.time);
     await this.broker.closePosition(slot.side, slot.size, hit.reason);
     this._resetSlot(slot);
-    if (this._removeOrdersOnFlat && this.getCntPos() === 0) this.orders = [];
+    if (this._removeOrdersOnFlat && this.getCntPos() === 0) {
+      if (this.onOrderExpired && this.orders.length > 0) {
+        this.onOrderExpired([...this.orders]);
+      }
+      this.orders = [];
+    }
   }
 
   private async _closeSlot(slot: PositionSlot, info?: string): Promise<boolean> {

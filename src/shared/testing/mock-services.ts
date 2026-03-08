@@ -58,6 +58,8 @@ export function makeSignalEvent(overrides: Partial<SignalEvent> = {}): SignalEve
 export function makeOrderEvent(overrides: Partial<OrderEvent> = {}): OrderEvent {
   return {
     action: 'FILLED',
+    orderId: 0,
+    orderType: 'UNKNOWN',
     brokerId: 'broker:paper:primary',
     symbol: 'EURUSD',
     direction: 'BUY',

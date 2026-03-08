@@ -103,6 +103,8 @@ export class ExecutionSaga extends BaseService {
         this.riskManager.releaseCapacity(signal.symbol);
         this.eventBus.emit('order', {
           action: 'REJECTED',
+          orderId: 0,
+          orderType: 'UNKNOWN',
           brokerId,
           symbol: signal.symbol,
           direction: signal.action,
@@ -119,6 +121,8 @@ export class ExecutionSaga extends BaseService {
       this._ordersPlaced++;
       this.eventBus.emit('order', {
         action: 'FILLED',
+        orderId: 0,
+        orderType: 'UNKNOWN',
         brokerId,
         symbol: signal.symbol,
         direction: signal.action,
@@ -134,6 +138,8 @@ export class ExecutionSaga extends BaseService {
 
       this.eventBus.emit('order', {
         action: 'REJECTED',
+        orderId: 0,
+        orderType: 'UNKNOWN',
         brokerId: (signal.metadata.brokerId as string | undefined) ?? 'broker:paper:primary',
         symbol: signal.symbol,
         direction: signal.action,

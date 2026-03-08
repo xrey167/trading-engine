@@ -71,6 +71,22 @@ export const SSRMResponseSchema = <T extends TSchema>(itemSchema: T) =>
     lastRow: Type.Integer(),
   });
 
+
+export const OpenBBOrderEventRowSchema = Type.Object({
+  id:         Type.Integer(),
+  orderId:    Type.Integer(),
+  action:     Type.String(),
+  orderType:  Type.String(),
+  source:     Type.Union([Type.String(), Type.Null()]),
+  symbol:     Type.String(),
+  direction:  Type.String(),
+  lots:       Type.Number(),
+  price:      Type.Number(),
+  limitPrice: Type.Union([Type.Number(), Type.Null()]),
+  timestamp:  Type.String({ format: 'date-time' }),
+  createdAt:  Type.String({ format: 'date-time' }),
+});
+
 // ─────────────────────────────────────────────────────────────
 // New widget schemas
 // ─────────────────────────────────────────────────────────────
