@@ -7,6 +7,10 @@ import { ServiceKind } from '../shared/services/types.js';
 import { BaseService } from '../shared/services/base-service.js';
 import { BrokerService } from '../broker/broker-service.js';
 import type { RiskManagerService } from './risk-manager.js';
+import { createCanonicalId, EntityType, BrokerSlot, type CanonicalId } from '../shared/lib/canonical-id.js';
+import { CanonicalIdRegistry } from '../shared/lib/canonical-id-registry.js';
+
+const _canonicalRegistry = new CanonicalIdRegistry();
 
 export class ExecutionSaga extends BaseService {
   readonly id: string;
@@ -119,15 +123,36 @@ export class ExecutionSaga extends BaseService {
 
       // 4. Emit success
       this._ordersPlaced++;
+      const fillTicket = orderResult.value.ticket;
+      let canonicalId: CanonicalId | undefined;
+      if (fillTicket !== 0) {
+        const cidResult = createCanonicalId(
+          {
+            broker: BrokerSlot.Paper,
+            type: EntityType.Order,
+            nativeId: fillTicket,
+            symbol: signal.symbol,
+            strategyId: 0,
+          },
+          _canonicalRegistry,
+          svc.broker,
+        );
+        if (cidResult.ok) {
+          canonicalId = cidResult.value;
+        } else {
+          this.logger.warn(`ExecutionSaga: canonicalId creation failed — ${cidResult.error.message}`);
+        }
+      }
       this.eventBus.emit('order', {
         action: 'FILLED',
-        orderId: 0,
+        orderId: fillTicket,
         orderType: 'UNKNOWN',
         brokerId,
         symbol: signal.symbol,
         direction: signal.action,
         lots: 1,
         price,
+        canonicalId,
         metadata: { signalServiceId: signal.serviceId },
         timestamp: new Date().toISOString(),
       });

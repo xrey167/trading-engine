@@ -25,7 +25,8 @@ export class DealWriter {
       profit:     (event.metadata.profit as number) ?? 0,
       swap:       (event.metadata.swap as number) ?? 0,
       commission: (event.metadata.commission as number) ?? 0,
-      time:       new Date(event.timestamp),
+      canonicalId: event.canonicalId ?? null,
+      time:        new Date(event.timestamp),
     }).then(() => {
       this.logger.debug(`Deal written: ${event.symbol} ${event.direction} ${event.lots}@${event.price}`);
     }).catch((err) => {
