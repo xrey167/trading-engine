@@ -16,10 +16,10 @@ import {
 // Unit 2 — Domain enums
 import { DayOfWeek } from '../domain/calendar/session.js';
 import { MAType, PriceType } from '../domain/indicator/indicator.js';
+import { OrderType, OrderFilling, OrderSide, OrderEntryType } from '../domain/order/order.js';
 import {
-  OrderSide, PositionSizeType,
+  PositionSizeType,
   StopLimitType, StopLossType, TakeProfitType,
-  OrderType, OrderFilling,
 } from '../domain/enums.js';
 
 // Unit 3 — Analysis

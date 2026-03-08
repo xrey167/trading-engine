@@ -1,5 +1,5 @@
 import { Type, type Static } from '@sinclair/typebox';
-import { OrderEntryType } from '../domain/enums.js';
+import { OrderEntryType } from '../domain/order/order.js';
 import { BarBase, OrderAttr, LimitConfirm } from '../domain/engine-enums.js';
 
 // ─────────────────────────────────────────────────────────────
