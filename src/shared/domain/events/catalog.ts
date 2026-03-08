@@ -4,7 +4,7 @@
 
 import { ALL_EVENTS } from './definitions.js';
 import type { EventDefinition } from './types.js';
-import { EventDomain, EventImportance, EventSector, EventType, EventFrequency } from './types.js';
+import { type EventDomain, EventImportance, type EventSector, type EventType, type EventFrequency } from './types.js';
 
 export interface EventQuery {
   domain?: EventDomain | EventDomain[];

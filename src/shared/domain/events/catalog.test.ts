@@ -37,9 +37,9 @@ describe('EventCatalog', () => {
     it('returns NFP by id', () => {
       const e = getEventById('US.JOBS.NFP');
       expect(e).toBeDefined();
-      expect(e!.name).toBe('Non-Farm Payrolls');
-      expect(e!.importance).toBe(EventImportance.High);
-      expect(e!.domain).toBe(EventDomain.Economic);
+      expect(e?.name).toBe('Non-Farm Payrolls');
+      expect(e?.importance).toBe(EventImportance.High);
+      expect(e?.domain).toBe(EventDomain.Economic);
     });
 
     it('returns undefined for unknown id', () => {
@@ -49,7 +49,7 @@ describe('EventCatalog', () => {
     it('returns ECB rate decision', () => {
       const e = getEventById('EU.MONEY.ECB_RATE');
       expect(e).toBeDefined();
-      expect(e!.currency).toBe('EUR');
+      expect(e?.currency).toBe('EUR');
     });
   });
 

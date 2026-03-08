@@ -41,8 +41,8 @@ describe('createAmqpClient', () => {
 
     expect(amqplib.connect).toHaveBeenCalledWith('amqp://localhost:5672', { heartbeat: 30 });
     expect(result).not.toBeNull();
-    expect(result!.connection).toBe(mockConnection);
-    expect(result!.channel).toBe(mockChannel);
+    expect(result?.connection).toBe(mockConnection);
+    expect(result?.channel).toBe(mockChannel);
   });
 
   it('connects with RABBITMQ_URL env var', async () => {

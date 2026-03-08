@@ -40,8 +40,8 @@ describe('createDatabase', () => {
     const result = createDatabase(nullLogger);
 
     expect(result).not.toBeNull();
-    expect(result!.db).toBeDefined();
-    expect(result!.pool).toBeDefined();
+    expect(result?.db).toBeDefined();
+    expect(result?.pool).toBeDefined();
   });
 
   it('registers error handler on pool', () => {
