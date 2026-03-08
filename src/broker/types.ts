@@ -79,6 +79,8 @@ export interface IIndicatorGateway {
 
 // Composite
 export interface IFullBrokerAdapter extends IBrokerAdapter, IOrderGateway, IPositionGateway, IHistoryGateway, IMarketDataGateway, IAccountGateway, IIndicatorGateway {
+  /** Native ticket width for this broker: 32-bit (MT5, paper) or 64-bit (IB, etc.). */
+  readonly idWidth: 32 | 64;
   connect(): Promise<void>;
   disconnect(): Promise<void>;
   isConnected(): boolean;

@@ -39,6 +39,7 @@ import { consoleLogger, type Logger } from '../../shared/lib/logger.js';
  *   - PaperIndicatorGateway  (IIndicatorGateway)
  */
 export class PaperBroker implements IBrokerAdapter, IOrderGateway, IPositionGateway, IHistoryGateway, IMarketDataGateway, IAccountGateway, IIndicatorGateway {
+  readonly idWidth = 32 as const;
   private seq = 0;
   private priceRef = 0;
 
