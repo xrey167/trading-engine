@@ -3,3 +3,7 @@ dist/
 docs-api/
 *.js.map
 .worktrees/
+
+# macOS metadata
+.DS_Store
+**/.DS_Store
