@@ -122,6 +122,15 @@ describe('PostgresBarCache', () => {
     expect(bars[1].close).toBe(1.16);
   });
 
+  it('hydrate uses maxBars as default limit', async () => {
+    const customMaxBars = 250;
+    const customCache = new PostgresBarCache(db as any, nullLogger, customMaxBars);
+    db._selectChain.limit.mockResolvedValue([]);
+
+    await customCache.hydrate('EURUSD', 'M1');
+    expect(db._selectChain.limit).toHaveBeenCalledWith(customMaxBars);
+  });
+
   it('hydrate returns 0 on error', async () => {
     db._selectChain.limit.mockRejectedValue(new Error('connection refused'));
     const count = await cache.hydrate('EURUSD', 'M1');

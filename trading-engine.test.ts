@@ -871,6 +871,64 @@ describe('P13 – ScaledOrderEngine: order count and named preset', () => {
 });
 
 // ─────────────────────────────────────────────────────────────
+// P13b – ScaledOrderEngine: attrCO/attrREV re-applied in loops
+// ─────────────────────────────────────────────────────────────
+
+describe('P13b – ScaledOrderEngine: attrCO/attrREV carried on limit and stop loop orders', () => {
+  const flatBars = makeBars(Array(30).fill(1.10000));
+
+  it('attrCO=true: all limit loop orders carry the CO flag', async () => {
+    const broker = mockBroker(1.10000);
+    const eng = new TradingEngine(EURUSD5, broker);
+    const preset: ScaledOrderPreset = {
+      name: 'co-limit-test',
+      atrMode: 'None', distance: 20,
+      progressLimits: 1, progressStops: 1,
+      countLimits: 2, countStops: 0,
+      slRel: 0, trailBegin: 0, trailDistance: 0,
+      factorLong: 1, factorShort: 1,
+      attrOCO: false, attrCO: true, attrREV: false, attrNET: false,
+      instantOrderType: 'MTO',
+      instantOrderDistance: 1,
+      chainLimits: false,
+      eachTick: false,
+    };
+    const scaled = new ScaledOrderEngine(eng, EURUSD5, preset);
+    await scaled.placeLong(flatBars, 1.10000);
+
+    // 1 MIT (instant) + 2 limits = 3 pending orders; all 3 must have co=true
+    const orders = eng.getOrders();
+    expect(orders).toHaveLength(3);
+    expect(orders.every(o => o.co === true)).toBe(true);
+  });
+
+  it('attrCO=true: all stop loop orders carry the CO flag', async () => {
+    const broker = mockBroker(1.10000);
+    const eng = new TradingEngine(EURUSD5, broker);
+    const preset: ScaledOrderPreset = {
+      name: 'co-stop-test',
+      atrMode: 'None', distance: 20,
+      progressLimits: 1, progressStops: 1,
+      countLimits: 0, countStops: 2,
+      slRel: 0, trailBegin: 0, trailDistance: 0,
+      factorLong: 1, factorShort: 1,
+      attrOCO: false, attrCO: true, attrREV: false, attrNET: false,
+      instantOrderType: 'MTO',
+      instantOrderDistance: 1,
+      chainLimits: false,
+      eachTick: false,
+    };
+    const scaled = new ScaledOrderEngine(eng, EURUSD5, preset);
+    await scaled.placeLong(flatBars, 1.10000);
+
+    // 1 MIT (instant) + 2 stops = 3 pending orders; all 3 must have co=true
+    const orders = eng.getOrders();
+    expect(orders).toHaveLength(3);
+    expect(orders.every(o => o.co === true)).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
 // P14 – Bars utility methods: sma, highestHigh, lowestLow
 // ─────────────────────────────────────────────────────────────
 

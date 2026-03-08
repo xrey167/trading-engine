@@ -3,6 +3,9 @@ import { EventEmitter } from 'node:events';
 import { AuditConsumer } from './audit-consumer.js';
 import { nullLogger } from '../shared/lib/logger.js';
 
+/** Flush all pending microtasks/promise continuations */
+const flushPromises = () => new Promise<void>((resolve) => setImmediate(resolve));
+
 class MockAmqpChannel extends EventEmitter {
   consumers = new Map<string, (msg: any) => void>();
   assertedExchanges: string[] = [];
@@ -54,6 +57,7 @@ describe('AuditConsumer', () => {
       payload: { symbol: 'EURUSD' },
       timestamp: '2026-01-01T00:00:00.000Z',
     });
+    await flushPromises();
 
     expect(consumer.size).toBe(1);
     const entries = consumer.query();
@@ -73,6 +77,7 @@ describe('AuditConsumer', () => {
         timestamp: `2026-01-01T00:00:0${i}.000Z`,
       });
     }
+    await flushPromises();
 
     // Buffer size is 5, so oldest 2 should be dropped
     expect(consumer.size).toBe(5);
@@ -87,6 +92,7 @@ describe('AuditConsumer', () => {
     channel.simulateMessage({ type: 'signal', payload: {}, timestamp: '2026-01-01T00:00:00.000Z' });
     channel.simulateMessage({ type: 'order', payload: {}, timestamp: '2026-01-01T00:00:01.000Z' });
     channel.simulateMessage({ type: 'signal', payload: {}, timestamp: '2026-01-01T00:00:02.000Z' });
+    await flushPromises();
 
     const signals = consumer.query({ type: 'signal' });
     expect(signals).toHaveLength(2);
@@ -99,6 +105,7 @@ describe('AuditConsumer', () => {
     channel.simulateMessage({ type: 'a', payload: {}, timestamp: '2026-01-01T00:00:00.000Z' });
     channel.simulateMessage({ type: 'b', payload: {}, timestamp: '2026-01-02T00:00:00.000Z' });
     channel.simulateMessage({ type: 'c', payload: {}, timestamp: '2026-01-03T00:00:00.000Z' });
+    await flushPromises();
 
     const result = consumer.query({ since: '2026-01-02T00:00:00.000Z' });
     expect(result).toHaveLength(2);
@@ -112,6 +119,7 @@ describe('AuditConsumer', () => {
     for (let i = 1; i <= 4; i++) {
       channel.simulateMessage({ type: 'x', payload: { i }, timestamp: `2026-01-0${i}T00:00:00.000Z` });
     }
+    await flushPromises();
 
     const result = consumer.query({ limit: 2 });
     expect(result).toHaveLength(2);
@@ -127,10 +135,11 @@ describe('AuditConsumer', () => {
     expect(consumer.isStarted).toBe(false);
   });
 
-  it('writes to Postgres when db is provided', async () => {
+  it('writes to Postgres when db is provided and acks after insert resolves', async () => {
     const mockValues = vi.fn().mockResolvedValue(undefined);
     const mockInsert = vi.fn().mockReturnValue({ values: mockValues });
     const mockDb = { insert: mockInsert } as any;
+    const ackSpy = vi.spyOn(channel, 'ack');
 
     const dbConsumer = new AuditConsumer(channel as any, nullLogger, { bufferSize: 5, db: mockDb });
     await dbConsumer.start();
@@ -142,6 +151,11 @@ describe('AuditConsumer', () => {
       timestamp: '2026-01-01T00:00:00.000Z',
     });
 
+    // Before promises flush: insert may still be pending — ack should NOT have been called yet
+    expect(ackSpy).not.toHaveBeenCalled();
+
+    await flushPromises();
+
     // Ring buffer still works
     expect(dbConsumer.size).toBe(1);
 
@@ -150,6 +164,32 @@ describe('AuditConsumer', () => {
     expect(mockValues).toHaveBeenCalledWith(
       expect.objectContaining({ instanceId: 'inst-1', type: 'order' }),
     );
+
+    // Ack happens after the insert resolves
+    expect(ackSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('still acks when Postgres insert throws (prevents infinite requeue)', async () => {
+    const mockValues = vi.fn().mockRejectedValue(new Error('DB connection lost'));
+    const mockInsert = vi.fn().mockReturnValue({ values: mockValues });
+    const mockDb = { insert: mockInsert } as any;
+    const ackSpy = vi.spyOn(channel, 'ack');
+
+    const dbConsumer = new AuditConsumer(channel as any, nullLogger, { bufferSize: 5, db: mockDb });
+    await dbConsumer.start();
+
+    channel.simulateMessage({
+      instanceId: 'inst-1',
+      type: 'order',
+      payload: { symbol: 'EURUSD' },
+      timestamp: '2026-01-01T00:00:00.000Z',
+    });
+    await flushPromises();
+
+    // Message is still acked even though DB write failed
+    expect(ackSpy).toHaveBeenCalledTimes(1);
+    // Entry was still pushed to the ring buffer before the failed DB write
+    expect(dbConsumer.size).toBe(1);
   });
 
   it('works without db (no Postgres write)', async () => {
@@ -161,6 +201,7 @@ describe('AuditConsumer', () => {
       payload: {},
       timestamp: '2026-01-01T00:00:00.000Z',
     });
+    await flushPromises();
 
     expect(noPgConsumer.size).toBe(1);
     // No error, no crash — just ring buffer

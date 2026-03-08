@@ -217,5 +217,14 @@ describe('SnapshotWriter', () => {
 
       expect(mockInsert.values).not.toHaveBeenCalled();
     });
+
+    it('stop() removes the order listener from the emitter', () => {
+      writer.start(60_000, emitter);
+      const countAfterStart = emitter.listenerCount('order');
+      expect(countAfterStart).toBeGreaterThan(0);
+
+      writer.stop();
+      expect(emitter.listenerCount('order')).toBe(countAfterStart - 1);
+    });
   });
 });

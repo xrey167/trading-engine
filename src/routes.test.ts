@@ -1772,6 +1772,22 @@ describe('R28 – all mutating routes reject requests when API_KEY is set', () =
     const res = await app.inject({ method: 'GET', url: '/account' });
     expect(res.statusCode).toBe(200);
   });
+
+  it('route handler body is NOT executed after a 401 — no order is placed', async () => {
+    // If apiKeyPreHandler did not return after reply.send(), Fastify would call
+    // the route handler anyway, executing business logic on unauthenticated requests.
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orders',
+      payload: { type: 'BUY_LIMIT', price: 1.095 },
+    });
+    expect(res.statusCode).toBe(401);
+    expect(res.json()).toHaveProperty('error');
+    // Engine must remain clean — no order was placed despite a valid payload
+    const ordersRes = await app.inject({ method: 'GET', url: '/orders' });
+    expect(ordersRes.statusCode).toBe(200);
+    expect(ordersRes.json()).toHaveLength(0);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────
