@@ -1302,6 +1302,7 @@ export class TradingEngine {
   private _nextREV     = false;
   private _nextLimitConfirm: LimitConfirm = LimitConfirm.None;
   private _removeOrdersOnFlat = false;
+  onOrderExpired?: (orders: Order[]) => void;
 
   // Spread cache
   private _spreadAbs = 0;
@@ -1990,7 +1991,12 @@ export class TradingEngine {
     this._recordDeal(slot, hit.exitPrice, hit.reason.toLowerCase(), bar.time);
     await this.broker.closePosition(slot.side, slot.size, hit.reason);
     this._resetSlot(slot);
-    if (this._removeOrdersOnFlat && this.getCntPos() === 0) this.orders = [];
+    if (this._removeOrdersOnFlat && this.getCntPos() === 0) {
+      if (this.onOrderExpired && this.orders.length > 0) {
+        this.onOrderExpired([...this.orders]);
+      }
+      this.orders = [];
+    }
   }
 
   private async _closeSlot(slot: PositionSlot, info?: string): Promise<boolean> {

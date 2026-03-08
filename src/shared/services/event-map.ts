@@ -21,12 +21,16 @@ export interface ScreenerEvent {
 }
 
 export interface OrderEvent {
-  readonly action: 'PLACED' | 'FILLED' | 'REJECTED' | 'CANCELLED';
+  readonly action: 'PLACED' | 'FILLED' | 'REJECTED' | 'CANCELLED' | 'EXPIRED' | 'MODIFIED';
+  readonly orderId: number;
+  readonly orderType: string;
   readonly brokerId: string;
   readonly symbol: string;
   readonly direction: 'BUY' | 'SELL';
   readonly lots: number;
   readonly price: number;
+  readonly source?: 'http' | 'broker' | 'synthetic';
+  readonly limitPrice?: number;
   readonly metadata: Record<string, unknown>;
   readonly timestamp: string;
 }

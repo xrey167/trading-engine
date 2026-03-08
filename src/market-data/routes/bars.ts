@@ -8,6 +8,26 @@ import {
 import { apiKeyPreHandler } from '../../shared/lib/api-utils.js';
 
 const barsRoute: FastifyPluginAsync = async (fastify) => {
+  // Wire engine callback to emit EXPIRED events when removeOrdersOnFlat fires
+  fastify.engine.onOrderExpired = (orders) => {
+    const now = new Date().toISOString();
+    for (const o of orders) {
+      fastify.emitter.emit('order', {
+        action:    'EXPIRED',
+        orderId:   Number(o.id),
+        orderType: o.type,
+        source:    'broker',
+        brokerId:  'paper',
+        symbol:    fastify.symbol.name,
+        direction: (o.side > 0) ? 'BUY' : 'SELL',
+        lots:      o.size,
+        price:     o.price,
+        metadata:  {},
+        timestamp: now,
+      });
+    }
+  };
+
   // POST /bars — drives engine.onBar(); emits 'bar' event to WebSocket clients
   fastify.post<{ Body: PostBarsBody }>('/bars', {
     preHandler: [apiKeyPreHandler],

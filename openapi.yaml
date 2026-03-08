@@ -2779,6 +2779,54 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+  /openbb/order-history:
+    get:
+      tags:
+        - OpenBB
+      summary: Order lifecycle history (SSRM)
+      description: |
+        Append-only log of every order state transition.
+        Supports AG Grid Server-Side Row Model pagination via `startRow`/`endRow`.
+        Returns 503 when `DATABASE_URL` is not configured.
+      operationId: getOpenBBOrderHistory
+      parameters:
+        - name: startRow
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: endRow
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 100
+        - name: apiKey
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Paginated order event rows
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenBBOrderHistoryResponse'
+        '503':
+          description: Database not configured
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                  message:
+                    type: string
+                  statusCode:
+                    type: integer
+
   /openbb/symbol:
     get:
       tags: [OpenBB]
@@ -4753,6 +4801,50 @@ components:
         swap:       { type: number, description: "Swap charges applied" }
         commission: { type: number, description: "Commission charged" }
         time:       { type: string, format: date-time, description: "Execution timestamp" }
+
+    OpenBBOrderEventRow:
+      type: object
+      properties:
+        id:
+          type: integer
+        orderId:
+          type: integer
+        action:
+          type: string
+          enum: [PLACED, FILLED, CANCELLED, REJECTED, EXPIRED, MODIFIED]
+        orderType:
+          type: string
+        source:
+          type: string
+          nullable: true
+        symbol:
+          type: string
+        direction:
+          type: string
+          enum: [BUY, SELL]
+        lots:
+          type: number
+        price:
+          type: number
+        limitPrice:
+          type: number
+          nullable: true
+        timestamp:
+          type: string
+        createdAt:
+          type: string
+      required: [id, orderId, action, orderType, symbol, direction, lots, price, timestamp, createdAt]
+
+    OpenBBOrderHistoryResponse:
+      type: object
+      properties:
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/OpenBBOrderEventRow'
+        lastRow:
+          type: integer
+      required: [rows, lastRow]
 
     HighchartsConfig:
       type: object

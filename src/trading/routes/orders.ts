@@ -155,6 +155,22 @@ const ordersRoute: FastifyPluginAsync = async (fastify) => {
           return reply.status(400).send({ error: `Unknown order type: ${type}` });
       }
 
+      if (id !== undefined) {
+        fastify.emitter.emit('order', {
+          action:    'PLACED',
+          orderId:   Number(id),
+          orderType: type,
+          source:    'http',
+          brokerId:  'paper',
+          symbol:    fastify.symbol.name,
+          direction: type.startsWith('BUY') ? 'BUY' : 'SELL',
+          lots:      size ?? 1,
+          price:     price ?? 0,
+          limitPrice: limitPrice,
+          metadata:  {},
+          timestamp: new Date().toISOString(),
+        });
+      }
       return reply.send({ id });
     } finally {
       release();
@@ -193,8 +209,22 @@ const ordersRoute: FastifyPluginAsync = async (fastify) => {
   }, async (req, reply) => {
     const release = await fastify.engineMutex.acquire();
     try {
+      const existing = fastify.engine.getOrders().find(o => o.id === req.params.id);
       const moved = fastify.engine.moveOrder(req.params.id, req.body.price);
       if (!moved) return reply.status(404).send({ error: `Order ${req.params.id} not found` });
+      fastify.emitter.emit('order', {
+        action:    'MODIFIED',
+        orderId:   Number(req.params.id),
+        orderType: existing?.type ?? 'UNKNOWN',
+        source:    'http',
+        brokerId:  'paper',
+        symbol:    fastify.symbol.name,
+        direction: (existing?.side ?? 0) > 0 ? 'BUY' : 'SELL',
+        lots:      existing?.size ?? 0,
+        price:     req.body.price,
+        metadata:  {},
+        timestamp: new Date().toISOString(),
+      });
       return reply.send({ ok: true });
     } finally {
       release();
@@ -214,12 +244,34 @@ const ordersRoute: FastifyPluginAsync = async (fastify) => {
     const release = await fastify.engineMutex.acquire();
     try {
       const { side } = req.query as { side: string };
+      const allOrders = fastify.engine.getOrders();
+      const toCancel = side === 'buy'
+        ? allOrders.filter(o => o.side > 0)
+        : side === 'sell'
+          ? allOrders.filter(o => o.side < 0)
+          : allOrders;
       switch (side) {
         case 'buy':  await fastify.engine.deleteBuyOrders();  break;
         case 'sell': await fastify.engine.deleteSellOrders(); break;
         case 'all':  await fastify.engine.deleteAllOrders();  break;
         default:
           return reply.status(400).send({ error: `Unknown side: ${side}` });
+      }
+      const now = new Date().toISOString();
+      for (const o of toCancel) {
+        fastify.emitter.emit('order', {
+          action:    'CANCELLED',
+          orderId:   Number(o.id),
+          orderType: o.type,
+          source:    'http',
+          brokerId:  'paper',
+          symbol:    fastify.symbol.name,
+          direction: o.side > 0 ? 'BUY' : 'SELL',
+          lots:      o.size,
+          price:     o.price,
+          metadata:  {},
+          timestamp: now,
+        });
       }
       return reply.send({ ok: true });
     } finally {
@@ -240,8 +292,22 @@ const ordersRoute: FastifyPluginAsync = async (fastify) => {
   }, async (req, reply) => {
     const release = await fastify.engineMutex.acquire();
     try {
+      const existing = fastify.engine.getOrders().find(o => o.id === req.params.id);
       const deleted = fastify.engine.deleteOrder(req.params.id);
       if (!deleted) return reply.status(404).send({ error: `Order ${req.params.id} not found` });
+      fastify.emitter.emit('order', {
+        action:    'CANCELLED',
+        orderId:   Number(req.params.id),
+        orderType: existing?.type ?? 'UNKNOWN',
+        source:    'http',
+        brokerId:  'paper',
+        symbol:    fastify.symbol.name,
+        direction: (existing?.side ?? 0) > 0 ? 'BUY' : 'SELL',
+        lots:      existing?.size ?? 0,
+        price:     existing?.price ?? 0,
+        metadata:  {},
+        timestamp: new Date().toISOString(),
+      });
       return reply.send({ ok: true });
     } finally {
       release();

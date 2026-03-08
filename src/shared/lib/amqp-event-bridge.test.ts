@@ -152,7 +152,7 @@ describe('AmqpEventBridge', () => {
       action: 'BUY', confidence: 1, metadata: {}, timestamp: new Date().toISOString(),
     });
     bus.emit('order', {
-      action: 'PLACED', brokerId: 'paper', symbol: 'EURUSD',
+      action: 'PLACED', orderId: 0, orderType: 'UNKNOWN', brokerId: 'paper', symbol: 'EURUSD',
       direction: 'BUY', lots: 0.1, price: 1.1, metadata: {}, timestamp: new Date().toISOString(),
     });
 
@@ -171,7 +171,7 @@ describe('AmqpEventBridge', () => {
     await bridge.start();
 
     bus.emit('order', {
-      action: 'FILLED', brokerId: 'paper', symbol: 'EURUSD',
+      action: 'FILLED', orderId: 0, orderType: 'UNKNOWN', brokerId: 'paper', symbol: 'EURUSD',
       direction: 'BUY', lots: 0.1, price: 1.1, metadata: {}, timestamp: new Date().toISOString(),
     });
     bus.emit('risk', {
