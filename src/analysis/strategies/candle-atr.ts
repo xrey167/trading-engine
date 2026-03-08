@@ -39,7 +39,7 @@ export class CandleAtrStrategy implements ISignalStrategy {
       return SignalResult.HOLD;
     }
 
-    if (currentBar.range() < atr * this.config.atrMultiplier) {
+    if (prevBar.range() < atr * this.config.atrMultiplier) {
       return SignalResult.HOLD;
     }
 

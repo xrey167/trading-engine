@@ -62,40 +62,45 @@ export class AuditConsumer {
       AUDIT_QUEUE,
       (msg) => {
         if (!msg) return;
-        try {
-          const envelope = JSON.parse(msg.content.toString());
-          const entry: AuditEntry = {
-            id: this.nextId++,
-            instanceId: envelope.instanceId ?? 'unknown',
-            type: envelope.type ?? 'unknown',
-            payload: envelope.payload,
-            timestamp: envelope.timestamp ?? new Date().toISOString(),
-            receivedAt: new Date().toISOString(),
-          };
+        void (async () => {
+          try {
+            const envelope = JSON.parse(msg.content.toString());
+            const entry: AuditEntry = {
+              id: this.nextId++,
+              instanceId: envelope.instanceId ?? 'unknown',
+              type: envelope.type ?? 'unknown',
+              payload: envelope.payload,
+              timestamp: envelope.timestamp ?? new Date().toISOString(),
+              receivedAt: new Date().toISOString(),
+            };
 
-          // Ring buffer: shift oldest when full
-          if (this.buffer.length >= this.maxSize) {
-            this.buffer.shift();
+            // Ring buffer: shift oldest when full
+            if (this.buffer.length >= this.maxSize) {
+              this.buffer.shift();
+            }
+            this.buffer.push(entry);
+
+            // Await Postgres insert before acking to prevent data loss on crash
+            if (this.db) {
+              try {
+                await this.db.insert(auditEvents).values({
+                  instanceId: entry.instanceId,
+                  type: entry.type,
+                  payload: entry.payload as Record<string, unknown>,
+                  timestamp: new Date(entry.timestamp),
+                  receivedAt: new Date(entry.receivedAt),
+                });
+              } catch (err) {
+                this.logger.error(`Audit PG write error: ${(err as Error).message}`);
+              }
+            }
+
+            this.channel.ack(msg);
+          } catch (err) {
+            this.channel.ack(msg); // ack bad messages to prevent redelivery loops
+            this.logger.error(`Audit consumer parse error: ${(err as Error).message}`);
           }
-          this.buffer.push(entry);
-
-          // Write-through to Postgres (fire-and-forget)
-          if (this.db) {
-            this.db.insert(auditEvents).values({
-              instanceId: entry.instanceId,
-              type: entry.type,
-              payload: entry.payload as Record<string, unknown>,
-              timestamp: new Date(entry.timestamp),
-              receivedAt: new Date(entry.receivedAt),
-            }).then(() => {})
-              .catch((err) => this.logger.error(`Audit PG write error: ${(err as Error).message}`));
-          }
-
-          this.channel.ack(msg);
-        } catch (err) {
-          this.channel.ack(msg); // ack bad messages to prevent redelivery loops
-          this.logger.error(`Audit consumer parse error: ${(err as Error).message}`);
-        }
+        })();
       },
       { noAck: false },
     );

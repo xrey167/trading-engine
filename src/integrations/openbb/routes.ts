@@ -249,6 +249,13 @@ function getDb(fastify: Parameters<FastifyPluginAsync>[0]) {
 
 // NOT fp()-wrapped — hooks and routes are scoped to this child only.
 const openbbRoute: FastifyPluginAsync = async (fastify) => {
+  fastify.addHook('onClose', async () => {
+    if (_dbConn) {
+      await _dbConn.pool.end();
+      _dbConn = undefined;
+    }
+  });
+
   // Optional API-key guard — only activated when OPENBB_API_KEY env var is set.
   const API_KEY = process.env.OPENBB_API_KEY;
   if (API_KEY) {

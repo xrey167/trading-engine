@@ -206,6 +206,20 @@ describe('SnapshotWriter', () => {
       expect(mockInsert.values).not.toHaveBeenCalled();
     });
 
+    it('removes emitter listener on stop', async () => {
+      writer.start(60_000, emitter);
+      await vi.advanceTimersByTimeAsync(0);
+
+      writer.stop();
+
+      // Emitting after stop should not trigger capture
+      mockBroker.getAccount = vi.fn().mockResolvedValue({ equity: 10_200, balance: 9_500 });
+      mockInsert.values.mockClear();
+      emitter.emit('order', makeFilledEvent());
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockInsert.values).not.toHaveBeenCalled();
+    });
+
     it('ignores non-FILLED events', async () => {
       writer.start(60_000, emitter);
       await vi.advanceTimersByTimeAsync(0);

@@ -30,6 +30,38 @@ describe('CandleAtrStrategy', () => {
     const strategy = new CandleAtrStrategy({}, nullLogger);
     await expect(strategy.initialize()).resolves.toBeUndefined();
   });
+
+  it('ATR filter checks prevBar range, not currentBar range', async () => {
+    // Use atrPeriod=2 so we need fewer bars for ATR calculation
+    const strategy = new CandleAtrStrategy({ atrPeriod: 2, atrMultiplier: 1.0 }, nullLogger);
+    await strategy.initialize();
+
+    // Build bars: index 0 = currentBar, index 1 = prevBar, index 2+ = history for ATR
+    // ATR is calculated from shift=1, so it uses bars at indices 1,2,3...
+    // With atrPeriod=2, ATR = average of TR at indices 1 and 2
+    // Bars at indices 1 and 2 have range 0.10 each, so ATR ~ 0.10
+    // prevBar (index 1) has range 0.05 which is < ATR*1.0 (0.10) → should HOLD
+    // currentBar (index 0) has range 0.20 (large) — old bug would pass this
+    const data: OHLC[] = [
+      makeOHLC(1.20, { open: 1.00, high: 1.20, low: 1.00 }), // index 0: currentBar, range=0.20
+      makeOHLC(1.05, { open: 1.00, high: 1.05, low: 1.00 }), // index 1: prevBar, range=0.05
+      makeOHLC(1.10, { open: 1.00, high: 1.10, low: 1.00 }), // index 2: history, range=0.10
+      makeOHLC(1.10, { open: 1.00, high: 1.10, low: 1.00 }), // index 3: history, range=0.10
+    ];
+    const bars = makeBars(data);
+
+    const result = await strategy.evaluate({
+      isNewBar: true,
+      runMode: RunMode.Live,
+      bars,
+      positionState: flatState,
+      symbol: 'EURUSD',
+      timeframe: 'H1',
+    });
+
+    // prevBar.range() (0.05) < ATR (0.10) * 1.0 → HOLD
+    expect(result).toBe(SignalResult.HOLD);
+  });
 });
 
 describe('VolumeBreakoutStrategy', () => {

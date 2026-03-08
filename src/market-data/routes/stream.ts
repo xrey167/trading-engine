@@ -39,9 +39,19 @@ const streamRoute: FastifyPluginAsync = async (fastify) => {
   };
 
   const { emitter } = fastify;
-  emitter.on('bar',   (e: unknown) => broadcastEvent('bar', e));
-  emitter.on('fill',  (e: unknown) => broadcastEvent('fill', e));
-  emitter.on('close', (e: unknown) => broadcastEvent('close', e));
+  const barHandler   = (e: unknown) => broadcastEvent('bar', e);
+  const fillHandler  = (e: unknown) => broadcastEvent('fill', e);
+  const closeHandler = (e: unknown) => broadcastEvent('close', e);
+
+  emitter.on('bar',   barHandler);
+  emitter.on('fill',  fillHandler);
+  emitter.on('close', closeHandler);
+
+  fastify.addHook('onClose', () => {
+    emitter.off('bar',   barHandler);
+    emitter.off('fill',  fillHandler);
+    emitter.off('close', closeHandler);
+  });
 
   // GET /stream — WebSocket real-time event stream
   // Protocol v2: { id, type, payload } envelopes with replay support

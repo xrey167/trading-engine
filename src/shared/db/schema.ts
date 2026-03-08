@@ -63,7 +63,7 @@ export const orderEvents = pgTable('order_events', {
   price:      real('price').notNull(),
   limitPrice: real('limit_price'),
   metadata:   jsonb('metadata'),
-  timestamp:  text('timestamp').notNull(),
+  timestamp:  timestamp('timestamp', { withTimezone: true }).notNull(),
   createdAt:  timestamp('created_at').defaultNow().notNull(),
 }, (t) => [
   index('order_events_order_id_idx').on(t.orderId),

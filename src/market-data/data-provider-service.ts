@@ -18,6 +18,7 @@ export class DataProviderService extends BaseService {
   private readonly fetcher: IDataFetcher;
   private readonly cache: IBarCache;
   private timer: ReturnType<typeof setInterval> | null = null;
+  private readonly lastBarTime = new Map<string, string>();
 
   constructor(
     config: DataProviderConfig,
@@ -43,6 +44,7 @@ export class DataProviderService extends BaseService {
       clearInterval(this.timer);
       this.timer = null;
     }
+    this.lastBarTime.clear();
   }
 
   private async poll(): Promise<void> {
