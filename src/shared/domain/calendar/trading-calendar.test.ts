@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { TradingCalendar } from './trading-calendar.js';
-import { NYSE } from './countries.js';
+import { NYSE } from '../country/countries.js';
 
 // NYSE: America/New_York, 09:30–16:00, standard US holiday calendar
 const cal = new TradingCalendar(NYSE);

@@ -1,8 +1,8 @@
 import type { DomainError } from './errors.js';
 import { err, ok, type Result } from './result.js';
 import { gatewayError } from './errors.js';
-import type { FigiInstrument, FigiMappingRequest } from '../domain/figi.js';
-import { isFigi } from '../domain/figi.js';
+import type { FigiInstrument, FigiMappingRequest } from '../domain/figi/figi.js';
+import { isFigi } from '../domain/figi/figi.js';
 
 const OPENFIGI_BASE = 'https://api.openfigi.com/v3';
 const BATCH_SIZE = 100;

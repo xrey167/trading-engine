@@ -8,7 +8,7 @@
 // identical to TradingHoliday.date in country.ts.
 
 import { DateTime } from 'luxon';
-import type { TradingCalendar } from '../trading-calendar.js';
+import type { TradingCalendar } from '../calendar/trading-calendar.js';
 import { getEventById } from './catalog.js';
 import type { EventDefinition } from './types.js';
 import { EventImportance } from './types.js';

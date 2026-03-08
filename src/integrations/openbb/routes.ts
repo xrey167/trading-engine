@@ -18,7 +18,7 @@ import {
   SSRMResponseSchema,
 } from './schemas.js';
 import { PendingOrderSchema } from '../../trading/schemas.js';
-import { SymbolInfoVOSchema } from '../../shared/domain/account.js';
+import { SymbolInfoVOSchema } from '../../shared/domain/account/account.js';
 import { applySSRM, type SSRMParams } from '../../shared/lib/ssrm.js';
 import type { SignalEvent } from '../../shared/services/event-map.js';
 

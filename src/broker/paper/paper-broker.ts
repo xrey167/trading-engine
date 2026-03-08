@@ -5,7 +5,7 @@ import type { Side } from '../../shared/domain/engine-enums.js';
 import { Bars } from '../../market-data/bars.js';
 import type { OHLC } from '../../market-data/ohlc.js';
 import type { PositionInfoVO, DealInfoVO, HistoryOrderInfoVO } from '../../shared/domain/position.js';
-import type { AccountInfoVO, SymbolInfoVO, Tick } from '../../shared/domain/account.js';
+import type { AccountInfoVO, SymbolInfoVO, Tick } from '../../shared/domain/account/account.js';
 import type {
   IOrderGateway,
   IPositionGateway,

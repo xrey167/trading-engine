@@ -1,7 +1,7 @@
 import type { Result } from '../shared/lib/result.js';
 import type { DomainError } from '../shared/lib/errors.js';
 import type { PositionInfoVO, DealInfoVO, HistoryOrderInfoVO } from '../shared/domain/position.js';
-import type { AccountInfoVO, SymbolInfoVO, Tick } from '../shared/domain/account.js';
+import type { AccountInfoVO, SymbolInfoVO, Tick } from '../shared/domain/account/account.js';
 // TODO(architecture): Dependency inversion — gateway interfaces (ports) should not depend
 // on the engine implementation layer. Define an abstract IBars interface in domain/ or
 // gateways/ and have trading-engine.Bars implement it, so the dependency arrow points inward.

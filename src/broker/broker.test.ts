@@ -3,7 +3,7 @@ import { PaperBroker } from './paper/paper-broker.js';
 import { TypedEventBus } from '../shared/event-bus.js';
 import { isOk, isErr } from '../shared/lib/result.js';
 import type { PositionInfoVO } from '../shared/domain/position.js';
-import type { AccountInfoVO } from '../shared/domain/account.js';
+import type { AccountInfoVO } from '../shared/domain/account/account.js';
 
 function makeBroker(): PaperBroker {
   return new PaperBroker(new TypedEventBus());

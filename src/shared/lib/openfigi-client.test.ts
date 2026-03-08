@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { FigiIdType } from '../domain/figi.js';
-import type { FigiMappingRequest } from '../domain/figi.js';
+import { FigiIdType } from '../domain/figi/figi.js';
+import type { FigiMappingRequest } from '../domain/figi/figi.js';
 import { createOpenFigiClient } from './openfigi-client.js';
 
 const mockFetch = vi.fn<typeof fetch>();

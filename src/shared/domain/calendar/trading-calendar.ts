@@ -13,7 +13,7 @@
 //   cal.isLastNthTradingDayOfMonth(today, 1)   // last trading day of month
 
 import { DateTime } from 'luxon';
-import type { Exchange, TradingHoliday } from './country.js';
+import type { Exchange, TradingHoliday } from '../country/country.js';
 
 export class TradingCalendar {
   constructor(public readonly exchange: Exchange) {}
