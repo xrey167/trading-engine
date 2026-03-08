@@ -182,3 +182,41 @@ describe('createCanonicalId guard', () => {
     expect(result.value).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
   });
 });
+
+describe('monotonicity', () => {
+  it('two IDs created at same ms have different seq values', () => {
+    const reg = new CanonicalIdRegistry();
+    reg.registerSymbol('EURUSD');
+    const ts = 1741392002000;
+    const a = createCanonicalId({ broker: BrokerSlot.Paper, type: EntityType.Order, nativeId: 1, symbol: 'EURUSD', timestampMs: ts }, reg, { idWidth: 32 });
+    const b = createCanonicalId({ broker: BrokerSlot.Paper, type: EntityType.Order, nativeId: 2, symbol: 'EURUSD', timestampMs: ts }, reg, { idWidth: 32 });
+    if (!isOk(a) || !isOk(b)) throw new Error('expected ok');
+    const da = decodeCanonicalId(a.value);
+    const db = decodeCanonicalId(b.value);
+    expect(db.seq).toBe(da.seq + 1);
+  });
+
+  it('IDs created at same ms sort lexicographically by seq', () => {
+    const reg = new CanonicalIdRegistry();
+    reg.registerSymbol('EURUSD');
+    const ts = 1741392003000;
+    const ids: string[] = [];
+    for (let i = 1; i <= 5; i++) {
+      const r = createCanonicalId({ broker: BrokerSlot.Paper, type: EntityType.Order, nativeId: i, symbol: 'EURUSD', timestampMs: ts }, reg, { idWidth: 32 });
+      if (isOk(r)) ids.push(r.value);
+    }
+    expect(ids).toHaveLength(5);
+    const sorted = [...ids].sort();
+    expect(sorted).toEqual(ids);
+  });
+
+  it('does not go backward on clock regression', () => {
+    const reg = new CanonicalIdRegistry();
+    reg.registerSymbol('EURUSD');
+    const ts = 1741392004000;
+    createCanonicalId({ broker: BrokerSlot.Paper, type: EntityType.Order, nativeId: 1, symbol: 'EURUSD', timestampMs: ts }, reg, { idWidth: 32 });
+    const r = createCanonicalId({ broker: BrokerSlot.Paper, type: EntityType.Order, nativeId: 2, symbol: 'EURUSD', timestampMs: ts - 5000 }, reg, { idWidth: 32 });
+    if (!isOk(r)) throw new Error('expected ok');
+    expect(decodeCanonicalId(r.value).timestampMs).toBeGreaterThanOrEqual(ts);
+  });
+});
