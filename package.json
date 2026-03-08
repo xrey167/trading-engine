@@ -22,8 +22,8 @@
     "db:migrate": "drizzle-kit migrate"
   },
   "devDependencies": {
-    "@types/amqplib": "^0.10.7",
     "@biomejs/biome": "^2.4.4",
+    "@types/amqplib": "^0.10.7",
     "@types/ioredis": "^4.28.10",
     "@types/luxon": "^3.7.1",
     "@types/node": "^25.3.3",
@@ -41,9 +41,10 @@
     "@fastify/static": "^9.0.0",
     "@fastify/websocket": "^11.2.0",
     "@sinclair/typebox": "^0.34.48",
+    "amqplib": "^0.10.8",
+    "drizzle-orm": "^0.45.1",
     "fastify": "^5.7.4",
     "fastify-plugin": "^5.1.0",
-    "amqplib": "^0.10.8",
     "ioredis": "^5.10.0",
     "luxon": "^3.7.2",
     "drizzle-orm": "^0.44.2",

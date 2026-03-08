@@ -1254,13 +1254,13 @@ describe('R25 – GET /widgets.json', () => {
   beforeEach(async () => { app = await buildApp({ logger: false }); await app.ready(); });
   afterEach(() => app.close());
 
-  it('returns all 11 widget keys', async () => {
+  it('returns all 12 widget keys', async () => {
     const res = await app.inject({ method: 'GET', url: '/widgets.json' });
     expect(res.statusCode).toBe(200);
     expect(Object.keys(res.json()).sort()).toEqual([
       'account_balance', 'account_equity', 'audit_events', 'deal_history',
-      'engine_config', 'engine_positions', 'equity_curve', 'pending_orders',
-      'signal_feed', 'symbol_info', 'tradingview_chart',
+      'engine_config', 'engine_positions', 'equity_curve', 'order_history',
+      'pending_orders', 'signal_feed', 'symbol_info', 'tradingview_chart',
     ]);
   });
 
