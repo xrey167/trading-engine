@@ -163,6 +163,67 @@ describe('DataProviderService', () => {
     await svc.stop();
   });
 
+  it('deduplicates bars across poll cycles — same bars emitted only once', async () => {
+    const bus = new TypedEventBus<AppEventMap>();
+    const events: NormalizedBarEvent[] = [];
+    bus.on('normalized_bar', (e) => events.push(e));
+
+    // Fetcher always returns the same bar (rolling window behaviour)
+    const fetcher = new MockFetcher([makeBar(1.1, '2024-01-01T00:00:00Z')]);
+    const cache = new InMemoryBarCache();
+    const svc = new DataProviderService(
+      { id: 'dp:dedup', name: 'dedup-provider', symbols: ['EURUSD'], timeframe: 'H1', pollIntervalMs: 20 },
+      fetcher, cache, bus, nullLogger,
+    );
+    await svc.start();
+
+    // Allow at least 3 poll cycles
+    await new Promise(r => setTimeout(r, 100));
+    await svc.stop();
+
+    // Despite multiple polls the bar should have been emitted exactly once
+    const eurusdEvents = events.filter(e => e.symbol === 'EURUSD');
+    expect(eurusdEvents).toHaveLength(1);
+    expect(fetcher.fetchCount).toBeGreaterThanOrEqual(3);
+  });
+
+  it('emits new bar when a later bar appears in subsequent poll', async () => {
+    const bus = new TypedEventBus<AppEventMap>();
+    const events: NormalizedBarEvent[] = [];
+    bus.on('normalized_bar', (e) => events.push(e));
+
+    let callCount = 0;
+    const fetcher: IDataFetcher = {
+      async fetchBars(_symbol, _timeframe) {
+        callCount++;
+        if (callCount === 1) {
+          return [makeBar(1.1, '2024-01-01T00:00:00Z')];
+        }
+        // Second and later polls include the original bar plus a new one
+        return [
+          makeBar(1.1, '2024-01-01T00:00:00Z'),
+          makeBar(1.2, '2024-01-01T01:00:00Z'),
+        ];
+      },
+    };
+    const cache = new InMemoryBarCache();
+    const svc = new DataProviderService(
+      { id: 'dp:new-bar', name: 'new-bar-provider', symbols: ['EURUSD'], timeframe: 'H1', pollIntervalMs: 20 },
+      fetcher, cache, bus, nullLogger,
+    );
+    await svc.start();
+
+    // Allow at least 3 poll cycles
+    await new Promise(r => setTimeout(r, 100));
+    await svc.stop();
+
+    const eurusdEvents = events.filter(e => e.symbol === 'EURUSD');
+    // First bar emitted on cycle 1, second bar emitted once on cycle 2+
+    expect(eurusdEvents).toHaveLength(2);
+    expect(eurusdEvents[0].bar.time).toBe('2024-01-01T00:00:00Z');
+    expect(eurusdEvents[1].bar.time).toBe('2024-01-01T01:00:00Z');
+  });
+
   it('exposes cache via getCache()', () => {
     const bus = new TypedEventBus<AppEventMap>();
     const cache = new InMemoryBarCache();

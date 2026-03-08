@@ -50,6 +50,10 @@ export class DataProviderService extends BaseService {
       try {
         const bars = await this.fetcher.fetchBars(symbol, this.config.timeframe);
         for (const bar of bars) {
+          const latest = this.cache.latest(symbol, this.config.timeframe);
+          if (latest !== undefined && bar.time <= latest.time) {
+            continue;
+          }
           this.cache.push(symbol, this.config.timeframe, bar);
           this.eventBus.emit('normalized_bar', {
             providerId: this.id,
