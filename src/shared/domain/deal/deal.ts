@@ -1,4 +1,8 @@
 import { Type, type Static } from '@sinclair/typebox';
+import { DealType, DealEntry } from '../history/history.js';
+
+const DealTypeSchema  = Type.Union(Object.values(DealType).map(v  => Type.Literal(v)));
+const DealEntrySchema = Type.Union(Object.values(DealEntry).map(v => Type.Literal(v)));
 
 export const DealInfoVOSchema = Type.Object({
   ticket:     Type.Number(),
@@ -6,8 +10,8 @@ export const DealInfoVOSchema = Type.Object({
   order:      Type.Number(),
   positionId: Type.Number(),
   symbol:     Type.String(),
-  type:       Type.String(),
-  entry:      Type.String(),
+  type:       DealTypeSchema,
+  entry:      DealEntrySchema,
   volume:     Type.Number(),
   price:      Type.Number(),
   commission: Type.Number(),
@@ -24,8 +28,8 @@ export const DealInfoVOFactory = {
       ticket:     0,
       userId:     overrides.userId,
       symbol:     overrides.symbol,
-      type:       'BUY',
-      entry:      'IN',
+      type:       DealType.Buy,
+      entry:      DealEntry.In,
       order:      0,
       positionId: 0,
       volume:     0,
