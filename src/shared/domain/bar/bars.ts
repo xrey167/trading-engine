@@ -119,6 +119,42 @@ export class Bars {
     return ema;
   }
 
+  lwma(periods: number, shift = 0): number {
+    let weightedSum = 0, weightTotal = 0;
+    for (let i = 0; i < periods && shift + i < this.data.length; i++) {
+      const w = periods - i;
+      weightedSum += this.data[shift + i].close * w;
+      weightTotal += w;
+    }
+    return weightTotal === 0 ? 0 : weightedSum / weightTotal;
+  }
+
+  smma(periods: number, shift = 0): number {
+    const deepEnd = Math.min(shift + periods * 2, this.data.length);
+    if (deepEnd <= shift) return 0;
+    const seedStart = Math.min(shift + periods, deepEnd);
+    let sum = 0, cnt = 0;
+    for (let i = seedStart; i < deepEnd; i++) { sum += this.data[i].close; cnt++; }
+    if (cnt === 0) return this.data[shift].close;
+    let smma = sum / cnt;
+    for (let i = seedStart - 1; i >= shift; i--) {
+      smma = (smma * (periods - 1) + this.data[i].close) / periods;
+    }
+    return smma;
+  }
+
+  isMaSloping(type: 'sma' | 'ema', periods: number, span: number, shift = 0, up = true): boolean {
+    if (span < 2) return false;
+    const maFn = type === 'sma' ? (s: number) => this.sma(periods, s) : (s: number) => this.ema(periods, s);
+    let prev = maFn(shift + span - 1);
+    for (let i = shift + span - 2; i >= shift; i--) {
+      const cur = maFn(i);
+      if (up ? cur <= prev : cur >= prev) return false;
+      prev = cur;
+    }
+    return true;
+  }
+
   isEngulfingLong(shift = 0): boolean {
     if (shift + 1 >= this.data.length) return false;
     return this.data[shift].low < this.data[shift + 1].low
@@ -156,18 +192,6 @@ export class Bars {
   volumeRatio(periods: number, shift = 0): number {
     const avg = this.tickVolumeAverage(periods, shift + 1);
     return avg === 0 ? 0 : (this.data[shift]?.volume ?? 0) / avg;
-  }
-
-  isMaSloping(type: 'sma' | 'ema', periods: number, span: number, shift = 0, up = true): boolean {
-    if (span < 2) return false;
-    const maFn = type === 'sma' ? (s: number) => this.sma(periods, s) : (s: number) => this.ema(periods, s);
-    let prev = maFn(shift + span - 1);
-    for (let i = shift + span - 2; i >= shift; i--) {
-      const cur = maFn(i);
-      if (up ? cur <= prev : cur >= prev) return false;
-      prev = cur;
-    }
-    return true;
   }
 
   stochastic(periodK: number, periodD: number, slowing: number, shift = 0): { main: number; signal: number } {
@@ -260,29 +284,5 @@ export class Bars {
       timeBegin: this.data[endIdx - 1].time,
       timeEnd: this.data[startIdx].time,
     };
-  }
-
-  lwma(periods: number, shift = 0): number {
-    let weightedSum = 0, weightTotal = 0;
-    for (let i = 0; i < periods && shift + i < this.data.length; i++) {
-      const w = periods - i;
-      weightedSum += this.data[shift + i].close * w;
-      weightTotal += w;
-    }
-    return weightTotal === 0 ? 0 : weightedSum / weightTotal;
-  }
-
-  smma(periods: number, shift = 0): number {
-    const deepEnd = Math.min(shift + periods * 2, this.data.length);
-    if (deepEnd <= shift) return 0;
-    const seedStart = Math.min(shift + periods, deepEnd);
-    let sum = 0, cnt = 0;
-    for (let i = seedStart; i < deepEnd; i++) { sum += this.data[i].close; cnt++; }
-    if (cnt === 0) return this.data[shift].close;
-    let smma = sum / cnt;
-    for (let i = seedStart - 1; i >= shift; i--) {
-      smma = (smma * (periods - 1) + this.data[i].close) / periods;
-    }
-    return smma;
   }
 }
