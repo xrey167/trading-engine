@@ -64,8 +64,8 @@ export class RiskManagerService extends BaseService {
     }
   };
 
-  private handleClose = (_event: AppEventMap['close']): void => {
-    if (this.openPositionCount > 0) this.openPositionCount--;
+  private handleClose = (event: AppEventMap['close']): void => {
+    this.releaseCapacity(event.symbol);
   };
 
   validateOrder(request: OrderValidationRequest): Result<RiskValidationResult, DomainError> {
@@ -130,7 +130,11 @@ export class RiskManagerService extends BaseService {
   releaseCapacity(symbol: string): void {
     if (this.openPositionCount > 0) this.openPositionCount--;
     const current = this.symbolPositions.get(symbol) ?? 0;
-    if (current > 0) this.symbolPositions.set(symbol, current - 1);
+    if (current > 1) {
+      this.symbolPositions.set(symbol, current - 1);
+    } else {
+      this.symbolPositions.delete(symbol);
+    }
   }
 
   recordLoss(amount: number): void {

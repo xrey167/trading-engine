@@ -146,6 +146,30 @@ describe('RiskManagerService', () => {
     await svc.stop();
   });
 
+  it('open → close → open cycle: second open is not blocked by symbolPositions', async () => {
+    const { bus, svc } = makeRiskManager({ maxPositionsPerSymbol: 1 });
+    await svc.start();
+
+    // Open a position for EURUSD
+    bus.emit('order', { action: 'FILLED', orderId: 1, orderType: 'MARKET', brokerId: 'b', symbol: 'EURUSD', direction: 'BUY', lots: 1, price: 1.1, metadata: {}, timestamp: new Date().toISOString() });
+
+    // Should be blocked now
+    let result = svc.validateOrder({ symbol: 'EURUSD', direction: 'BUY', lots: 1 });
+    expect(result.ok && !result.value.approved).toBe(true);
+
+    // Close the position — symbolPositions should decrement
+    bus.emit('close', { side: 1, size: 1, price: 1.1, time: new Date(), symbol: 'EURUSD' });
+
+    // Second open for same symbol should now be approved
+    result = svc.validateOrder({ symbol: 'EURUSD', direction: 'BUY', lots: 1 });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.approved).toBe(true);
+    }
+
+    await svc.stop();
+  });
+
   it('resetDailyLoss clears the counter', async () => {
     const { svc } = makeRiskManager({ maxDailyLoss: 100 });
     await svc.start();
