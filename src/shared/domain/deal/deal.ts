@@ -17,3 +17,25 @@ export const DealInfoVOSchema = Type.Object({
   comment:    Type.String(),
 });
 export type DealInfoVO = Static<typeof DealInfoVOSchema>;
+
+export const DealInfoVOFactory = {
+  make(overrides: Partial<DealInfoVO> & Pick<DealInfoVO, 'userId' | 'symbol'>): DealInfoVO {
+    const defaults: DealInfoVO = {
+      ticket:     0,
+      userId:     overrides.userId,
+      symbol:     overrides.symbol,
+      type:       'BUY',
+      entry:      'IN',
+      order:      0,
+      positionId: 0,
+      volume:     0,
+      price:      0,
+      commission: 0,
+      swap:       0,
+      profit:     0,
+      time:       new Date().toISOString(),
+      comment:    '',
+    };
+    return { ...defaults, ...overrides };
+  },
+};

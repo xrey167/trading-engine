@@ -90,3 +90,24 @@ export const OrderEntryType = {
   SellStopTrail:  'SELL_STOP_TRAIL',
 } as const;
 export type OrderEntryType = (typeof OrderEntryType)[keyof typeof OrderEntryType];
+
+export const OrderVOFactory = {
+  make(overrides: Partial<HistoryOrderInfoVO> & Pick<HistoryOrderInfoVO, 'userId' | 'symbol'>): HistoryOrderInfoVO {
+    const defaults: HistoryOrderInfoVO = {
+      ticket:        0,
+      userId:        overrides.userId,
+      symbol:        overrides.symbol,
+      type:          'BUY',
+      state:         'FILLED',
+      volumeInitial: 0,
+      volumeCurrent: 0,
+      priceOpen:     0,
+      stopLoss:      0,
+      takeProfit:    0,
+      timeSetup:     new Date().toISOString(),
+      timeDone:      new Date().toISOString(),
+      comment:       '',
+    };
+    return { ...defaults, ...overrides };
+  },
+};

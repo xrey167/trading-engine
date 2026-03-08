@@ -26,3 +26,30 @@ export const PositionInfoVOSchema = Type.Object({
   reason:         Type.Number(),
 });
 export type PositionInfoVO = Static<typeof PositionInfoVOSchema>;
+
+export const PositionVOFactory = {
+  make(overrides: Partial<PositionInfoVO> & Pick<PositionInfoVO, 'userId' | 'symbol'>): PositionInfoVO {
+    const defaults: PositionInfoVO = {
+      ticket:         0,
+      userId:         overrides.userId,
+      symbol:         overrides.symbol,
+      type:           'BUY',
+      magic:          0,
+      identifier:     0,
+      time:           new Date().toISOString(),
+      priceOpen:      0,
+      priceCurrent:   0,
+      stopLoss:       0,
+      takeProfit:     0,
+      priceStopLimit: 0,
+      volume:         0,
+      commission:     0,
+      swap:           0,
+      profit:         0,
+      comment:        '',
+      externalId:     '',
+      reason:         0,
+    };
+    return { ...defaults, ...overrides };
+  },
+};
