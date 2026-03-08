@@ -1,9 +1,9 @@
 import { BaseCalculator } from '../base-calculator.js';
 import type { CalculationContext } from '../calculation-context.js';
 import type { IStopLossCalculator, ILotsProvider, StopLossParams } from '../types.js';
-import type { Result } from '../../shared/lib/result.js';
-import type { DomainError } from '../../shared/lib/errors.js';
-import { StopLimitType } from '../../shared/domain/enums.js';
+import type { Result } from '../../../shared/lib/result.js';
+import type { DomainError } from '../../../shared/lib/errors.js';
+import { StopLimitType } from '../../../shared/domain/enums.js';
 
 /**
  * Dollar-based stop-loss calculator.

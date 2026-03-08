@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { Type } from '@sinclair/typebox';
-import { ErrorResponseSchema } from '../shared/schemas/common.js';
+import { ErrorResponseSchema } from '../../shared/schemas/common.js';
 import { MoneyManagementFactoryConfigSchema } from './types.js';
 import { CreateMoneyManagementUseCase } from './use-cases/money-management.js';
 

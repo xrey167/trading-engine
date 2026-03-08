@@ -1,9 +1,9 @@
 import { Value } from '@sinclair/typebox/value';
-import type { Logger } from '../../shared/lib/logger.js';
-import type { Result } from '../../shared/lib/result.js';
-import type { DomainError } from '../../shared/lib/errors.js';
-import { ok, err } from '../../shared/lib/result.js';
-import { invalidInput } from '../../shared/lib/errors.js';
+import type { Logger } from '../../../shared/lib/logger.js';
+import type { Result } from '../../../shared/lib/result.js';
+import type { DomainError } from '../../../shared/lib/errors.js';
+import { ok, err } from '../../../shared/lib/result.js';
+import { invalidInput } from '../../../shared/lib/errors.js';
 import { MoneyManagementFactoryConfigSchema, type MoneyManagementFactoryConfig } from '../types.js';
 
 export class CreateMoneyManagementUseCase {

@@ -1,9 +1,9 @@
 import { Type, type Static } from '@sinclair/typebox';
-import type { Result } from '../shared/lib/result.js';
-import type { DomainError } from '../shared/lib/errors.js';
-import { StopLossType, TakeProfitType, PositionSizeType } from '../shared/domain/enums.js';
+import type { Result } from '../../shared/lib/result.js';
+import type { DomainError } from '../../shared/lib/errors.js';
+import { StopLossType, TakeProfitType, PositionSizeType } from '../../shared/domain/enums.js';
 
-export type { IIndicatorGateway, IAccountGateway } from '../broker/types.js';
+export type { IIndicatorGateway, IAccountGateway } from '../../broker/types.js';
 
 export interface MoneyManagementResult {
   readonly lots: number;

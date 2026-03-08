@@ -1,8 +1,8 @@
 import { BaseCalculator } from '../base-calculator.js';
 import type { CalculationContext } from '../calculation-context.js';
 import type { ILotsProvider, LotsParams } from '../types.js';
-import type { Result } from '../../shared/lib/result.js';
-import type { DomainError } from '../../shared/lib/errors.js';
+import type { Result } from '../../../shared/lib/result.js';
+import type { DomainError } from '../../../shared/lib/errors.js';
 
 /**
  * Default lots provider.

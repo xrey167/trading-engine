@@ -36,7 +36,7 @@ import engineModule from './engine/index.js';
 import tradingModule from './trading/index.js';
 import marketDataModule from './market-data/index.js';
 import analysisModule from './analysis/index.js';
-import mmModule from './money-management/module.js';
+import mmModule from './trading/money-management/module.js';
 import openbbModule from './integrations/openbb/index.js';
 import skillsModule from './integrations/skills/index.js';
 import servicesModule from './services/index.js';
