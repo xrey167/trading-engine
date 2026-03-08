@@ -2,16 +2,9 @@ import type { FastifyPluginAsync } from 'fastify';
 import { Type } from '@sinclair/typebox';
 import { SKILL_CATALOG, type SkillDef } from './catalog.js';
 import { streamAgentQuery } from './sse.js';
-import { SkillRunSchema, type SkillRunBody } from './schemas.js';
+import { SkillRunSchema, SkillListItemSchema, type SkillRunBody } from './schemas.js';
 import { ErrorResponseSchema } from '../../shared/schemas/common.js';
 import { apiKeyPreHandler } from '../../shared/lib/api-utils.js';
-
-const SkillListItemSchema = Type.Object({
-  path:        Type.String(),
-  command:     Type.String(),
-  category:    Type.String(),
-  description: Type.String(),
-});
 
 // Prevent concurrent resume of the same session.
 // NOTE: This is process-local. In a multi-process deployment (pm2 cluster,

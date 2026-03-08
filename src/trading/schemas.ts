@@ -50,6 +50,12 @@ export const PendingOrderSchema = Type.Object({
 // Route body schemas
 // ─────────────────────────────────────────────────────────────
 
+export const TrailEntrySchema = Type.Object({
+  mode:        TrailModeSchema,
+  distancePts: Type.Number({ minimum: 0 }),
+  periods:     Type.Optional(Type.Number({ minimum: 0 })),
+});
+
 export const PostOrderBodySchema = Type.Object({
   type:       OrderEntryTypeSchema,
   price:      Type.Optional(Type.Number({ minimum: 0 })),  // not required for BUY_MARKET / SELL_MARKET / MTO trail types
@@ -65,11 +71,7 @@ export const PostOrderBodySchema = Type.Object({
     pullbackPts:  Type.Optional(Type.Number({ minimum: 0 })),
     limitConfirm: Type.Optional(LimitConfirmSchema),
   })),
-  trailEntry: Type.Optional(Type.Object({
-    mode:        TrailModeSchema,
-    distancePts: Type.Number({ minimum: 0 }),
-    periods:     Type.Optional(Type.Number({ minimum: 0 })),
-  })),
+  trailEntry: Type.Optional(TrailEntrySchema),
 });
 export type PostOrderBody = Static<typeof PostOrderBodySchema>;
 
@@ -99,12 +101,6 @@ export const PostMarketOrderBodySchema = Type.Object({
   size: Type.Optional(Type.Number({ exclusiveMinimum: 0 })),
 });
 export type PostMarketOrderBody = Static<typeof PostMarketOrderBodySchema>;
-
-export const TrailEntrySchema = Type.Object({
-  mode:        TrailModeSchema,
-  distancePts: Type.Number({ minimum: 0 }),
-  periods:     Type.Optional(Type.Number({ minimum: 0 })),
-});
 
 export const PostBracketBodySchema = Type.Object({
   entryType:  Type.Union([
