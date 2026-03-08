@@ -133,7 +133,7 @@ export async function buildApp(
   const emitter = new TypedEventBus<AppEventMap>();
   const { pair = 'EURUSD', digits = 5 } = cfg.symbol ?? {};
   const symbol  = new SymbolInfoForex(pair, digits);
-  const broker  = new PaperBroker(emitter, app.log);
+  const broker  = new PaperBroker(emitter, app.log, symbol.name);
 
   app.decorate('emitter', emitter);
 
@@ -161,12 +161,6 @@ export async function buildApp(
 
   // 1c. Bar cache — Postgres > Redis > in-memory cascade
   const logger = toLogger(app.log);
-
-  // 1c.0 PostgreSQL persistence — wires OrderWriter when DATABASE_URL is set
-  const db = createDatabase(logger);
-  if (db) {
-    new OrderWriter(db.db, app.emitter, logger);
-  }
 
   const redis = createRedisClient(logger);
   const database = createDatabase(logger);
@@ -231,6 +225,7 @@ export async function buildApp(
   // 1c.3b. PostgreSQL persistence (optional — falls back to in-memory when DATABASE_URL unset)
   let snapshotWriter: SnapshotWriter | null = null;
   if (database) {
+    new OrderWriter(database.db, emitter, logger);
     new DealWriter(database.db, emitter, logger);
     snapshotWriter = new SnapshotWriter(database.db, broker, logger);
     snapshotWriter.start(60_000, emitter);

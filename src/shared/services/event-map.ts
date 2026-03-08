@@ -65,7 +65,16 @@ export interface ServiceLifecycleEvent {
   readonly timestamp: string;
 }
 
+export interface AppCloseEvent {
+  readonly side: number;
+  readonly size: number;
+  readonly price: number;
+  readonly time: Date;
+  readonly symbol: string;
+}
+
 export interface AppEventMap extends EngineEventMap {
+  'close':             AppCloseEvent;
   'signal':            SignalEvent;
   'screener':          ScreenerEvent;
   'order':             OrderEvent;

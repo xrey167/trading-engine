@@ -93,5 +93,6 @@ export async function apiKeyPreHandler(req: FastifyRequest, reply: FastifyReply)
   if (isErr(result)) {
     const status = statusForError(result.error);
     reply.status(status).send({ error: result.error });
+    return;
   }
 }

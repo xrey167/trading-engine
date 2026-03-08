@@ -79,19 +79,25 @@ export class AuditConsumer {
           }
           this.buffer.push(entry);
 
-          // Write-through to Postgres (fire-and-forget)
-          if (this.db) {
-            this.db.insert(auditEvents).values({
-              instanceId: entry.instanceId,
-              type: entry.type,
-              payload: entry.payload as Record<string, unknown>,
-              timestamp: new Date(entry.timestamp),
-              receivedAt: new Date(entry.receivedAt),
-            }).then(() => {})
-              .catch((err) => this.logger.error(`Audit PG write error: ${(err as Error).message}`));
-          }
-
-          this.channel.ack(msg);
+          // Write-through to Postgres before acking (at-least-once delivery to DB)
+          void (async () => {
+            if (this.db) {
+              try {
+                const now = new Date();
+                await this.db.insert(auditEvents).values({
+                  instanceId: entry.instanceId,
+                  type: entry.type,
+                  payload: entry.payload as Record<string, unknown>,
+                  timestamp: new Date(entry.timestamp),
+                  receivedAt: now,
+                });
+              } catch (err) {
+                // Log and continue — ack still fires to prevent infinite requeue loops
+                this.logger.error(`Audit PG write error: ${(err as Error).message}`);
+              }
+            }
+            this.channel.ack(msg);
+          })();
         } catch (err) {
           this.channel.ack(msg); // ack bad messages to prevent redelivery loops
           this.logger.error(`Audit consumer parse error: ${(err as Error).message}`);

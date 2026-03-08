@@ -2576,6 +2576,8 @@ export class ScaledOrderEngine {
 
       // Chain mode: each limit has OCO so nearest fill cancels the rest
       if (p.chainLimits) this.engine.orderAttrOCO(true);
+      if (p.attrCO)  this.engine.orderAttrCO(true);
+      if (p.attrREV) this.engine.orderAttrREV(true);
       this.engine.orderSize(sizeFactor);
 
       const id = isLong
@@ -2596,6 +2598,8 @@ export class ScaledOrderEngine {
         ? currentPrice + stopCumulDist
         : currentPrice - stopCumulDist;
 
+      if (p.attrCO)  this.engine.orderAttrCO(true);
+      if (p.attrREV) this.engine.orderAttrREV(true);
       this.engine.orderSize(sizeFactor);
       const id = isLong
         ? this.engine.addBuyStop(stopPrice, sizeFactor)
