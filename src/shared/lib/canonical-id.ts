@@ -17,6 +17,7 @@
 import { ok, err, type Result } from './result.js';
 import { invalidInput } from './errors.js';
 import type { CanonicalIdRegistry } from './canonical-id-registry.js';
+import { base62Encode, base62Decode } from './base62.js';
 
 // Branded opaque type — raw string is not assignable to CanonicalId
 export type CanonicalId = string & { readonly __brand: 'CanonicalId' };
@@ -250,6 +251,51 @@ export function decodeCanonicalId(id: string): CanonicalIdPayload {
     version,
     nativeId: nativeLow32,
   };
+}
+
+// ---------------------------------------------------------------------------
+// matchId — exhaustive discriminant helper
+// ---------------------------------------------------------------------------
+
+export function matchId<T>(
+  payload: CanonicalIdPayload,
+  handlers: {
+    compact:  (p: CompactPayload)  => T;
+    extended: (p: ExtendedPayload) => T;
+  },
+): T {
+  if (payload.mode === 'compact')  return handlers.compact(payload);
+  if (payload.mode === 'extended') return handlers.extended(payload);
+  // TypeScript exhaustiveness guard
+  const _never: never = payload;
+  throw new Error(`Unknown canonical ID mode: ${JSON.stringify(_never)}`);
+}
+
+// ---------------------------------------------------------------------------
+// base62 wire format
+// ---------------------------------------------------------------------------
+
+const TYPE_PREFIX: Record<EntityType, string> = {
+  [EntityType.Order]:    'ord_',
+  [EntityType.Deal]:     'deal_',
+  [EntityType.Position]: 'pos_',
+  [EntityType.Ticket]:   'fill_',
+};
+
+export function toBase62(id: CanonicalId): string {
+  const buf  = Buffer.from(id.replace(/-/g, ''), 'hex');
+  const type = buf[11] as EntityType;
+  return (TYPE_PREFIX[type] ?? 'id_') + base62Encode(buf);
+}
+
+export function fromBase62(str: string): CanonicalId {
+  const underscore = str.indexOf('_');
+  if (underscore < 0) throw new Error(`Missing prefix in base62 canonical ID: "${str}"`);
+  const encoded = str.slice(underscore + 1);
+  const buf = base62Decode(encoded);
+  const hex = buf.toString('hex');
+  const id  = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  return id as CanonicalId;
 }
 
 // ---------------------------------------------------------------------------

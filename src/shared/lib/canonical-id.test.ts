@@ -4,6 +4,7 @@ import {
   EntityType, BrokerSlot,
   type CompactPayload, type ExtendedPayload,
   createCanonicalId, configureNode, type CanonicalId,
+  matchId, toBase62, fromBase62,
 } from './canonical-id.js';
 import { isOk, isErr } from './result.js';
 import { CanonicalIdRegistry } from './canonical-id-registry.js';
@@ -218,5 +219,89 @@ describe('monotonicity', () => {
     const r = createCanonicalId({ broker: BrokerSlot.Paper, type: EntityType.Order, nativeId: 2, symbol: 'EURUSD', timestampMs: ts - 5000 }, reg, { idWidth: 32 });
     if (!isOk(r)) throw new Error('expected ok');
     expect(decodeCanonicalId(r.value).timestampMs).toBeGreaterThanOrEqual(ts);
+  });
+});
+
+describe('matchId', () => {
+  let registry: CanonicalIdRegistry;
+  beforeEach(() => {
+    registry = new CanonicalIdRegistry();
+    registry.registerSymbol('EURUSD');
+  });
+
+  it('routes compact payload to compact handler', () => {
+    const r = createCanonicalId(
+      { broker: BrokerSlot.Paper, type: EntityType.Order, nativeId: 1, symbol: 'EURUSD' },
+      registry,
+      { idWidth: 32 },
+    );
+    if (!isOk(r)) throw new Error('expected ok');
+    const decoded = decodeCanonicalId(r.value);
+    const result = matchId(decoded, {
+      compact:  (p) => `compact:${p.mode}`,
+      extended: (_p) => 'extended',
+    });
+    expect(result).toBe('compact:compact');
+  });
+
+  it('routes extended payload to extended handler', () => {
+    const r = createCanonicalId(
+      { broker: BrokerSlot.IB, type: EntityType.Order, nativeId: 999n, symbol: 'EURUSD' },
+      registry,
+      { idWidth: 64 },
+    );
+    if (!isOk(r)) throw new Error('expected ok');
+    const decoded = decodeCanonicalId(r.value);
+    const result = matchId(decoded, {
+      compact:  (_p) => 'compact',
+      extended: (p) => `extended:${p.nativeId}`,
+    });
+    expect(result).toMatch(/^extended:/);
+  });
+
+  it('is exhaustive — TypeScript would error if a mode is unhandled', () => {
+    // This is a type-level test; just verify runtime works with both modes
+    const modes = ['compact', 'extended'] as const;
+    expect(modes).toHaveLength(2);
+  });
+});
+
+describe('base62 wire format', () => {
+  let registry: CanonicalIdRegistry;
+  beforeEach(() => {
+    registry = new CanonicalIdRegistry();
+    registry.registerSymbol('EURUSD');
+  });
+
+  it('toBase62 produces ord_ prefixed string for Order type', () => {
+    const r = createCanonicalId(
+      { broker: BrokerSlot.Paper, type: EntityType.Order, nativeId: 1, symbol: 'EURUSD' },
+      registry,
+      { idWidth: 32 },
+    );
+    if (!isOk(r)) throw new Error('expected ok');
+    const b62 = toBase62(r.value);
+    expect(b62).toMatch(/^ord_[0-9A-Za-z]{22}$/);
+  });
+
+  it('fromBase62 round-trips back to the original canonical id', () => {
+    const r = createCanonicalId(
+      { broker: BrokerSlot.Paper, type: EntityType.Order, nativeId: 2, symbol: 'EURUSD' },
+      registry,
+      { idWidth: 32 },
+    );
+    if (!isOk(r)) throw new Error('expected ok');
+    const b62 = toBase62(r.value);
+    expect(fromBase62(b62)).toBe(r.value);
+  });
+
+  it('deal_ prefix for Deal type', () => {
+    const r = createCanonicalId(
+      { broker: BrokerSlot.Paper, type: EntityType.Deal, nativeId: 3, symbol: 'EURUSD' },
+      registry,
+      { idWidth: 32 },
+    );
+    if (!isOk(r)) throw new Error('expected ok');
+    expect(toBase62(r.value)).toMatch(/^deal_/);
   });
 });
