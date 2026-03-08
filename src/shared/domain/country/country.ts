@@ -201,6 +201,26 @@ export class Exchange {
  * us.isNationalHoliday(new Date('2025-07-04T12:00:00Z'));     // true
  */
 export class Country {
+  private static readonly _registry: Record<string, Country> = {};
+
+  /** Register a country into the global registry. Called by `countries.ts` at module init. */
+  static register(country: Country): void {
+    Country._registry[country.isoCode] = country;
+  }
+
+  /** All registered countries, keyed by ISO 3166-1 alpha-2 code. */
+  static get all(): Readonly<Record<string, Country>> {
+    return Country._registry;
+  }
+
+  /**
+   * Returns the `Country` for a given ISO 3166-1 alpha-2 code, or `undefined`.
+   * @example Country.get('US')?.isMarketOpen(new Date(), 'XNYS')
+   */
+  static get(isoCode: string): Country | undefined {
+    return Country._registry[isoCode.toUpperCase()];
+  }
+
   constructor(
     /** ISO 3166-1 alpha-2 code, e.g. `'US'`, `'DE'`, `'JP'`. */
     public readonly isoCode:   string,

@@ -209,20 +209,10 @@ export const JP = new Country(
 );
 
 // ─────────────────────────────────────────────────────────────
-// Registry map — look up by ISO 3166-1 alpha-2 code
+// Register all countries into Country.all / Country.get()
 // ─────────────────────────────────────────────────────────────
 
-export const Countries: Readonly<Record<string, Country>> = {
-  US,
-  GB,
-  DE,
-  JP,
-};
-
-/**
- * Returns the `Country` for a given ISO 3166-1 alpha-2 code, or `undefined`.
- * @example getCountry('US')?.isMarketOpen(new Date(), 'XNYS')
- */
-export function getCountry(isoCode: string): Country | undefined {
-  return Countries[isoCode.toUpperCase()];
-}
+Country.register(US);
+Country.register(GB);
+Country.register(DE);
+Country.register(JP);
