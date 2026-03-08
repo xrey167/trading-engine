@@ -1,19 +1,10 @@
-import { Side, TrailMode } from '../shared/domain/engine-enums.js';
-import type { ExitReason } from '../shared/domain/engine-enums.js';
+import { Side } from '../shared/domain/engine-enums.js';
+import { TrailMode } from '../shared/domain/trail/trail.js';
+import type { TrailConfig, TrailState, HitResult } from '../shared/domain/trail/trail.js';
 import type { Bar } from '../shared/domain/bar/bar.js';
 import type { Bars } from '../market-data/bars.js';
 import type { SymbolInfoBase } from '../engine/core/symbol.js';
-
-export interface TrailConfig {
-  mode:        TrailMode;
-  distancePts: number;
-  periods:     number;
-}
-
-export interface TrailState {
-  active: boolean;
-  plhRef: number;
-}
+export type { TrailMode, TrailConfig, TrailState, HitResult } from '../shared/domain/trail/trail.js';
 
 export function calcTrailingSL(p: {
   side:          Side;
@@ -79,11 +70,6 @@ export function calcTrailingSL(p: {
   }
 
   return currentSL;
-}
-
-export interface HitResult {
-  reason:    ExitReason;
-  exitPrice: number;
 }
 
 export function checkSLTP(p: {

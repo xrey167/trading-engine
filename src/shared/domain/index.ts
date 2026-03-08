@@ -9,7 +9,7 @@ export * from './symbol/symbol.js';
 export * from './symbol/tick.js';
 export * from './enums.js';
 export * from './ea/ea-enums.js';
-export { TrailMode } from './engine-enums.js';
+export * from './trail/trail.js';
 export * from './history/history.js';
 export * from './calendar/session.js';
 export * from './indicator/indicator.js';
