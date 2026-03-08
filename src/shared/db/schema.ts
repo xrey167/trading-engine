@@ -1,4 +1,4 @@
-import { pgTable, serial, text, doublePrecision, real, timestamp, jsonb, integer, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import { pgTable, serial, text, doublePrecision, real, timestamp, jsonb, integer, uuid, uniqueIndex, index } from 'drizzle-orm/pg-core';
 
 export const bars = pgTable('bars', {
   id:        serial('id').primaryKey(),
@@ -25,6 +25,7 @@ export const deals = pgTable('deals', {
   swap:       doublePrecision('swap').notNull(),
   commission: doublePrecision('commission').notNull(),
   time:       timestamp('time', { withTimezone: true }).notNull(),
+  canonicalId: uuid('canonical_id'),
 });
 
 export const auditEvents = pgTable('audit_events', {
@@ -63,6 +64,7 @@ export const orderEvents = pgTable('order_events', {
   price:      real('price').notNull(),
   limitPrice: real('limit_price'),
   metadata:   jsonb('metadata'),
+  canonicalId: uuid('canonical_id'),
   timestamp:  timestamp('timestamp', { withTimezone: true }).notNull(),
   createdAt:  timestamp('created_at').defaultNow().notNull(),
 }, (t) => [

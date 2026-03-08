@@ -24,8 +24,9 @@ export class OrderWriter {
       lots:       event.lots,
       price:      event.price,
       limitPrice: event.limitPrice,
-      metadata:   event.metadata,
-      timestamp:  new Date(event.timestamp),
+      metadata:    event.metadata,
+      canonicalId: event.canonicalId ?? null,
+      timestamp:   new Date(event.timestamp),
     }).catch((err: unknown) => {
       this.logger.error(`OrderWriter insert error: ${(err as Error).message}`);
     });

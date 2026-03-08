@@ -3,6 +3,7 @@ import { nullLogger } from '../lib/logger.js';
 import { TypedEventBus } from '../event-bus.js';
 import type { AppEventMap, OrderEvent } from '../services/event-map.js';
 import { DealWriter } from './deal-writer.js';
+import type { CanonicalId } from '../lib/canonical-id.js';
 
 function makeOrderEvent(overrides: Partial<OrderEvent> = {}): OrderEvent {
   return {
@@ -54,6 +55,16 @@ describe('DealWriter', () => {
         volume: 0.1,
         price: 1.1234,
       }),
+    );
+  });
+
+  it('writes canonicalId to the insert call when provided', () => {
+    const canonicalId = '00000000-0000-8000-8000-000000000001' as CanonicalId;
+    new DealWriter(mockDb, emitter, nullLogger);
+    emitter.emit('order', makeOrderEvent({ canonicalId }));
+
+    expect(mockInsert.values).toHaveBeenCalledWith(
+      expect.objectContaining({ canonicalId })
     );
   });
 

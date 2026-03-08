@@ -1,6 +1,7 @@
 import type { EngineEventMap } from '../event-bus.js';
 import type { OHLCBody } from '../schemas/common.js';
 import type { ServiceStatus } from './types.js';
+import type { CanonicalId } from '../lib/canonical-id.js';
 
 export interface SignalEvent {
   readonly serviceId: string;
@@ -31,6 +32,7 @@ export interface OrderEvent {
   readonly price: number;
   readonly source?: 'http' | 'broker' | 'synthetic';
   readonly limitPrice?: number;
+  readonly canonicalId?: CanonicalId;
   readonly metadata: Record<string, unknown>;
   readonly timestamp: string;
 }
