@@ -1,8 +1,17 @@
 import type { FastifyPluginAsync } from 'fastify';
+import { Type } from '@sinclair/typebox';
 import { SKILL_CATALOG, type SkillDef } from './catalog.js';
 import { streamAgentQuery } from './sse.js';
 import { SkillRunSchema, type SkillRunBody } from './schemas.js';
+import { ErrorResponseSchema } from '../../shared/schemas/common.js';
 import { apiKeyPreHandler } from '../../shared/lib/api-utils.js';
+
+const SkillListItemSchema = Type.Object({
+  path:        Type.String(),
+  command:     Type.String(),
+  category:    Type.String(),
+  description: Type.String(),
+});
 
 // Prevent concurrent resume of the same session.
 // NOTE: This is process-local. In a multi-process deployment (pm2 cluster,
@@ -31,6 +40,7 @@ const skillsRoute: FastifyPluginAsync = async (fastify) => {
   // GET /skills — list all available skills (auth-gated via x-api-key)
   fastify.get('/skills', {
     preHandler: [apiKeyPreHandler],
+    schema: { response: { 200: Type.Array(SkillListItemSchema) } },
   }, async () =>
     Object.entries(SKILL_CATALOG).map(([path, def]) => ({
       path: `/skills/${path}`,
@@ -43,7 +53,7 @@ const skillsRoute: FastifyPluginAsync = async (fastify) => {
   // Register a POST route for each skill in the catalog
   for (const [path, def] of Object.entries(SKILL_CATALOG) as [string, SkillDef][]) {
     fastify.post<{ Body: SkillRunBody }>(`/skills/${path}`, {
-      schema: { body: SkillRunSchema },
+      schema: { body: SkillRunSchema, response: { 409: ErrorResponseSchema } },
       preHandler: [apiKeyPreHandler],
       config: { rateLimit: { max: 5, timeWindow: '1 minute' } },
     }, async (req, reply) => {
