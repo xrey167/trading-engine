@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { OrderWriter } from './order-writer.js';
 import { TypedEventBus } from '../event-bus.js';
 import type { AppEventMap } from '../services/event-map.js';
+import type { CanonicalId } from '../lib/canonical-id.js';
 
 describe('OrderWriter', () => {
   function makeEvent(action: AppEventMap['order']['action']) {
@@ -48,6 +49,22 @@ describe('OrderWriter', () => {
 
     expect(insertMock.values).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'CANCELLED' })
+    );
+  });
+
+  it('writes canonicalId to the insert call when provided', async () => {
+    const insertMock = { values: vi.fn().mockResolvedValue(undefined) };
+    const db = { insert: vi.fn().mockReturnValue(insertMock) } as any;
+    const emitter = new TypedEventBus<AppEventMap>();
+    const logger = { error: vi.fn() } as any;
+
+    const canonicalId = '00000000-0000-8000-8000-000000000001' as CanonicalId;
+    new OrderWriter(db, emitter, logger);
+    emitter.emit('order', { ...makeEvent('FILLED'), canonicalId });
+    await Promise.resolve();
+
+    expect(insertMock.values).toHaveBeenCalledWith(
+      expect.objectContaining({ canonicalId })
     );
   });
 

@@ -7,7 +7,7 @@ import { ServiceKind } from '../shared/services/types.js';
 import { BaseService } from '../shared/services/base-service.js';
 import { BrokerService } from '../broker/broker-service.js';
 import type { RiskManagerService } from './risk-manager.js';
-import { createCanonicalId, EntityType, BrokerSlot, type CanonicalId } from '../shared/lib/canonical-id.js';
+import { createCanonicalId, EntityType, type CanonicalId } from '../shared/lib/canonical-id.js';
 import { CanonicalIdRegistry } from '../shared/lib/canonical-id-registry.js';
 
 const _canonicalRegistry = new CanonicalIdRegistry();
@@ -128,7 +128,7 @@ export class ExecutionSaga extends BaseService {
       if (fillTicket !== 0) {
         const cidResult = createCanonicalId(
           {
-            broker: BrokerSlot.Paper,
+            broker: svc.broker.brokerSlot,
             type: EntityType.Order,
             nativeId: fillTicket,
             symbol: signal.symbol,

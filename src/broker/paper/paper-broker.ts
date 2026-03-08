@@ -17,6 +17,7 @@ import type {
 import { ok, err, type Result } from '../../shared/lib/result.js';
 import { notFound, gatewayError, type DomainError } from '../../shared/lib/errors.js';
 import { consoleLogger, type Logger } from '../../shared/lib/logger.js';
+import { BrokerSlot } from '../../shared/lib/canonical-id.js';
 
 /**
  * Paper broker — simulates fills in memory.
@@ -40,6 +41,7 @@ import { consoleLogger, type Logger } from '../../shared/lib/logger.js';
  */
 export class PaperBroker implements IBrokerAdapter, IOrderGateway, IPositionGateway, IHistoryGateway, IMarketDataGateway, IAccountGateway, IIndicatorGateway {
   readonly idWidth = 32 as const;
+  readonly brokerSlot = BrokerSlot.Paper;
   private seq = 0;
   private priceRef = 0;
 
