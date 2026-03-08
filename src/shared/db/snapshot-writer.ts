@@ -46,6 +46,10 @@ export class SnapshotWriter {
   private lastEventCaptureMs = 0;
   private readonly threshold: number;
   private readonly cooldownMs: number;
+  private eventEmitter: TypedEventBus<AppEventMap> | null = null;
+  private readonly handleOrder = (event: AppEventMap['order']): void => {
+    if (event.action === 'FILLED') this.onEquityChange(event);
+  };
 
   constructor(
     private readonly db: DrizzleDB,
@@ -64,9 +68,8 @@ export class SnapshotWriter {
 
     // Hybrid: also capture on significant equity changes after order fills
     if (emitter) {
-      emitter.on('order', (event) => {
-        if (event.action === 'FILLED') this.onEquityChange(event);
-      });
+      this.eventEmitter = emitter;
+      emitter.on('order', this.handleOrder);
     }
   }
 
@@ -74,6 +77,10 @@ export class SnapshotWriter {
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
+    }
+    if (this.eventEmitter) {
+      this.eventEmitter.off('order', this.handleOrder);
+      this.eventEmitter = null;
     }
   }
 
