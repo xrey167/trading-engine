@@ -63,7 +63,7 @@ export class PostgresBarCache implements IBarCache {
    * Hydrates the in-memory mirror from Postgres for the given symbol/timeframe.
    * Call this on startup to restore state from a previous session.
    */
-  async hydrate(symbol: string, timeframe: string, limit = 1000): Promise<number> {
+  async hydrate(symbol: string, timeframe: string, limit = this.maxBars): Promise<number> {
     try {
       const rows = await this.db
         .select()
