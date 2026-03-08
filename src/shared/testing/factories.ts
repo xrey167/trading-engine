@@ -1,4 +1,4 @@
-import { Bars } from '../../market-data/bars.js';
+import { Bars } from '../../shared/domain/bar/bars.js';
 import type { OHLC } from '../../shared/domain/bar/ohlc.js';
 
 export interface TestBar {

@@ -3,7 +3,7 @@ import { AtrModule } from './atr-module.js';
 import type { AtrModuleConfig } from './atr-module.js';
 import { TradingEngine } from './trading-engine.js';
 import type { IBrokerAdapter } from './trading-engine.js';
-import { Bars } from '../../market-data/bars.js';
+import { Bars } from '../../shared/domain/bar/bars.js';
 import type { OHLC } from '../../shared/domain/bar/ohlc.js';
 import { AtrMethod, BarsAtrMode, BarBase } from '../../shared/domain/engine-enums.js';
 import { SymbolInfoForex } from './symbol.js';

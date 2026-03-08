@@ -13,7 +13,7 @@ import { ServiceKind } from '../shared/services/types.js';
 import { StrategyService } from '../analysis/strategy-service.js';
 import { ScreenerService } from '../analysis/screener-service.js';
 import { RiskManagerService } from '../managers/risk-manager.js';
-import { Bars } from '../market-data/bars.js';
+import { Bars } from '../shared/domain/bar/bars.js';
 
 const serviceRoutes: FastifyPluginAsync = async (fastify) => {
   const { serviceRegistry } = fastify;

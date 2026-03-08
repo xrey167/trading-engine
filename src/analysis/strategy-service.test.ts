@@ -4,7 +4,7 @@ import type { AppEventMap, SignalEvent } from '../shared/services/event-map.js';
 import { ServiceStatus, ServiceKind } from '../shared/services/types.js';
 import { StrategyService } from './strategy-service.js';
 import { nullLogger } from '../shared/lib/logger.js';
-import { Bars } from '../market-data/bars.js';
+import { Bars } from '../shared/domain/bar/bars.js';
 import type { OHLC } from '../shared/domain/bar/ohlc.js';
 import { RunMode, SignalResult } from './strategies/types.js';
 

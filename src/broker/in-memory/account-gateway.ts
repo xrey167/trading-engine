@@ -5,7 +5,7 @@ import { notFound } from '../../shared/lib/errors.js';
 import type { AccountInfoVO } from '../../shared/domain/account/account.js';
 import type { SymbolInfoVO, Tick } from '../../shared/domain/symbol/symbol.js';;
 import type { IAccountGateway, IMarketDataGateway, IIndicatorGateway } from '../types.js';
-import { Bars } from '../../market-data/bars.js';
+import { Bars } from '../../shared/domain/bar/bars.js';
 import type { OHLC } from '../../shared/domain/bar/ohlc.js';
 
 export class InMemoryAccountGateway implements IAccountGateway, IMarketDataGateway, IIndicatorGateway {

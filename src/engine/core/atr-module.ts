@@ -1,5 +1,5 @@
 import type { AtrMethod, BarsAtrMode, BarBase } from '../../shared/domain/engine-enums.js';
-import type { Bars } from '../../market-data/bars.js';
+import type { Bars } from '../../shared/domain/bar/bars.js';
 import type { SymbolInfoBase } from './symbol.js';
 import type { TradingEngine } from './trading-engine.js';
 

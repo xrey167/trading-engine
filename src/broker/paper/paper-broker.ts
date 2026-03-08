@@ -2,7 +2,7 @@ import type { TypedEventBus } from '../../shared/event-bus.js';
 import type { AppEventMap } from '../../shared/services/event-map.js';
 import type { IBrokerAdapter, ExecutionReport } from '../../engine/core/position.js';
 import type { Side } from '../../shared/domain/engine-enums.js';
-import { Bars } from '../../market-data/bars.js';
+import { Bars } from '../../shared/domain/bar/bars.js';
 import type { OHLC } from '../../shared/domain/bar/ohlc.js';
 import type { PositionInfoVO } from '../../shared/domain/position/position.js';
 import type { DealInfoVO } from '../../shared/domain/deal/deal.js';

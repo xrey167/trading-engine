@@ -7,7 +7,7 @@ import type { IBarCache } from '../market-data/data-provider-types.js';
 import type { ISignalStrategy, ISignalContext } from './strategies/types.js';
 import { SignalResult, RunMode } from './strategies/types.js';
 import { createStrategy } from './strategies/strategy-factory.js';
-import { Bars } from '../market-data/bars.js';
+import { Bars } from '../shared/domain/bar/bars.js';
 
 export interface StrategyServiceConfig {
   readonly id: string;

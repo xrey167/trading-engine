@@ -1,4 +1,4 @@
-import type { Bars } from '../market-data/bars.js';
+import type { Bars } from '../shared/domain/bar/bars.js';
 import { BarsAtrMode, BarBase } from '../shared/domain/engine-enums.js';
 import type { Result } from '../shared/lib/result.js';
 import type { DomainError } from '../shared/lib/errors.js';

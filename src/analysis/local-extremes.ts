@@ -1,4 +1,4 @@
-import type { Bars } from '../market-data/bars.js';
+import type { Bars } from '../shared/domain/bar/bars.js';
 
 export function isLocalHigh(bars: Bars, window: number, shift: number): boolean {
   const center = bars.high(shift);

@@ -7,7 +7,7 @@ import { PaperBroker } from './paper/paper-broker.js';
 import { SymbolInfoForex } from '../engine/core/symbol.js';
 import { TradingEngine } from '../engine/core/trading-engine.js';
 import { Bar } from '../shared/domain/bar/bar.js';
-import { Bars } from '../market-data/bars.js';
+import { Bars } from '../shared/domain/bar/bars.js';
 import { nullLogger } from '../shared/lib/logger.js';
 
 function makeBrokerService(id = 'broker:paper:test') {

@@ -1,5 +1,5 @@
 import { Side } from '../../shared/domain/engine-enums.js';
-import type { Bars } from '../../market-data/bars.js';
+import type { Bars } from '../../shared/domain/bar/bars.js';
 import type { SymbolInfoBase } from '../../engine/core/symbol.js';
 import type { TradingEngine } from '../../engine/core/trading-engine.js';
 

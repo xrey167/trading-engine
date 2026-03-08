@@ -2,7 +2,7 @@ import { Side } from '../shared/domain/engine-enums.js';
 import { TrailMode } from '../shared/domain/trail/trail.js';
 import type { TrailConfig, TrailState, HitResult } from '../shared/domain/trail/trail.js';
 import type { Bar } from '../shared/domain/bar/bar.js';
-import type { Bars } from '../market-data/bars.js';
+import type { Bars } from '../shared/domain/bar/bars.js';
 import type { SymbolInfoBase } from '../engine/core/symbol.js';
 export type { TrailMode, TrailConfig, TrailState, HitResult } from '../shared/domain/trail/trail.js';
 

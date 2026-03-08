@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { Bar } from '../../shared/domain/bar/bar.js';
-import { Bars } from '../bars.js';
+import { Bars } from '../../shared/domain/bar/bars.js';
 import { OkResponseSchema } from '../../shared/schemas/common.js';
 import {
   PostBarsBodySchema,

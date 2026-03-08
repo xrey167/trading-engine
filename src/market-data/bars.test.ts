@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { Bars } from './bars.js';
+import { Bars } from '../shared/domain/bar/bars.js';
 import type { OHLC } from '../shared/domain/bar/ohlc.js';
 import { AtrMethod } from '../shared/domain/engine-enums.js';
 

@@ -1,6 +1,6 @@
 import { Side, TrailMode, LimitConfirm } from '../../shared/domain/engine-enums.js';
 import { Bar } from '../../shared/domain/bar/bar.js';
-import type { Bars } from '../../market-data/bars.js';
+import type { Bars } from '../../shared/domain/bar/bars.js';
 import type { SymbolInfoBase } from './symbol.js';
 import type { PositionSlot, DealRecord, DealStats, IBrokerAdapter, ExecutionReport } from './position.js';
 import { dealStatsComputed } from './position.js';

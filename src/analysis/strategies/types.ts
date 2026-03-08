@@ -1,4 +1,4 @@
-import type { Bars } from '../../market-data/bars.js';
+import type { Bars } from '../../shared/domain/bar/bars.js';
 
 // Signal results
 export const SignalResult = { BUY: 'BUY', SELL: 'SELL', HOLD: 'HOLD' } as const;

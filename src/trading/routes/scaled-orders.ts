@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { Type } from '@sinclair/typebox';
 import { ScaledOrderEngine, SCALED_ORDER_PRESETS } from '../../trading/scaled-orders/engine.js';
-import { Bars } from '../../market-data/bars.js';
+import { Bars } from '../../shared/domain/bar/bars.js';
 import { ErrorResponseSchema } from '../../shared/schemas/common.js';
 import {
   PostScaledOrdersBodySchema,

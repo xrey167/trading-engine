@@ -1,6 +1,6 @@
 import { Side, type TrailMode, type LimitConfirm } from '../../shared/domain/engine-enums.js';
 import type { Bar } from '../../shared/domain/bar/bar.js';
-import type { Bars } from '../../market-data/bars.js';
+import type { Bars } from '../../shared/domain/bar/bars.js';
 import type { SymbolInfoBase } from '../../engine/core/symbol.js';
 
 export type OrderEntryType =
