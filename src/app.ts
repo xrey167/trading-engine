@@ -303,11 +303,22 @@ export async function buildApp(
 
   // 7. API docs
   const __dirname = dirname(fileURLToPath(import.meta.url));
-  const specPath = join(__dirname, '../../openapi.yaml');
+  // Try project root first (process.cwd()), fall back to relative-from-dist path
+  const specCandidates = [
+    join(process.cwd(), 'openapi.yaml'),
+    join(__dirname, '../../openapi.yaml'),
+    join(__dirname, '../openapi.yaml'),
+  ];
   let specContent = '';
-  try { specContent = readFileSync(specPath, 'utf8'); } catch { /* spec not built */ }
+  for (const candidate of specCandidates) {
+    try { specContent = readFileSync(candidate, 'utf8'); break; } catch { /* try next */ }
+  }
 
   app.get('/openapi.yaml', async (_req, reply) => {
+    if (!specContent) {
+      reply.status(404).send('openapi.yaml not found — run npm run build first');
+      return;
+    }
     reply.header('Content-Type', 'text/yaml; charset=utf-8');
     reply.header('Cache-Control', 'no-cache');
     return reply.send(specContent);
