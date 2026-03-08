@@ -84,12 +84,12 @@ export const OrderEntryTypeSchema = Type.Union([
 // ─────────────────────────────────────────────────────────────
 
 export const OHLCSchema = Type.Object({
-  open:   Type.Number(),
-  high:   Type.Number(),
-  low:    Type.Number(),
-  close:  Type.Number(),
+  open:   Type.Number({ minimum: 0 }),
+  high:   Type.Number({ minimum: 0 }),
+  low:    Type.Number({ minimum: 0 }),
+  close:  Type.Number({ minimum: 0 }),
   time:   Type.String({ format: 'date-time' }),
-  volume: Type.Optional(Type.Number()),
+  volume: Type.Optional(Type.Number({ minimum: 0 })),
 });
 export type OHLCBody = Static<typeof OHLCSchema>;
 
@@ -99,8 +99,8 @@ export type OHLCBody = Static<typeof OHLCSchema>;
 
 export const TrailConfigSchema = Type.Object({
   mode:        TrailModeSchema,
-  distancePts: Type.Number(),
-  periods:     Type.Number(),
+  distancePts: Type.Number({ minimum: 0 }),
+  periods:     Type.Number({ minimum: 0 }),
 });
 
 export const TrailStateSchema = Type.Object({
@@ -113,7 +113,7 @@ export const TrailStateSchema = Type.Object({
 // ─────────────────────────────────────────────────────────────
 
 export const ExecutionReportSchema = Type.Object({
-  price: Type.Number(),
+  price: Type.Number({ minimum: 0 }),
   time:  Type.String({ format: 'date-time' }),
   id:    Type.String(),
 });
