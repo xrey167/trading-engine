@@ -5,4 +5,5 @@ export * from './common.js';
 export { TradeSignalEntrySchema } from '../domain/trade-signal.js';
 export { TradeStatsSchema, TradeParamsSchema } from '../domain/trade-params.js';
 export { PositionInfoVOSchema, DealInfoVOSchema, HistoryOrderInfoVOSchema } from '../domain/position.js';
-export { AccountInfoVOSchema, SymbolInfoVOSchema, TickSchema } from '../domain/account/account.js';
+export { AccountInfoVOSchema } from '../domain/account/account.js';
+export { SymbolInfoVOSchema, TickSchema } from '../domain/symbol/symbol.js';;

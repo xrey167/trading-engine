@@ -21,7 +21,8 @@ import {
   TradeParamsSchema,
 } from './trade-params.js';
 import { PositionInfoVOSchema } from './position.js';
-import { AccountInfoVOSchema, SymbolInfoVOSchema, TickSchema } from './account/account.js';
+import { AccountInfoVOSchema } from './account/account.js';
+import { SymbolInfoVOSchema, TickSchema } from './symbol/symbol.js';;
 import { MoneyManagementFactoryConfigSchema } from '../../trading/money-management/types.js';
 
 // ─────────────────────────────────────────────────────────────
