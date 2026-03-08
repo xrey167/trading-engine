@@ -1,5 +1,8 @@
 const CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
 const BASE  = BigInt(62);
+const CHARS_MAP = new Map<string, number>(
+  Array.from(CHARS, (c, i) => [c, i] as [string, number])
+);
 
 /**
  * Encodes a 16-byte Buffer to a 22-character base62 string using alphabet [0-9A-Za-z].
@@ -21,7 +24,7 @@ export function base62Encode(buf: Buffer): string {
 export function base62Decode(str: string): Buffer {
   let n = 0n;
   for (const c of str) {
-    const idx = CHARS.indexOf(c);
+    const idx = CHARS_MAP.get(c) ?? -1;
     if (idx < 0) throw new Error(`Invalid base62 character: "${c}"`);
     n = n * BASE + BigInt(idx);
   }

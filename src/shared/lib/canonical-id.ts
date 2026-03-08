@@ -32,9 +32,19 @@ export function configureNode(nodeId: number): void {
 }
 
 function nextSeq(nowMs: number): { seq: number; ts: number } {
-  if (nowMs > _lastMs) { _seq = 0; _lastMs = nowMs; }
-  else { nowMs = _lastMs; } // clock regression: hold
-  const seq = (_seq++) & 0x3fff; // 14-bit max
+  if (nowMs > _lastMs) {
+    _seq = 0;
+    _lastMs = nowMs;
+  } else {
+    nowMs = _lastMs; // clock regression: hold
+  }
+  if (_seq >= 0x4000) {
+    // seq overflow: advance to next virtual millisecond
+    _lastMs++;
+    nowMs = _lastMs;
+    _seq = 0;
+  }
+  const seq = (_seq++) & 0x3fff;
   return { seq, ts: nowMs };
 }
 
@@ -195,7 +205,11 @@ export function decodeCanonicalId(id: string): CanonicalIdPayload {
   );
 
   // Byte 6: [1000][vvvv]
-  const version = buf[6] & 0x0F;
+  const byte6 = buf[6];
+  if ((byte6 >> 4) !== 8) {
+    throw new Error(`Not a canonical ID — invalid RFC v8 version nibble in byte 6: 0x${byte6.toString(16)}`);
+  }
+  const version = byte6 & 0x0F;
 
   // Byte 7: [m][bbbbbbb]
   const modeBit = (buf[7] >> 7) & 1;
@@ -293,9 +307,7 @@ export function fromBase62(str: string): CanonicalId {
   if (underscore < 0) throw new Error(`Missing prefix in base62 canonical ID: "${str}"`);
   const encoded = str.slice(underscore + 1);
   const buf = base62Decode(encoded);
-  const hex = buf.toString('hex');
-  const id  = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-  return id as CanonicalId;
+  return toUuidString(buf) as CanonicalId;
 }
 
 // ---------------------------------------------------------------------------
