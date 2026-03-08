@@ -1,9 +1,12 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
   encodeCanonicalId, decodeCanonicalId,
   EntityType, BrokerSlot,
   type CompactPayload, type ExtendedPayload,
+  createCanonicalId, configureNode, type CanonicalId,
 } from './canonical-id.js';
+import { isOk, isErr } from './result.js';
+import { CanonicalIdRegistry } from './canonical-id-registry.js';
 
 describe('canonical-id codec', () => {
   const base: CompactPayload = {
@@ -110,5 +113,72 @@ describe('canonical-id codec', () => {
   it('round-trips seq=16383 (max 14-bit)', () => {
     const id = encodeCanonicalId({ ...base, seq: 16383 });
     expect(decodeCanonicalId(id)).toMatchObject({ seq: 16383 });
+  });
+});
+
+describe('createCanonicalId guard', () => {
+  let registry: CanonicalIdRegistry;
+
+  beforeEach(() => {
+    registry = new CanonicalIdRegistry();
+    registry.registerSymbol('EURUSD');
+  });
+
+  it('returns Ok for valid compact input', () => {
+    const result = createCanonicalId(
+      { broker: BrokerSlot.Paper, type: EntityType.Order, nativeId: 100, symbol: 'EURUSD', strategyId: 0 },
+      registry,
+      { idWidth: 32 },
+    );
+    expect(isOk(result)).toBe(true);
+  });
+
+  it('returns Err when nativeId is 0 (number)', () => {
+    const result = createCanonicalId(
+      { broker: BrokerSlot.Paper, type: EntityType.Order, nativeId: 0, symbol: 'EURUSD', strategyId: 0 },
+      registry,
+      { idWidth: 32 },
+    );
+    expect(isErr(result)).toBe(true);
+  });
+
+  it('returns Err when nativeId is 0n (bigint)', () => {
+    const result = createCanonicalId(
+      { broker: BrokerSlot.IB, type: EntityType.Order, nativeId: 0n, symbol: 'EURUSD', strategyId: 0 },
+      registry,
+      { idWidth: 64 },
+    );
+    expect(isErr(result)).toBe(true);
+  });
+
+  it('returns Err when symbol registry is full', () => {
+    // Fill the registry (EURUSD already registered as code 1, so fill codes 2-255)
+    for (let i = 2; i <= 255; i++) registry.registerSymbol(`SYM${i}`);
+    const result = createCanonicalId(
+      { broker: BrokerSlot.Paper, type: EntityType.Order, nativeId: 1, symbol: 'OVERFLOW' },
+      registry,
+      { idWidth: 32 },
+    );
+    expect(isErr(result)).toBe(true);
+  });
+
+  it('stores nativeId in registry on success', () => {
+    const result = createCanonicalId(
+      { broker: BrokerSlot.Paper, type: EntityType.Order, nativeId: 42, symbol: 'EURUSD', strategyId: 0 },
+      registry,
+      { idWidth: 32 },
+    );
+    if (!isOk(result)) throw new Error('expected ok');
+    expect(registry.getNativeId(result.value)).toBe(42);
+  });
+
+  it('returned value is a valid UUID string (branded CanonicalId)', () => {
+    const result = createCanonicalId(
+      { broker: BrokerSlot.Paper, type: EntityType.Order, nativeId: 1, symbol: 'EURUSD' },
+      registry,
+      { idWidth: 32 },
+    );
+    if (!isOk(result)) throw new Error('expected ok');
+    expect(result.value).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
   });
 });

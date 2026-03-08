@@ -14,6 +14,73 @@
  *               (symbolCode / strategyId are NOT encoded — sidecar only)
  */
 
+import { ok, err, type Result } from './result.js';
+import { invalidInput } from './errors.js';
+import type { CanonicalIdRegistry } from './canonical-id-registry.js';
+
+// Branded opaque type — raw string is not assignable to CanonicalId
+export type CanonicalId = string & { readonly __brand: 'CanonicalId' };
+
+// Module-level Snowflake counter (hardened in Task 4)
+let _nodeId = (parseInt(process.env['INSTANCE_ID'] ?? '0', 10) || 0) & 0xff;
+let _seq    = 0;
+let _lastMs = 0;
+
+export function configureNode(nodeId: number): void {
+  _nodeId = nodeId & 0xff;
+}
+
+function nextSeq(nowMs: number): { seq: number; ts: number } {
+  if (nowMs > _lastMs) { _seq = 0; _lastMs = nowMs; }
+  else { nowMs = _lastMs; } // clock regression: hold
+  const seq = (_seq++) & 0x3fff; // 14-bit max
+  return { seq, ts: nowMs };
+}
+
+export function createCanonicalId(
+  opts: {
+    broker:       BrokerSlot;
+    type:         EntityType;
+    nativeId:     number | bigint;
+    symbol:       string;
+    strategyId?:  number;
+    timestampMs?: number;
+  },
+  registry: CanonicalIdRegistry,
+  adapter:  { idWidth: 32 | 64 },
+): Result<CanonicalId, ReturnType<typeof invalidInput>> {
+  // Guard: nativeId=0 is MT5's error sentinel
+  if (opts.nativeId === 0 || opts.nativeId === 0n) {
+    return err(invalidInput('nativeId must not be zero (broker error sentinel)', 'nativeId'));
+  }
+
+  // Guard: symbol must be registerable (throws if registry is full)
+  let symCode: number;
+  try {
+    symCode = registry.registerSymbol(opts.symbol);
+  } catch (e) {
+    return err(invalidInput(`Cannot register symbol "${opts.symbol}": ${(e as Error).message}`, 'symbol'));
+  }
+
+  const { seq, ts } = nextSeq(opts.timestampMs ?? Date.now());
+  const isExtended  = adapter.idWidth === 64;
+
+  const payload: CanonicalIdPayload = isExtended
+    ? {
+        mode: 'extended', timestampMs: ts, broker: opts.broker, type: opts.type,
+        nativeId: BigInt(opts.nativeId), nodeId: _nodeId, seq, version: 0,
+      }
+    : {
+        mode: 'compact', timestampMs: ts, broker: opts.broker, type: opts.type,
+        symbolCode: symCode, nativeId: Number(opts.nativeId),
+        strategyId: opts.strategyId ?? 0, nodeId: _nodeId, seq, version: 0,
+      };
+
+  const id = encodeCanonicalId(payload) as CanonicalId;
+  registry.setNativeId(id, opts.nativeId);
+  return ok(id);
+}
+
 export const EntityType = {
   Order:    0x01,
   Deal:     0x02,
