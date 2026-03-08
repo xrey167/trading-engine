@@ -2,7 +2,7 @@ import fp from 'fastify-plugin';
 import type { FastifyPluginAsync } from 'fastify';
 import backtestRoute from './routes/backtest.js';
 import signalRoute from './routes/signal.js';
-import eventsRoute from '../shared/domain/events/routes.js';
+import eventsRoute from '../shared/domain/economic-events/routes.js';
 
 const analysisModule: FastifyPluginAsync = async (fastify) => {
   await fastify.register(backtestRoute);
