@@ -25,6 +25,7 @@
     "src/shared/domain/country.ts",
     "src/shared/domain/countries.ts",
     "src/shared/domain/trading-calendar.ts",
+    "src/shared/domain/figi.ts",
     "src/shared/domain/events/types.ts",
     "src/shared/domain/events/catalog.ts",
     "src/shared/domain/events/scheduled.ts",
