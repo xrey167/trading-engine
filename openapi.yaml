@@ -193,6 +193,12 @@ servers:
     description: Local development (paper broker)
 
 tags:
+  # ── Infrastructure ────────────────────────────────────────
+  - name: Health
+    description: >
+      Liveness and readiness probes for container orchestration and load balancers.
+      `GET /health` returns process uptime; `GET /readyz` confirms traffic-readiness.
+
   # ── Core Trading ──────────────────────────────────────────
   - name: Engine
     description: >
@@ -292,6 +298,63 @@ tags:
       registered and return 404.
 
 paths:
+
+  # ─────────────────────────────────────────────────────────────
+  # Health probes
+  # ─────────────────────────────────────────────────────────────
+
+  /health:
+    get:
+      tags: [Health]
+      summary: Liveness probe
+      operationId: getHealth
+      description: |
+        Returns `200 OK` with the process uptime in seconds. Use as a liveness
+        probe for Kubernetes, Docker HEALTHCHECK, or any load balancer.
+
+        **curl:**
+        ```bash
+        curl http://localhost:3000/health
+        ```
+      security: []
+      responses:
+        '200':
+          description: Engine is alive
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, uptime]
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  uptime:
+                    type: number
+                    description: Process uptime in seconds
+                    example: 123.45
+
+  /readyz:
+    get:
+      tags: [Health]
+      summary: Readiness probe
+      operationId: getReadyz
+      description: |
+        Returns `200 OK` when the engine is ready to serve traffic. Use as a
+        readiness probe for Kubernetes or similar orchestration.
+      security: []
+      responses:
+        '200':
+          description: Engine is ready
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    example: ok
 
   # ─────────────────────────────────────────────────────────────
   # Engine
