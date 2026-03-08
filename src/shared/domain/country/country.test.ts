@@ -251,7 +251,7 @@ describe('Country.isMarketOpen', () => {
 });
 
 describe('Country.isHoliday', () => {
-  it('Xetra Good Friday is both a national and exchange holiday in DE', () => {
+  it('Xetra Good Friday is an exchange holiday in DE → isHoliday returns true', () => {
     // 2025-04-18 09:00 CEST = 07:00 UTC
     expect(DE.isHoliday(utc('2025-04-18T07:00:00Z'), 'XETR')).toBe(true);
   });

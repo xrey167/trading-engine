@@ -243,13 +243,16 @@ export class Country {
 
   // ── Holiday helpers ──────────────────────────────────────────
 
+  private localDate(date: Date): string {
+    return DateTime.fromJSDate(date, { zone: this.timezone }).toFormat('yyyy-MM-dd');
+  }
+
   /**
    * `true` when `date` falls on a national holiday in this country's
    * primary timezone (resolved via Luxon).
    */
   isNationalHoliday(date: Date): boolean {
-    const d = DateTime.fromJSDate(date, { zone: this.timezone }).toFormat('yyyy-MM-dd');
-    return this.holidays.some(h => h.date === d);
+    return this.holidays.some(h => h.date === this.localDate(date));
   }
 
   /**
