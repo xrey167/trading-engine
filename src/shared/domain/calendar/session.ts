@@ -1,6 +1,17 @@
 // Forex session helpers — ported from quant-lib/domain
 import type { OHLC } from '../../../market-data/ohlc.js';
 
+export const DayOfWeek = {
+  Sunday:    0,
+  Monday:    1,
+  Tuesday:   2,
+  Wednesday: 3,
+  Thursday:  4,
+  Friday:    5,
+  Saturday:  6,
+} as const;
+export type DayOfWeek = (typeof DayOfWeek)[keyof typeof DayOfWeek];
+
 export const ForexSession = {
   Sydney:  'SYDNEY',
   Tokyo:   'TOKYO',
