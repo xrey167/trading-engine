@@ -11,12 +11,9 @@ export const AccountTradeMode = {
 } as const;
 export type AccountTradeMode = (typeof AccountTradeMode)[keyof typeof AccountTradeMode];
 
-export const AccountTradeModeSchema = Type.Union([
-  Type.Literal('SINGLE_HEDGE'),
-  Type.Literal('SINGLE_NOHEDGE'),
-  Type.Literal('FUTURE'),
-  Type.Literal('HEDGE'),
-]);
+export const AccountTradeModeSchema = Type.Union(
+  Object.values(AccountTradeMode).map(v => Type.Literal(v)) as [ReturnType<typeof Type.Literal>, ...ReturnType<typeof Type.Literal>[]]
+);
 
 export const AccountMarginMode = { Retail: 0, Exchange: 2 } as const;
 export type AccountMarginMode = (typeof AccountMarginMode)[keyof typeof AccountMarginMode];

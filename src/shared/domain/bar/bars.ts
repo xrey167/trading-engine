@@ -1,6 +1,6 @@
 import type { OHLC } from './ohlc.js';
-import { Bar } from './bar.js';
-import { AtrMethod, BarsAtrMode, BarBase } from '../engine-enums.js';
+import { Bar, BarsAtrMode, BarBase } from './bar.js';
+import { AtrMethod } from '../indicator/indicator.js';
 
 export class Bars {
   constructor(private readonly data: OHLC[]) {}
