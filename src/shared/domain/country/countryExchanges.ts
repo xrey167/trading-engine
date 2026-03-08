@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────
-// Pre-populated country & exchange registry
+// Exchange domain — class + pre-populated instances
 // ─────────────────────────────────────────────────────────────
 //
 // Holidays listed for 2025–2026. Update annually or replace with
@@ -10,7 +10,182 @@
 // Use isOpen() for morning/afternoon sessions only, or extend Exchange
 // with a multi-session array when needed.
 
-import { Country, Exchange } from './country.js';
+import { DateTime } from 'luxon';
+
+/**
+ * Open and close times for a market session expressed as local `'HH:MM'`
+ * strings (24-hour). Timezone resolution is handled by the owning `Exchange`.
+ *
+ * @example
+ * const nyse: MarketSession = { open: '09:30', close: '16:00' };
+ */
+export interface MarketSession {
+  /** Local open time, e.g. `'09:30'`. */
+  open:  string;
+  /** Local close time, e.g. `'16:00'`. */
+  close: string;
+}
+
+/**
+ * A single non-trading day for an exchange or country.
+ *
+ * Set `halfDay: true` and supply `earlyClose` for short sessions
+ * (e.g. Christmas Eve on US exchanges closes at `'13:00'`).
+ */
+export interface TradingHoliday {
+  /** `'YYYY-MM-DD'` in the exchange's or country's local timezone. */
+  date:        string;
+  /** Human-readable name, e.g. `'Christmas Day'`. */
+  name:        string;
+  /** True when the market closes early rather than being fully closed. */
+  halfDay?:    boolean;
+  /** Early close time as `'HH:MM'` — only meaningful when `halfDay` is true. */
+  earlyClose?: string;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Exchange
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * A regulated trading venue identified by its ISO 10383 MIC code.
+ *
+ * All timezone math delegates to **Luxon** (`DateTime.fromJSDate` with an
+ * IANA zone), which resolves DST transitions automatically via the
+ * platform's `Intl` implementation.
+ *
+ * Luxon weekday convention: `1` = Monday … `7` = Sunday (ISO 8601).
+ *
+ * @example
+ * const nyse = new Exchange('XNYS', 'New York Stock Exchange', 'America/New_York',
+ *   { open: '09:30', close: '16:00' },
+ *   [{ date: '2025-12-25', name: 'Christmas Day' }],
+ * );
+ *
+ * nyse.isOpen(new Date('2025-06-10T14:00:00Z')); // true  (10:00 ET, in session)
+ * nyse.isOpen(new Date('2025-06-10T21:00:00Z')); // false (17:00 ET, after close)
+ */
+export class Exchange {
+  constructor(
+    /** ISO 10383 Market Identifier Code, e.g. `'XNYS'`, `'XNAS'`, `'XLON'`. */
+    public readonly mic:      string,
+    /** Full exchange name. */
+    public readonly name:     string,
+    /**
+     * IANA timezone for this exchange, e.g. `'America/New_York'`.
+     * Luxon resolves DST automatically using this zone.
+     */
+    public readonly timezone: string,
+    /** Regular trading session hours in local time. */
+    public readonly session:  MarketSession,
+    /** Exchange-specific non-trading days (overrides country-level holidays). */
+    public readonly holidays: TradingHoliday[] = [],
+  ) {}
+
+  // ── Luxon helpers ────────────────────────────────────────────
+
+  /**
+   * Returns a Luxon `DateTime` for `date` expressed in this exchange's timezone.
+   * All DST offsets are resolved by Luxon via the IANA database.
+   */
+  private dt(date: Date): DateTime {
+    return DateTime.fromJSDate(date, { zone: this.timezone });
+  }
+
+  /**
+   * Returns the local date as `'YYYY-MM-DD'` in this exchange's timezone.
+   * @example exchange.localDate(new Date('2025-06-10T14:00:00Z')) // '2025-06-10'
+   */
+  localDate(date: Date): string {
+    return this.dt(date).toFormat('yyyy-MM-dd');
+  }
+
+  /**
+   * Returns the local time as `'HH:MM'` (24-hour) in this exchange's timezone.
+   * @example exchange.localTime(new Date('2025-06-10T14:00:00Z')) // '10:00' (ET)
+   */
+  localTime(date: Date): string {
+    return this.dt(date).toFormat('HH:mm');
+  }
+
+  /**
+   * Returns the ISO weekday in this exchange's timezone.
+   * Luxon convention: `1` = Monday, `7` = Sunday.
+   */
+  localWeekday(date: Date): number {
+    return this.dt(date).weekday;
+  }
+
+  /**
+   * `true` when `date` falls on a Saturday (6) or Sunday (7) in this
+   * exchange's timezone. Override in a subclass for 24/7 venues (e.g. crypto).
+   */
+  isWeekend(date: Date): boolean {
+    const wd = this.localWeekday(date);
+    return wd === 6 || wd === 7;
+  }
+
+  // ── Holiday checks ───────────────────────────────────────────
+
+  /**
+   * Returns the holiday entry for `date` if one exists, otherwise `undefined`.
+   * Date comparison uses the exchange's local timezone via Luxon.
+   */
+  getHoliday(date: Date): TradingHoliday | undefined {
+    const d = this.localDate(date);
+    return this.holidays.find(h => h.date === d);
+  }
+
+  /**
+   * `true` when `date` falls on a full (non-half-day) exchange holiday.
+   */
+  isHoliday(date: Date): boolean {
+    const h = this.getHoliday(date);
+    return h !== undefined && !h.halfDay;
+  }
+
+  // ── Session check ────────────────────────────────────────────
+
+  /**
+   * `true` when the exchange is actively trading at the given UTC `date`.
+   *
+   * Rules applied in order:
+   * 1. Weekend (Sat/Sun in local timezone) → closed
+   * 2. Full holiday → closed
+   * 3. Half-day holiday → open only until `earlyClose`
+   * 4. Otherwise → open when `session.open ≤ localTime < closeTime`
+   *
+   * Time comparison uses `'HH:MM'` strings which sort correctly
+   * lexicographically for 24-hour zero-padded values.
+   */
+  isOpen(date: Date): boolean {
+    if (this.isWeekend(date)) return false;
+
+    const holiday = this.getHoliday(date);
+    if (holiday && !holiday.halfDay) return false;
+
+    const time      = this.localTime(date);
+    const closeTime = holiday?.halfDay && holiday.earlyClose
+      ? holiday.earlyClose
+      : this.session.close;
+
+    return time >= this.session.open && time < closeTime;
+  }
+
+  /**
+   * Returns a human-readable description of the current session status
+   * and the local time at this exchange.
+   *
+   * @example exchange.sessionInfo(new Date()) // 'XNYS 10:32 ET — OPEN'
+   */
+  sessionInfo(date: Date): string {
+    const local  = this.dt(date);
+    const time   = local.toFormat('HH:mm');
+    const offset = local.toFormat('ZZZZ');   // e.g. 'EDT', 'EST'
+    const status = this.isOpen(date) ? 'OPEN' : 'CLOSED';
+    return `${this.mic} ${time} ${offset} — ${status}`;
+  }
+}
 
 // ─────────────────────────────────────────────────────────────
 // United States
@@ -61,16 +236,6 @@ export const NASDAQ = new Exchange(
   US_HOLIDAYS_2025_2026,
 );
 
-export const US = new Country(
-  'US',
-  'United States',
-  'USD',
-  'America/New_York',
-  true,              // observes DST (ET: EST/EDT)
-  [NYSE, NASDAQ],
-  [],                // national holidays folded into exchange calendars for the US
-);
-
 // ─────────────────────────────────────────────────────────────
 // United Kingdom
 // ─────────────────────────────────────────────────────────────
@@ -102,16 +267,6 @@ export const LSE = new Exchange(
   ],
 );
 
-export const GB = new Country(
-  'GB',
-  'United Kingdom',
-  'GBP',
-  'Europe/London',
-  true,    // observes BST (British Summer Time)
-  [LSE],
-  [],
-);
-
 // ─────────────────────────────────────────────────────────────
 // Germany
 // ─────────────────────────────────────────────────────────────
@@ -140,20 +295,6 @@ export const XETRA = new Exchange(
     { date: '2026-12-25', name: 'Christmas Day' },
     { date: '2026-12-28', name: 'Boxing Day (observed)' },
     { date: '2026-12-31', name: "New Year's Eve", halfDay: true, earlyClose: '14:00' },
-  ],
-);
-
-export const DE = new Country(
-  'DE',
-  'Germany',
-  'EUR',
-  'Europe/Berlin',
-  true,    // observes CET/CEST
-  [XETRA],
-  [
-    // German national holidays not always on exchange calendar
-    { date: '2025-10-03', name: 'German Unity Day' },
-    { date: '2026-10-03', name: 'German Unity Day' },
   ],
 );
 
@@ -197,32 +338,3 @@ export const TSE = new Exchange(
     { date: '2026-12-31', name: 'Bank Holiday' },
   ],
 );
-
-export const JP = new Country(
-  'JP',
-  'Japan',
-  'JPY',
-  'Asia/Tokyo',
-  false,   // Japan does NOT observe DST
-  [TSE],
-  [],
-);
-
-// ─────────────────────────────────────────────────────────────
-// Registry map — look up by ISO 3166-1 alpha-2 code
-// ─────────────────────────────────────────────────────────────
-
-export const Countries: Readonly<Record<string, Country>> = {
-  US,
-  GB,
-  DE,
-  JP,
-};
-
-/**
- * Returns the `Country` for a given ISO 3166-1 alpha-2 code, or `undefined`.
- * @example getCountry('US')?.isMarketOpen(new Date(), 'XNYS')
- */
-export function getCountry(isoCode: string): Country | undefined {
-  return Countries[isoCode.toUpperCase()];
-}

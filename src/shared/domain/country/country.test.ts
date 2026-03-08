@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { NYSE, NASDAQ, XETRA, TSE, US, GB, DE, JP, Countries, getCountry } from './countries.js';
+import { NYSE, NASDAQ, XETRA, TSE, US, GB, DE, JP, Country } from './country.js';
 
 // ─────────────────────────────────────────────────────────────
 // Helpers
@@ -251,7 +251,7 @@ describe('Country.isMarketOpen', () => {
 });
 
 describe('Country.isHoliday', () => {
-  it('Xetra Good Friday is both a national and exchange holiday in DE', () => {
+  it('Xetra Good Friday is an exchange holiday in DE → isHoliday returns true', () => {
     // 2025-04-18 09:00 CEST = 07:00 UTC
     expect(DE.isHoliday(utc('2025-04-18T07:00:00Z'), 'XETR')).toBe(true);
   });
@@ -277,21 +277,21 @@ describe('Country.getExchange / exchangeCodes', () => {
 // Registry
 // ─────────────────────────────────────────────────────────────
 
-describe('Countries registry / getCountry', () => {
+describe('Country registry (Country.all / Country.get)', () => {
   it('all four countries are in the registry', () => {
-    expect(Countries.US).toBe(US);
-    expect(Countries.GB).toBe(GB);
-    expect(Countries.DE).toBe(DE);
-    expect(Countries.JP).toBe(JP);
+    expect(Country.all.US).toBe(US);
+    expect(Country.all.GB).toBe(GB);
+    expect(Country.all.DE).toBe(DE);
+    expect(Country.all.JP).toBe(JP);
   });
 
-  it('getCountry is case-insensitive', () => {
-    expect(getCountry('us')).toBe(US);
-    expect(getCountry('GB')).toBe(GB);
+  it('Country.get is case-insensitive', () => {
+    expect(Country.get('us')).toBe(US);
+    expect(Country.get('GB')).toBe(GB);
   });
 
-  it('getCountry returns undefined for unknown code', () => {
-    expect(getCountry('ZZ')).toBeUndefined();
+  it('Country.get returns undefined for unknown code', () => {
+    expect(Country.get('ZZ')).toBeUndefined();
   });
 
   it('DST flags are correct', () => {

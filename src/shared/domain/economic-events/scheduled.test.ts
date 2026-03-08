@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { TradingCalendar } from '../calendar/trading-calendar.js';
-import { NYSE } from '../country/countries.js';
+import { NYSE } from '../country/country.js';
 import { ScheduledEventCalendar } from './scheduled.js';
 import type { ScheduledEvent } from './scheduled.js';
 
