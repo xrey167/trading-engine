@@ -92,7 +92,11 @@ export class Country {
 
   // ── Holiday helpers ──────────────────────────────────────────
 
-  private localDate(date: Date): string {
+  /**
+   * Returns the local date as `'YYYY-MM-DD'` in this country's primary timezone.
+   * @example country.localDate(new Date('2025-10-03T07:00:00Z')) // '2025-10-03' (CEST)
+   */
+  localDate(date: Date): string {
     return DateTime.fromJSDate(date, { zone: this.timezone }).toFormat('yyyy-MM-dd');
   }
 
