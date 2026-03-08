@@ -67,7 +67,7 @@ export const GicsIndustry = {
   Chemicals:                            151010,
   ConstructionMaterials:                151020,
   ContainersAndPackaging:               151030,
-  Metals:                               151040,
+  MetalsAndMining:                      151040,
   PaperAndForestProducts:               151050,
   // Industrials
   AerospaceAndDefense:                  201010,
@@ -161,6 +161,29 @@ for (const ind of Object.values(GicsIndustry) as GicsIndustry[]) {
   _industryToIndustryGroup.set(ind, Math.floor(ind / 100) as GicsIndustryGroup);
 }
 
+// Reverse maps: sector → its industry groups / industries (O(1) by-sector lookup)
+const _sectorToIndustryGroups = new Map<GicsSector, GicsIndustryGroup[]>();
+for (const ig of Object.values(GicsIndustryGroup) as GicsIndustryGroup[]) {
+  const sector = Math.floor(ig / 100) as GicsSector;
+  const list = _sectorToIndustryGroups.get(sector) ?? [];
+  list.push(ig);
+  _sectorToIndustryGroups.set(sector, list);
+}
+
+const _sectorToIndustries = new Map<GicsSector, GicsIndustry[]>();
+for (const ind of Object.values(GicsIndustry) as GicsIndustry[]) {
+  const ig = Math.floor(ind / 100) as GicsIndustryGroup;
+  const sector = _industryGroupToSector.get(ig);
+  if (sector !== undefined) {
+    const list = _sectorToIndustries.get(sector) ?? [];
+    list.push(ind);
+    _sectorToIndustries.set(sector, list);
+  }
+}
+
+// Set of known industry codes for validation in industryOf()
+const _knownIndustries = new Set<number>(Object.values(GicsIndustry) as number[]);
+
 // ── Public query API ────────────────────────────────────────────────────────
 export function sectorOf(industryGroup: GicsIndustryGroup): GicsSector {
   const s = _industryGroupToSector.get(industryGroup);
@@ -175,18 +198,15 @@ export function industryGroupOf(industry: GicsIndustry): GicsIndustryGroup {
 }
 
 export function industryOf(subIndustry: GicsSubIndustry): GicsIndustry {
-  return Math.floor(subIndustry / 100) as GicsIndustry;
+  const code = Math.floor(subIndustry / 100);
+  if (!_knownIndustries.has(code)) throw new Error(`Unknown Industry code derived from subIndustry: ${subIndustry}`);
+  return code as GicsIndustry;
 }
 
 export function industryGroupsInSector(sector: GicsSector): GicsIndustryGroup[] {
-  return (Object.values(GicsIndustryGroup) as GicsIndustryGroup[]).filter(
-    (ig) => Math.floor(ig / 100) === sector,
-  );
+  return _sectorToIndustryGroups.get(sector) ?? [];
 }
 
 export function industriesInSector(sector: GicsSector): GicsIndustry[] {
-  const groups = new Set(industryGroupsInSector(sector));
-  return (Object.values(GicsIndustry) as GicsIndustry[]).filter((ind) =>
-    groups.has(Math.floor(ind / 100) as GicsIndustryGroup),
-  );
+  return _sectorToIndustries.get(sector) ?? [];
 }
