@@ -4,7 +4,7 @@ import type { OHLCBody } from './schemas/common.js';
 export interface EngineEventMap {
   bar:   { type: 'bar'; bar: OHLCBody };
   fill:  { side: number; size: number; price: number; time: Date; id: string };
-  close: { side: number; size: number; price: number; time: Date };
+  close: { side: number; size: number; price: number; time: Date; symbol?: string };
 }
 
 export class TypedEventBus<TMap extends {} = EngineEventMap> {

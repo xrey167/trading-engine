@@ -49,7 +49,7 @@ export class PaperBroker implements IBrokerAdapter, IOrderGateway, IPositionGate
   private barsStore: Map<string, OHLC[]> = new Map();
   private accountInfoStore: AccountInfoVO | null = null;
 
-  constructor(private readonly emitter: TypedEventBus, private readonly log: Logger = consoleLogger) {}
+  constructor(private readonly emitter: TypedEventBus, private readonly log: Logger = consoleLogger, private readonly symbol?: string) {}
 
   // ───── IBrokerAdapter methods ─────
 
@@ -77,7 +77,7 @@ export class PaperBroker implements IBrokerAdapter, IOrderGateway, IPositionGate
   async closePosition(side: Side, size: number, info?: string): Promise<{ price: number }> {
     const price = this.priceRef;
     this.log.info(`[PaperBroker] close side=${side} size=${size} price=${price} ${info ?? ''}`);
-    this.emitter.emit('close', { side, size, price, time: new Date() });
+    this.emitter.emit('close', { side, size, price, time: new Date(), symbol: this.symbol });
     return { price };
   }
 

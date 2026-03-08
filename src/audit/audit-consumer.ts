@@ -80,7 +80,8 @@ export class AuditConsumer {
             }
             this.buffer.push(entry);
 
-            // Await Postgres insert before acking to prevent data loss on crash
+            // Await Postgres insert before acking to prevent data loss on crash.
+            // DB errors are logged and still acked to avoid infinite requeue loops.
             if (this.db) {
               try {
                 await this.db.insert(auditEvents).values({
@@ -95,9 +96,12 @@ export class AuditConsumer {
               }
             }
 
-            this.channel.ack(msg);
+            try { this.channel.ack(msg); } catch (ackErr) {
+              this.logger.error(`Audit ack error: ${(ackErr as Error).message}`);
+            }
           } catch (err) {
-            this.channel.ack(msg); // ack bad messages to prevent redelivery loops
+            // Parse failure: ack to prevent redelivery loops
+            try { this.channel.ack(msg); } catch { /* channel may be closed */ }
             this.logger.error(`Audit consumer parse error: ${(err as Error).message}`);
           }
         })();

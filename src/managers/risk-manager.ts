@@ -33,7 +33,6 @@ export class RiskManagerService extends BaseService {
   private readonly config: RiskManagerConfig;
   private openPositionCount = 0;
   private readonly symbolPositions = new Map<string, number>();
-  private readonly positionSymbolQueue: string[] = [];
   private dailyLoss = 0;
 
   constructor(
@@ -62,19 +61,17 @@ export class RiskManagerService extends BaseService {
       this.openPositionCount++;
       const current = this.symbolPositions.get(event.symbol) ?? 0;
       this.symbolPositions.set(event.symbol, current + 1);
-      this.positionSymbolQueue.push(event.symbol);
     }
   };
 
-  private handleClose = (_event: AppEventMap['close']): void => {
+  private handleClose = (event: AppEventMap['close']): void => {
     if (this.openPositionCount > 0) this.openPositionCount--;
-    const symbol = this.positionSymbolQueue.shift();
-    if (symbol !== undefined) {
-      const current = this.symbolPositions.get(symbol) ?? 0;
+    if (event.symbol !== undefined) {
+      const current = this.symbolPositions.get(event.symbol) ?? 0;
       if (current > 1) {
-        this.symbolPositions.set(symbol, current - 1);
+        this.symbolPositions.set(event.symbol, current - 1);
       } else {
-        this.symbolPositions.delete(symbol);
+        this.symbolPositions.delete(event.symbol);
       }
     }
   };

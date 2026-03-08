@@ -51,7 +51,9 @@ export class DataProviderService extends BaseService {
     for (const symbol of this.config.symbols) {
       try {
         const bars = await this.fetcher.fetchBars(symbol, this.config.timeframe);
+        const lastSeen = this.lastBarTime.get(symbol);
         for (const bar of bars) {
+          if (lastSeen !== undefined && bar.time <= lastSeen) continue;
           this.cache.push(symbol, this.config.timeframe, bar);
           this.eventBus.emit('normalized_bar', {
             providerId: this.id,
@@ -60,6 +62,10 @@ export class DataProviderService extends BaseService {
             bar,
             timestamp: new Date().toISOString(),
           });
+          const tracked = this.lastBarTime.get(symbol);
+          if (tracked === undefined || bar.time > tracked) {
+            this.lastBarTime.set(symbol, bar.time);
+          }
         }
       } catch (e) {
         this.logger.error(`DataProviderService ${this.id} poll error for ${symbol}: ${e}`);

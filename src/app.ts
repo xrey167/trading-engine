@@ -133,7 +133,7 @@ export async function buildApp(
   const emitter = new TypedEventBus<AppEventMap>();
   const { pair = 'EURUSD', digits = 5 } = cfg.symbol ?? {};
   const symbol  = new SymbolInfoForex(pair, digits);
-  const broker  = new PaperBroker(emitter, app.log);
+  const broker  = new PaperBroker(emitter, app.log, symbol.name);
 
   app.decorate('emitter', emitter);
 
