@@ -1,5 +1,17 @@
 import type { OHLC } from './ohlc.js';
-import { BarBase } from '../engine-enums.js';
+
+export const BarBase = {
+  HiLo:      'BASE_HILO',
+  OpenClose: 'BASE_OPENCLOSE',
+} as const;
+export type BarBase = (typeof BarBase)[keyof typeof BarBase];
+
+export const BarsAtrMode = {
+  Normal:  0,
+  Bullish: 1,
+  Bearish: -1,
+} as const;
+export type BarsAtrMode = (typeof BarsAtrMode)[keyof typeof BarsAtrMode];
 
 export class Bar implements OHLC {
   constructor(

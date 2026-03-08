@@ -1,3 +1,6 @@
+export const AtrMethod = { Sma: 0, Ema: 1 } as const;
+export type AtrMethod = (typeof AtrMethod)[keyof typeof AtrMethod];
+
 export const MAType = {
   SMA: 0,
   EMA: 1,

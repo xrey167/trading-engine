@@ -1,4 +1,4 @@
-import { AssetType } from '../../shared/domain/engine-enums.js';
+import { AssetType } from '../../shared/domain/symbol/symbol.js';
 
 export abstract class SymbolInfoBase {
   readonly pointSize: number;

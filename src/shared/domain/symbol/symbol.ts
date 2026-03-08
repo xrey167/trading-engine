@@ -1,5 +1,14 @@
 import { Type, type Static } from '@sinclair/typebox';
 
+export const AssetType = {
+  Forex:  'FOREX',
+  Stock:  'STOCK',
+  Future: 'FUTURE',
+  Crypto: 'CRYPTO',
+  Index:  'INDEX',
+} as const;
+export type AssetType = (typeof AssetType)[keyof typeof AssetType];
+
 export const SymbolInfoVOSchema = Type.Object({
   name:             Type.String(),
   description:      Type.String(),
