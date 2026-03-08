@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { NYSE, NASDAQ, XETRA, TSE, US, GB, DE, JP } from './countries.js';
-import { Country } from './country.js';
+import { NYSE, NASDAQ, XETRA, TSE, US, GB, DE, JP, Country } from './country.js';
 
 // ─────────────────────────────────────────────────────────────
 // Helpers
