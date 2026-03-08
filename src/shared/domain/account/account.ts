@@ -12,7 +12,7 @@ export const AccountTradeMode = {
 export type AccountTradeMode = (typeof AccountTradeMode)[keyof typeof AccountTradeMode];
 
 export const AccountTradeModeSchema = Type.Union(
-  Object.values(AccountTradeMode).map(v => Type.Literal(v)) as [ReturnType<typeof Type.Literal>, ...ReturnType<typeof Type.Literal>[]]
+  Object.values(AccountTradeMode).map(v => Type.Literal(v))
 );
 
 export const AccountMarginMode = { Retail: 0, Exchange: 2 } as const;
