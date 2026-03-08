@@ -57,15 +57,3 @@ export const OrderState = {
 } as const;
 export type OrderState = (typeof OrderState)[keyof typeof OrderState];
 
-export const HistoryOrderType = {
-  Buy:          'BUY',
-  Sell:         'SELL',
-  BuyLimit:     'BUY_LIMIT',
-  SellLimit:    'SELL_LIMIT',
-  BuyStop:      'BUY_STOP',
-  SellStop:     'SELL_STOP',
-  BuyStopLimit: 'BUY_STOP_LIMIT',
-  SellStopLimit: 'SELL_STOP_LIMIT',
-  CloseBy:      'CLOSE_BY',
-} as const;
-export type HistoryOrderType = (typeof HistoryOrderType)[keyof typeof HistoryOrderType];
