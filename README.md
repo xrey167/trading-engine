@@ -22,6 +22,8 @@ Live trading engine ported from MQL/StereoTrader — pure TypeScript with a Fast
 
 ## Getting started
 
+### Local (Node.js)
+
 ```bash
 npm install
 npm run build
@@ -32,6 +34,22 @@ npm start          # listens on :3000
 npm test           # vitest
 npm run typecheck  # tsc --noEmit
 npm run lint       # biome lint
+```
+
+### Docker (full stack)
+
+Spins up the engine with PostgreSQL, Redis, and RabbitMQ:
+
+```bash
+docker compose up --build
+```
+
+The engine will be available at `http://localhost:3000`. RabbitMQ management UI at `http://localhost:15672` (guest/guest).
+
+To apply the database schema on first run:
+
+```bash
+docker compose exec trading-engine sh -c "npm run db:push"
 ```
 
 ## Environment variables
@@ -190,6 +208,13 @@ All routes under `/openbb/*` return data formatted for the [OpenBB Terminal Pro]
 | `/openbb/order-history` | Order lifecycle ledger |
 | `/openbb/symbol` | Current symbol info |
 | `/openbb/engine-config` | Engine flag configuration |
+
+### Health probes
+
+| Path | Description |
+|------|-------------|
+| `GET /health` | Liveness — returns `{ status: "ok", uptime: <seconds> }` |
+| `GET /readyz` | Readiness — returns `{ status: "ok" }` |
 
 ### API docs
 
