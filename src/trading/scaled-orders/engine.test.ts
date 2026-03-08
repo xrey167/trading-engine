@@ -4,7 +4,7 @@ import type { ScaledOrderPreset } from './engine.js';
 import { TradingEngine } from '../../engine/core/trading-engine.js';
 import type { IBrokerAdapter } from '../../engine/core/trading-engine.js';
 import { Bars } from '../../market-data/bars.js';
-import type { OHLC } from '../../market-data/ohlc.js';
+import type { OHLC } from '../../shared/domain/bar/ohlc.js';
 import { SymbolInfoForex } from '../../engine/core/symbol.js';
 
 // ─────────────────────────────────────────────────────────────

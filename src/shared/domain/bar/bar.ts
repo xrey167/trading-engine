@@ -1,5 +1,5 @@
 import type { OHLC } from './ohlc.js';
-import { BarBase } from '../shared/domain/engine-enums.js';
+import { BarBase } from '../engine-enums.js';
 
 export class Bar implements OHLC {
   constructor(

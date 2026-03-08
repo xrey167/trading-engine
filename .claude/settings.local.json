@@ -22,7 +22,12 @@
       "Bash(echo \"exit: $?\")",
       "Read(//tmp/**)",
       "Bash(do test:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(npm list:*)",
+      "Bash(for f in figi.ts figi.test.ts sector.ts sector.test.ts country.ts country.test.ts countries.ts trading-calendar.ts trading-calendar.test.ts session.ts account.ts tick.ts history.ts)",
+      "Bash(do echo \"=== $f ===\")",
+      "Read(//Users/xrey/Downloads/ex 2/src/shared/domain/**)",
+      "Bash(done)"
     ]
   }
 }

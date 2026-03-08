@@ -1,5 +1,5 @@
 // Forex session helpers — ported from quant-lib/domain
-import type { OHLC } from '../../../market-data/ohlc.js';
+import type { OHLC } from '../bar/ohlc.js';
 
 export const DayOfWeek = {
   Sunday:    0,

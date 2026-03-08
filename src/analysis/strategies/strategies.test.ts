@@ -3,7 +3,7 @@ import { CandleAtrStrategy } from './candle-atr.js';
 import { VolumeBreakoutStrategy } from './volume-breakout.js';
 import { SignalResult, RunMode, type IPositionState } from './types.js';
 import { nullLogger } from '../../shared/lib/logger.js';
-import type { OHLC } from '../../market-data/ohlc.js';
+import type { OHLC } from '../../shared/domain/bar/ohlc.js';
 import { makeOHLC, makeBars } from '../../shared/testing/factories.js';
 
 const flatState: IPositionState = { isFlat: () => true, longCount: () => 0, shortCount: () => 0 };

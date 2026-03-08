@@ -1,4 +1,4 @@
-import type { OHLC } from '../market-data/ohlc.js';
+import type { OHLC } from '../shared/domain/bar/ohlc.js';
 import type { IPositionState } from './strategies/types.js';
 
 /** Stateless position state — always flat (no open positions). */

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { Bar } from './bar.js';
+import { Bar } from '../shared/domain/bar/bar.js';
 import { BarBase } from '../shared/domain/engine-enums.js';
 
 // ─────────────────────────────────────────────────────────────

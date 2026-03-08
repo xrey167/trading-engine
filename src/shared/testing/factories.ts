@@ -1,5 +1,5 @@
 import { Bars } from '../../market-data/bars.js';
-import type { OHLC } from '../../market-data/ohlc.js';
+import type { OHLC } from '../../shared/domain/bar/ohlc.js';
 
 export interface TestBar {
   open: number;

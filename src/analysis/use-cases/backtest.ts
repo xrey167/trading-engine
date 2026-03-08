@@ -1,5 +1,5 @@
 import { Bars } from '../../market-data/bars.js';
-import type { OHLC } from '../../market-data/ohlc.js';
+import type { OHLC } from '../../shared/domain/bar/ohlc.js';
 import type { Logger } from '../../shared/lib/logger.js';
 import type { ISignalStrategy, IPositionState } from '../strategies/types.js';
 import { SignalResult, RunMode } from '../strategies/types.js';

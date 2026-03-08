@@ -6,7 +6,7 @@ import { BrokerService } from './broker-service.js';
 import { PaperBroker } from './paper/paper-broker.js';
 import { SymbolInfoForex } from '../engine/core/symbol.js';
 import { TradingEngine } from '../engine/core/trading-engine.js';
-import { Bar } from '../market-data/bar.js';
+import { Bar } from '../shared/domain/bar/bar.js';
 import { Bars } from '../market-data/bars.js';
 import { nullLogger } from '../shared/lib/logger.js';
 

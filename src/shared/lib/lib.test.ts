@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { Bar } from '../../market-data/bar.js';
+import { Bar } from '../../shared/domain/bar/bar.js';
 
 // Unit 1 — Result
 import {

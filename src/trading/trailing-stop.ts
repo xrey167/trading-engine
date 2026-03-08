@@ -1,6 +1,6 @@
 import { Side, TrailMode } from '../shared/domain/engine-enums.js';
 import type { ExitReason } from '../shared/domain/engine-enums.js';
-import type { Bar } from '../market-data/bar.js';
+import type { Bar } from '../shared/domain/bar/bar.js';
 import type { Bars } from '../market-data/bars.js';
 import type { SymbolInfoBase } from '../engine/core/symbol.js';
 

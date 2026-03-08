@@ -6,7 +6,7 @@ import type { AccountInfoVO } from '../../shared/domain/account/account.js';
 import type { SymbolInfoVO, Tick } from '../../shared/domain/symbol/symbol.js';;
 import type { IAccountGateway, IMarketDataGateway, IIndicatorGateway } from '../types.js';
 import { Bars } from '../../market-data/bars.js';
-import type { OHLC } from '../../market-data/ohlc.js';
+import type { OHLC } from '../../shared/domain/bar/ohlc.js';
 
 export class InMemoryAccountGateway implements IAccountGateway, IMarketDataGateway, IIndicatorGateway {
   private accountInfo: AccountInfoVO | null = null;

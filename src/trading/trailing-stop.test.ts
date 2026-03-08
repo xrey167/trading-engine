@@ -1,9 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import { calcTrailingSL, checkSLTP } from './trailing-stop.js';
 import type { TrailState } from './trailing-stop.js';
-import { Bar } from '../market-data/bar.js';
+import { Bar } from '../shared/domain/bar/bar.js';
 import { Bars } from '../market-data/bars.js';
-import type { OHLC } from '../market-data/ohlc.js';
+import type { OHLC } from '../shared/domain/bar/ohlc.js';
 import { Side, TrailMode } from '../shared/domain/engine-enums.js';
 import { SymbolInfoForex } from '../engine/core/symbol.js';
 import { TradingEngine } from '../engine/core/trading-engine.js';

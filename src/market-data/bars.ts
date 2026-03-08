@@ -1,5 +1,5 @@
-import type { OHLC } from './ohlc.js';
-import { Bar } from './bar.js';
+import type { OHLC } from '../shared/domain/bar/ohlc.js';
+import { Bar } from '../shared/domain/bar/bar.js';
 import { AtrMethod, BarsAtrMode, BarBase } from '../shared/domain/engine-enums.js';
 
 export class Bars {

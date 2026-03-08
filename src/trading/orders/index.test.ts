@@ -1,9 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import { TradingEngine } from '../../engine/core/trading-engine.js';
 import type { IBrokerAdapter } from '../../engine/core/trading-engine.js';
-import { Bar } from '../../market-data/bar.js';
+import { Bar } from '../../shared/domain/bar/bar.js';
 import { Bars } from '../../market-data/bars.js';
-import type { OHLC } from '../../market-data/ohlc.js';
+import type { OHLC } from '../../shared/domain/bar/ohlc.js';
 import { TrailMode, LimitConfirm } from '../../shared/domain/engine-enums.js';
 import { SymbolInfoForex } from '../../engine/core/symbol.js';
 

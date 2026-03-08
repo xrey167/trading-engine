@@ -11,7 +11,7 @@ import {
   TradeSignalFlag,
   TradeSignalOp,
   TradeSignalEntrySchema,
-} from './trade-signal.js';
+} from './signal/signal.js';
 import {
   makeTradeStats,
   addStat,
@@ -19,7 +19,7 @@ import {
   makeTradeParams,
   TradeStatsSchema,
   TradeParamsSchema,
-} from './trade-params.js';
+} from './metrics/trade-params.js';
 import { PositionInfoVOSchema } from './position/position.js';
 import { AccountInfoVOSchema } from './account/account.js';
 import { SymbolInfoVOSchema, TickSchema } from './symbol/symbol.js';;

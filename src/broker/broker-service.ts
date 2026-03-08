@@ -1,6 +1,6 @@
 import { TradingEngine } from '../engine/core/trading-engine.js';
 import type { SymbolInfoBase } from '../engine/core/symbol.js';
-import type { Bar } from '../market-data/bar.js';
+import type { Bar } from '../shared/domain/bar/bar.js';
 import type { Bars } from '../market-data/bars.js';
 import type { IFullBrokerAdapter } from './types.js';
 import type { TypedEventBus } from '../shared/event-bus.js';
