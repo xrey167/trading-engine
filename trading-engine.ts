@@ -35,16 +35,45 @@ export type TrailMode = (typeof TrailMode)[keyof typeof TrailMode];
 export const AtrMethod = { Sma: 0, Ema: 1 } as const;
 export type AtrMethod = (typeof AtrMethod)[keyof typeof AtrMethod];
 
+/** Filter which candles contribute to ATR calculation */
+export const BarsAtrMode = {
+  Normal:  0,  // all bars (default)
+  Bullish: 1,  // only bullish bars (close > open)
+  Bearish: -1, // only bearish bars (close < open)
+} as const;
+export type BarsAtrMode = (typeof BarsAtrMode)[keyof typeof BarsAtrMode];
+
+/** Which price range forms the base of each TR measurement */
+export const BarBase = {
+  HiLo:       'BASE_HILO',       // High - Low  (standard True Range, default)
+  OpenClose:  'BASE_OPENCLOSE',  // |Open - Close|  (body range only)
+} as const;
+export type BarBase = (typeof BarBase)[keyof typeof BarBase];
+
+export const OrderAttr = {
+  OCO:  'ORDER_ATTR_OCO',   // One Cancels Other — fill cancels all other pending orders
+  CO:   'ORDER_ATTR_CO',    // Cancel Others on fill — cancel same-side pending orders
+  CS:   'ORDER_ATTR_CS',    // Cancel on Side — cancel all orders on same side when filled
+  REV:  'ORDER_ATTR_REV',   // Reverse — close current position and open opposite of same size
+  NET:  'ORDER_ATTR_NET',   // Net — reduce opposite position by the fill size
+  SLTP: 'ORDER_ATTR_SLTP',  // Transfer SL/TP — copy SL/TP levels to the filled position
+  ROL:  'ORDER_ATTR_ROL',   // Reverse On Loss — reverse position if closed at a loss
+  ROP:  'ORDER_ATTR_ROP',   // Reverse On Profit — reverse position if closed at a profit
+  MIT:  'ORDER_ATTR_MIT',   // Market If Touched — convert to market order when price is touched
+  FC:   'ORDER_ATTR_FC',    // Fill or Cancel — cancel order if not filled immediately
+} as const;
+export type OrderAttr = (typeof OrderAttr)[keyof typeof OrderAttr];
+
 export const LimitConfirm = {
-  None:      0,
-  Wick:      1,  // price must wick back from limit level
-  WickBreak: 2,  // wick + body must break back
-  WickColor: 3,  // wick + confirming candle color
+  None:      'LIMIT_CONFIRM_NONE',
+  Wick:      'LIMIT_CONFIRM_WICK',      // price must wick back from limit level
+  WickBreak: 'LIMIT_CONFIRM_WICKBREAK', // wick + body must break back
+  WickColor: 'LIMIT_CONFIRM_WICKCOLOR', // wick + confirming candle color
 } as const;
 export type LimitConfirm = (typeof LimitConfirm)[keyof typeof LimitConfirm];
 
 // ─────────────────────────────────────────────────────────────
-// OHLC / Candle
+// OHLC / Bar
 // ─────────────────────────────────────────────────────────────
 
 export interface OHLC {
@@ -52,7 +81,19 @@ export interface OHLC {
   time: Date; volume?: number | undefined;
 }
 
-export class Candle implements OHLC {
+/**
+ * Single candlestick value object with analysis methods.
+ *
+ * Provides directional classification, proportional measurements (body/wick/tail
+ * as fraction of range), single-bar patterns (hammer, shooting star, doji, solid),
+ * price-action breakout/touch detection, time filtering, Fibonacci retracement,
+ * and classic pivot points.
+ *
+ * All proportion and pattern methods accept an optional {@link BarBase} parameter:
+ * - `BASE_HILO` (default) — uses high/low for range
+ * - `BASE_OPENCLOSE` — uses open/close for range (body-only, ignores wicks)
+ */
+export class Bar implements OHLC {
   constructor(
     public open:   number,
     public high:   number,
@@ -62,48 +103,79 @@ export class Candle implements OHLC {
     public volume?: number,
   ) {}
 
+  /** True when close > open. */
   isBullish(): boolean { return this.close > this.open; }
+  /** True when close < open. */
   isBearish(): boolean { return this.close < this.open; }
+  /** True when |open − close| ≤ `tol`. */
   isDoji(tol = 0): boolean { return Math.abs(this.open - this.close) <= tol; }
 
-  range():     number { return this.high - this.low; }
+  /** High price (or max(open,close) with `BASE_OPENCLOSE`). */
+  effectiveHigh(base: BarBase = BarBase.HiLo): number {
+    return base === BarBase.HiLo ? this.high : Math.max(this.open, this.close);
+  }
+  /** Low price (or min(open,close) with `BASE_OPENCLOSE`). */
+  effectiveLow(base: BarBase = BarBase.HiLo): number {
+    return base === BarBase.HiLo ? this.low : Math.min(this.open, this.close);
+  }
+
+  /** Total range: effectiveHigh − effectiveLow. */
+  range(base: BarBase = BarBase.HiLo): number { return this.effectiveHigh(base) - this.effectiveLow(base); }
+  /** Upper shadow: high − max(open, close). */
   wickRange(): number { return this.high - Math.max(this.open, this.close); }
+  /** Lower shadow: min(open, close) − low. */
   tailRange(): number { return Math.min(this.open, this.close) - this.low; }
+  /** Body size: |open − close|. */
   bodyRange(): number { return Math.abs(this.open - this.close); }
 
-  bodyPart(): number { const r = this.range(); return r === 0 ? 0 : this.bodyRange() / r; }
-  tailPart(): number { const r = this.range(); return r === 0 ? 0 : this.tailRange() / r; }
-  wickPart(): number { const r = this.range(); return r === 0 ? 0 : this.wickRange() / r; }
+  /** Body as fraction of total range [0..1]. */
+  bodyPart(base: BarBase = BarBase.HiLo): number { const r = this.range(base); return r === 0 ? 0 : this.bodyRange() / r; }
+  /** Lower shadow as fraction of total range [0..1]. */
+  tailPart(base: BarBase = BarBase.HiLo): number { const r = this.range(base); return r === 0 ? 0 : this.tailRange() / r; }
+  /** Upper shadow as fraction of total range [0..1]. */
+  wickPart(base: BarBase = BarBase.HiLo): number { const r = this.range(base); return r === 0 ? 0 : this.wickRange() / r; }
 
-  isHammer(tailMin = 0.55): boolean {
-    return this.tailPart() >= tailMin && this.wickPart() <= this.tailPart() * 0.5;
+  /** Hammer pattern: long lower shadow, small upper shadow. */
+  isHammer(tailMin = 0.55, base: BarBase = BarBase.HiLo): boolean {
+    return this.tailPart(base) >= tailMin && this.wickPart(base) <= this.tailPart(base) * 0.5;
   }
-  isShootingStar(wickMin = 0.55): boolean {
-    return this.wickPart() >= wickMin && this.tailPart() <= this.wickPart() * 0.5;
+  /** Shooting star pattern: long upper shadow, small lower shadow. */
+  isShootingStar(wickMin = 0.55, base: BarBase = BarBase.HiLo): boolean {
+    return this.wickPart(base) >= wickMin && this.tailPart(base) <= this.wickPart(base) * 0.5;
   }
-  isSolid(wickMax = 0.15, tailMax = 0.15): boolean {
-    return this.tailPart() <= tailMax && this.wickPart() <= wickMax;
+  /** Solid (marubozu-like): both shadows below thresholds. */
+  isSolid(wickMax = 0.15, tailMax = 0.15, base: BarBase = BarBase.HiLo): boolean {
+    return this.tailPart(base) <= tailMax && this.wickPart(base) <= wickMax;
   }
-  isSolidBullish(wickMax = 0.15): boolean { return this.isBullish() && this.wickPart() <= wickMax; }
-  isSolidBearish(tailMax = 0.15): boolean { return this.isBearish() && this.tailPart() <= tailMax; }
+  /** Bullish bar with small upper shadow. */
+  isSolidBullish(wickMax = 0.15, base: BarBase = BarBase.HiLo): boolean { return this.isBullish() && this.wickPart(base) <= wickMax; }
+  /** Bearish bar with small lower shadow. */
+  isSolidBearish(tailMax = 0.15, base: BarBase = BarBase.HiLo): boolean { return this.isBearish() && this.tailPart(base) <= tailMax; }
 
+  /** Price opened on one side and closed on the other. */
   isBreaking(price: number): boolean {
     return (this.open > price && this.close < price) || (this.open < price && this.close > price);
   }
+  /** Broke upward through `price`, optionally by at least `exceed`. */
   isBreakingLong(price: number, exceed = 0): boolean {
     return this.open < price && this.close > price && this.close > price + exceed;
   }
+  /** Broke downward through `price`, optionally by at least `exceed`. */
   isBreakingShort(price: number, exceed = 0): boolean {
     return this.open > price && this.close < price && this.close < price - exceed;
   }
+  /** High/low range includes `price`. */
   isCrossing(price: number): boolean { return this.high >= price && this.low <= price; }
+  /** Wick touched `price` from above (low ≤ price, body above). */
   isTouchingLow(price: number): boolean {
     return this.low <= price && Math.min(this.open, this.close) >= price;
   }
+  /** Wick touched `price` from below (high ≥ price, body below). */
   isTouchingHigh(price: number): boolean {
     return this.high >= price && Math.max(this.open, this.close) <= price;
   }
 
+  /** True if bar's UTC time falls within the given hour:minute range (supports overnight). */
   isInTimeRange(beginH: number, beginM: number, endH: number, endM: number): boolean {
     const begin = beginH * 60 + beginM;
     const end   = endH   * 60 + endM;
@@ -111,21 +183,54 @@ export class Candle implements OHLC {
     if (end < begin) return cur >= begin || cur <= end;  // overnight
     return cur >= begin && cur <= end;
   }
+
+  /** Fibonacci retracement: `low + range * level` (0 = low, 1 = high, 0.618 = golden ratio). */
+  fiboPrice(level: number): number { return this.low + this.range() * level; }
+
+  /**
+   * Classic floor trader pivot points.
+   * @param type - `PP` (pivot), `R1`/`R2` (resistance), `S1`/`S2` (support)
+   */
+  pivotPrice(type: 'PP' | 'R1' | 'R2' | 'S1' | 'S2'): number {
+    const pp = (this.high + this.low + this.close) / 3;
+    switch (type) {
+      case 'PP': return pp;
+      case 'R1': return 2 * pp - this.low;
+      case 'R2': return pp + (this.high - this.low);
+      case 'S1': return 2 * pp - this.high;
+      case 'S2': return pp - (this.high - this.low);
+    }
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
 // Bars series (index 0 = most-recent closed bar)
 // ─────────────────────────────────────────────────────────────
 
+/**
+ * Time-series of OHLC bars with built-in indicators and pattern detection.
+ *
+ * Index 0 is the **most recent** closed bar; higher indices are older.
+ * All shift parameters follow this convention.
+ *
+ * **Indicators:** SMA, EMA, LWMA, SMMA, ATR, RSI, Stochastic
+ *
+ * **Patterns:** Engulfing (long/short), Reversing (long/short), Outside bar
+ *
+ * **Lookups:** highestHigh/lowestLow (value + shift), binary search by time,
+ * daily OHLC aggregation, volume average/ratio, MA slope detection
+ */
 export class Bars {
   constructor(private readonly data: OHLC[]) {}
 
+  /** Number of bars in the series. */
   get length(): number { return this.data.length; }
 
-  candle(shift = 0): Candle {
+  /** Get the {@link Bar} value object at `shift`. Throws if out of range. */
+  bar(shift = 0): Bar {
     const b = this.data[shift];
     if (!b) throw new RangeError(`shift ${shift} out of range (len=${this.data.length})`);
-    return new Candle(b.open, b.high, b.low, b.close, b.time, b.volume);
+    return new Bar(b.open, b.high, b.low, b.close, b.time, b.volume);
   }
 
   high(shift = 0):  number { return this.data[shift].high;  }
@@ -134,6 +239,7 @@ export class Bars {
   close(shift = 0): number { return this.data[shift].close; }
   time(shift = 0):  Date   { return this.data[shift].time;  }
 
+  /** Maximum high over `periods` bars starting at `shift`. */
   highestHigh(periods: number, shift = 0): number {
     let max = -Infinity;
     for (let i = shift; i < shift + periods && i < this.data.length; i++) {
@@ -142,6 +248,7 @@ export class Bars {
     return max;
   }
 
+  /** Minimum low over `periods` bars starting at `shift`. */
   lowestLow(periods: number, shift = 0): number {
     let min = Infinity;
     for (let i = shift; i < shift + periods && i < this.data.length; i++) {
@@ -150,6 +257,7 @@ export class Bars {
     return min;
   }
 
+  /** Simple Moving Average of close prices. */
   sma(periods: number, shift = 0): number {
     let sum = 0, cnt = 0;
     for (let i = shift; i < shift + periods && i < this.data.length; i++) {
@@ -158,11 +266,27 @@ export class Bars {
     return cnt === 0 ? 0 : sum / cnt;
   }
 
-  atr(periods: number, shift = 0, method: AtrMethod = AtrMethod.Sma): number {
+  /**
+   * Average True Range. Supports SMA/EMA smoothing, directional filtering,
+   * and body-only base ({@link BarBase}).
+   */
+  atr(
+    periods: number,
+    shift = 0,
+    method: AtrMethod = AtrMethod.Sma,
+    barsMode: BarsAtrMode = BarsAtrMode.Normal,
+    barBase: BarBase = BarBase.HiLo,
+  ): number {
     const trs: number[] = [];
-    for (let i = shift; i < shift + periods && i + 1 < this.data.length; i++) {
-      const c = this.data[i], p = this.data[i + 1];
-      trs.push(Math.max(c.high - c.low, Math.abs(c.high - p.close), Math.abs(c.low - p.close)));
+    for (let i = shift; trs.length < periods && i + 1 < this.data.length; i++) {
+      const c = this.data[i];
+      if (barsMode === BarsAtrMode.Bullish && c.close <= c.open) continue;
+      if (barsMode === BarsAtrMode.Bearish && c.close >= c.open) continue;
+      const p = this.data[i + 1];
+      const tr = barBase === BarBase.OpenClose
+        ? Math.abs(c.close - c.open)
+        : Math.max(c.high - c.low, Math.abs(c.high - p.close), Math.abs(c.low - p.close));
+      trs.push(tr);
     }
     if (trs.length === 0) return 0;
     if (method === AtrMethod.Sma) return trs.reduce((a, b) => a + b, 0) / trs.length;
@@ -170,6 +294,7 @@ export class Bars {
     return [...trs].reverse().reduce((ema, v, i) => i === 0 ? v : v * k + ema * (1 - k), 0);
   }
 
+  /** Wilder's RSI (Relative Strength Index). Returns 50 if insufficient data. */
   rsi(periods = 14, shift = 0): number {
     // Wilder's RSI needs shift + 2*periods + 1 bars:
     // one set of `periods` changes to seed the SMA, one set to smooth toward shift.
@@ -194,6 +319,7 @@ export class Bars {
     return avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
   }
 
+  /** True if bar at `shift` has the highest high in the `lookback` window behind it. */
   isLocalHigh(lookback: number, shift = 0, tol = 0): boolean {
     const peak = this.data[shift].high;
     for (let i = shift + 1; i <= shift + lookback && i < this.data.length; i++) {
@@ -202,6 +328,7 @@ export class Bars {
     return true;
   }
 
+  /** True if bar at `shift` has the lowest low in the `lookback` window behind it. */
   isLocalLow(lookback: number, shift = 0, tol = 0): boolean {
     const trough = this.data[shift].low;
     for (let i = shift + 1; i <= shift + lookback && i < this.data.length; i++) {
@@ -209,23 +336,355 @@ export class Bars {
     }
     return true;
   }
+
+  /** Exponential Moving Average (SMA-seeded, k = 2/(periods+1)). */
+  ema(periods: number, shift = 0): number {
+    const end = Math.min(shift + periods * 3, this.data.length);
+    if (end <= shift) return 0;
+    // Seed with SMA of exactly `periods` bars at the deepest end of the window
+    const seedStart = Math.max(end - periods, shift);
+    let seed = 0, cnt = 0;
+    for (let i = seedStart; i < end; i++) { seed += this.data[i].close; cnt++; }
+    if (cnt === 0) return this.data[shift].close;
+    seed /= cnt;
+    // Apply EMA from the bar before the seed range toward shift
+    const k = 2 / (periods + 1);
+    let ema = seed;
+    for (let i = seedStart - 1; i >= shift; i--) {
+      ema = this.data[i].close * k + ema * (1 - k);
+    }
+    return ema;
+  }
+
+  /** Bullish engulfing: current bar's low < prev low, close > prev high. */
+  isEngulfingLong(shift = 0): boolean {
+    if (shift + 1 >= this.data.length) return false;
+    return this.data[shift].low < this.data[shift + 1].low
+        && this.data[shift].close > this.data[shift + 1].high;
+  }
+
+  /** Bearish engulfing: current bar's high > prev high, close < prev low. */
+  isEngulfingShort(shift = 0): boolean {
+    if (shift + 1 >= this.data.length) return false;
+    return this.data[shift].high > this.data[shift + 1].high
+        && this.data[shift].close < this.data[shift + 1].low;
+  }
+
+  /** Bullish reversal: higher high, higher close, bullish close above prev open. */
+  isReversingLong(shift = 0): boolean {
+    if (shift + 1 >= this.data.length) return false;
+    const cur = this.data[shift], prev = this.data[shift + 1];
+    return cur.high > prev.high && cur.close > prev.close
+        && cur.close > prev.open && cur.close > cur.open;
+  }
+
+  /** Bearish reversal: lower low, lower close, bearish close below prev open. */
+  isReversingShort(shift = 0): boolean {
+    if (shift + 1 >= this.data.length) return false;
+    const cur = this.data[shift], prev = this.data[shift + 1];
+    return cur.low < prev.low && cur.close < prev.close
+        && cur.close < prev.open && cur.open > cur.close;
+  }
+
+  /** Average tick volume over `periods` bars. */
+  tickVolumeAverage(periods: number, shift = 0): number {
+    let sum = 0, cnt = 0;
+    for (let i = shift; i < shift + periods && i < this.data.length; i++) {
+      sum += this.data[i].volume ?? 0; cnt++;
+    }
+    return cnt === 0 ? 0 : sum / cnt;
+  }
+
+  /** Current bar's volume divided by the average of the next `periods` bars. */
+  volumeRatio(periods: number, shift = 0): number {
+    const avg = this.tickVolumeAverage(periods, shift + 1);
+    return avg === 0 ? 0 : (this.data[shift]?.volume ?? 0) / avg;
+  }
+
+  /** True if the MA forms a monotonic up (or down) slope over `span` consecutive bars. */
+  isMaSloping(type: 'sma' | 'ema', periods: number, span: number, shift = 0, up = true): boolean {
+    if (span < 2) return false;
+    const maFn = type === 'sma' ? (s: number) => this.sma(periods, s) : (s: number) => this.ema(periods, s);
+    let prev = maFn(shift + span - 1);
+    for (let i = shift + span - 2; i >= shift; i--) {
+      const cur = maFn(i);
+      if (up ? cur <= prev : cur >= prev) return false;
+      prev = cur;
+    }
+    return true;
+  }
+
+  /**
+   * Stochastic oscillator returning `{ main, signal }` (both 0–100).
+   * @param periodK - %K lookback period
+   * @param periodD - %D smoothing period (SMA of slowed %K)
+   * @param slowing - smoothing applied to raw %K before %D (1 = fast stochastic)
+   */
+  stochastic(periodK: number, periodD: number, slowing: number, shift = 0): { main: number; signal: number } {
+    // Compute raw %K values, then apply slowing (SMA of raw %K), then %D (SMA of slowed %K)
+    const rawKValues: number[] = [];
+    const needed = shift + slowing + periodD - 1;
+    for (let i = shift; i <= needed && i + periodK - 1 < this.data.length; i++) {
+      const hh = this.highestHigh(periodK, i);
+      const ll = this.lowestLow(periodK, i);
+      rawKValues.push(hh === ll ? 50 : ((this.data[i].close - ll) / (hh - ll)) * 100);
+    }
+    // Slowed %K values = SMA(rawK, slowing)
+    const slowedK: number[] = [];
+    for (let i = 0; i + slowing <= rawKValues.length; i++) {
+      let sum = 0;
+      for (let j = i; j < i + slowing; j++) sum += rawKValues[j];
+      slowedK.push(sum / slowing);
+    }
+    const main = slowedK.length > 0 ? slowedK[0] : 50;
+    // %D = SMA of slowed %K
+    let signal = main;
+    if (slowedK.length >= periodD) {
+      let sum = 0;
+      for (let i = 0; i < periodD; i++) sum += slowedK[i];
+      signal = sum / periodD;
+    }
+    return { main, signal };
+  }
+
+  /** Returns the **shift index** (not value) of the highest high in the window. */
+  highestHighShift(periods: number, shift = 0): number {
+    let max = -Infinity, idx = shift;
+    for (let i = shift; i < shift + periods && i < this.data.length; i++) {
+      if (this.data[i].high > max) { max = this.data[i].high; idx = i; }
+    }
+    return idx;
+  }
+
+  /** Returns the **shift index** (not value) of the lowest low in the window. */
+  lowestLowShift(periods: number, shift = 0): number {
+    let min = Infinity, idx = shift;
+    for (let i = shift; i < shift + periods && i < this.data.length; i++) {
+      if (this.data[i].low < min) { min = this.data[i].low; idx = i; }
+    }
+    return idx;
+  }
+
+  /** Binary search for the bar closest to `datetime`. Returns shift index. */
+  getBarShift(datetime: Date): number {
+    // Binary search — data is sorted descending by time (index 0 = newest)
+    let lo = 0, hi = this.data.length - 1;
+    const target = datetime.getTime();
+    while (lo <= hi) {
+      const mid = (lo + hi) >>> 1;
+      const t = this.data[mid].time.getTime();
+      if (t === target) return mid;
+      if (t > target) lo = mid + 1; else hi = mid - 1;
+    }
+    return lo < this.data.length ? lo : this.data.length - 1;
+  }
+
+  /** Scan backward for the nearest bar whose range fully encloses bar at `shift`. Returns shift or -1. */
+  findOutsideBar(shift = 0, maxScan = 100): number {
+    // Scan backward from shift+1 for a bar whose range encloses bar[shift]
+    const ref = this.data[shift];
+    if (!ref) return -1;
+    const limit = Math.min(shift + 1 + maxScan, this.data.length);
+    for (let i = shift + 1; i < limit; i++) {
+      if (this.data[i].high >= ref.high && this.data[i].low <= ref.low) return i;
+    }
+    return -1;
+  }
+
+  /** Aggregate intraday bars into daily OHLC. `daysBack=0` = today (most recent day). Returns null if day not found. */
+  dayOHLC(daysBack = 0): { open: number; high: number; low: number; close: number; timeBegin: Date; timeEnd: Date } | null {
+    // Group intraday bars by UTC date, then pick the Nth day back
+    let currentDate = '';
+    let dayCount = -1; // will increment to 0 on first date change
+    let startIdx = -1, endIdx = -1;
+    for (let i = 0; i < this.data.length; i++) {
+      const d = this.data[i].time.toISOString().slice(0, 10);
+      if (d !== currentDate) {
+        dayCount++;
+        if (dayCount === daysBack) startIdx = i;
+        if (dayCount === daysBack + 1) { endIdx = i; break; }
+        currentDate = d;
+      }
+    }
+    if (startIdx === -1) return null;
+    if (endIdx === -1) endIdx = this.data.length;
+    let high = -Infinity, low = Infinity;
+    for (let i = startIdx; i < endIdx; i++) {
+      if (this.data[i].high > high) high = this.data[i].high;
+      if (this.data[i].low < low) low = this.data[i].low;
+    }
+    // open = oldest bar of the day (highest index), close = newest (lowest index)
+    return {
+      open: this.data[endIdx - 1].open,
+      high,
+      low,
+      close: this.data[startIdx].close,
+      timeBegin: this.data[endIdx - 1].time,
+      timeEnd: this.data[startIdx].time,
+    };
+  }
+
+  /** Linearly Weighted Moving Average — newest bar gets weight `periods`, oldest gets 1. */
+  lwma(periods: number, shift = 0): number {
+    let weightedSum = 0, weightTotal = 0;
+    for (let i = 0; i < periods && shift + i < this.data.length; i++) {
+      const w = periods - i; // newest bar gets highest weight
+      weightedSum += this.data[shift + i].close * w;
+      weightTotal += w;
+    }
+    return weightTotal === 0 ? 0 : weightedSum / weightTotal;
+  }
+
+  /** Smoothed Moving Average (Wilder's): `prev × (n−1)/n + close/n`. SMA-seeded. */
+  smma(periods: number, shift = 0): number {
+    // Wilder's smoothed MA: seed with SMA of deeper bars, then smooth toward shift
+    const deepEnd = Math.min(shift + periods * 2, this.data.length);
+    if (deepEnd <= shift) return 0;
+    const seedStart = Math.min(shift + periods, deepEnd);
+    let sum = 0, cnt = 0;
+    for (let i = seedStart; i < deepEnd; i++) { sum += this.data[i].close; cnt++; }
+    if (cnt === 0) return this.data[shift].close;
+    let smma = sum / cnt;
+    for (let i = seedStart - 1; i >= shift; i--) {
+      smma = (smma * (periods - 1) + this.data[i].close) / periods;
+    }
+    return smma;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Crossing helpers (standalone — work on any two value series)
+// ─────────────────────────────────────────────────────────────
+
+/** True when A crosses above B: previously A ≤ B, now A > B. Works with any indicator pair. */
+export function isCrossingAbove(valueA: number, valueB: number, prevA: number, prevB: number): boolean {
+  return prevA <= prevB && valueA > valueB;
+}
+
+/** True when A crosses below B: previously A ≥ B, now A < B. Works with any indicator pair. */
+export function isCrossingBelow(valueA: number, valueB: number, prevA: number, prevB: number): boolean {
+  return prevA >= prevB && valueA < valueB;
 }
 
 // ─────────────────────────────────────────────────────────────
 // Symbol metadata
 // ─────────────────────────────────────────────────────────────
 
-export class SymbolInfo {
-  readonly pointSize: number;
+/** Discriminator for the symbol class hierarchy. */
+export const AssetType = {
+  Forex:  'FOREX',
+  Stock:  'STOCK',
+  Future: 'FUTURE',
+  Crypto: 'CRYPTO',
+  Index:  'INDEX',
+} as const;
+export type AssetType = (typeof AssetType)[keyof typeof AssetType];
 
-  constructor(public readonly name: string, public readonly digits: number) {
-    this.pointSize = Math.pow(10, -digits);
+/**
+ * Abstract base for all symbol descriptors.
+ *
+ * Holds the symbol `name`, decimal `digits`, and the derived `pointSize`
+ * (`10 ** -digits`). Shared conversion helpers are defined here so every
+ * subclass inherits identical math.
+ *
+ * @example
+ * // Subclass for a custom asset type
+ * class SymbolInfoCrypto extends SymbolInfoBase {
+ *   readonly assetType = AssetType.Crypto;
+ * }
+ */
+export abstract class SymbolInfoBase {
+  /** Smallest price increment: `10 ** -digits`. */
+  readonly pointSize: number;
+  /** Asset-class discriminator — set by each concrete subclass. */
+  abstract readonly assetType: AssetType;
+
+  constructor(
+    /** Broker symbol name, e.g. `'EURUSD'` or `'AAPL'`. */
+    public readonly name: string,
+    /** Number of decimal places in the price, e.g. `5` for forex. */
+    public readonly digits: number,
+  ) {
+    this.pointSize = 10 ** -digits;
   }
 
+  /** Convert a raw price value to points (integer multiples of `pointSize`). */
   priceToPoints(price: number): number  { return price / this.pointSize; }
+  /** Convert points back to a price value. */
   pointsToPrice(points: number): number { return points * this.pointSize; }
+  /** Round `price` to `digits` decimal places. */
   normalize(price: number): number { return parseFloat(price.toFixed(this.digits)); }
 }
+
+/**
+ * Symbol descriptor for forex currency pairs.
+ *
+ * Automatically extracts `baseCurrency` and `quoteCurrency` from the
+ * first six characters of `name`.
+ *
+ * @example
+ * const sym = new SymbolInfoForex('EURUSD', 5);
+ * sym.baseCurrency;          // 'EUR'
+ * sym.quoteCurrency;         // 'USD'
+ * sym.pointSize;             // 0.00001
+ * sym.priceToPoints(0.0001); // 10
+ */
+export class SymbolInfoForex extends SymbolInfoBase {
+  readonly assetType = AssetType.Forex;
+  /** First three characters of the symbol name (base currency). */
+  readonly baseCurrency: string;
+  /** Characters 3–5 of the symbol name (quote currency). */
+  readonly quoteCurrency: string;
+
+  constructor(name: string, digits: number) {
+    super(name, digits);
+    this.baseCurrency  = name.slice(0, 3).toUpperCase();
+    this.quoteCurrency = name.slice(3, 6).toUpperCase();
+  }
+}
+
+/**
+ * Symbol descriptor for equities.
+ *
+ * @example
+ * const sym = new SymbolInfoStock('AAPL', 2, 'NASDAQ');
+ * sym.exchange; // 'NASDAQ'
+ */
+export class SymbolInfoStock extends SymbolInfoBase {
+  readonly assetType = AssetType.Stock;
+
+  constructor(
+    name: string,
+    digits: number,
+    /** Optional exchange identifier, e.g. `'NYSE'` or `'NASDAQ'`. */
+    readonly exchange?: string,
+  ) {
+    super(name, digits);
+  }
+}
+
+/**
+ * Symbol descriptor for futures contracts.
+ *
+ * @example
+ * const sym = new SymbolInfoFuture('ES', 2, 50); // E-mini S&P 500
+ * sym.contractSize; // 50
+ */
+export class SymbolInfoFuture extends SymbolInfoBase {
+  readonly assetType = AssetType.Future;
+
+  constructor(
+    name: string,
+    digits: number,
+    /** Number of underlying units per contract (default `1`). */
+    readonly contractSize: number = 1,
+  ) {
+    super(name, digits);
+  }
+}
+
+/** @deprecated Use {@link SymbolInfoForex} directly. Kept for backward compatibility. */
+export { SymbolInfoForex as SymbolInfo };
 
 // ─────────────────────────────────────────────────────────────
 // Trailing-stop calculation (per-bar, pure function)
@@ -248,7 +707,7 @@ export interface TrailState {
  */
 export function calcTrailingSL(p: {
   side:          Side;
-  bar:           Candle;
+  bar:           Bar;
   bars:          Bars;
   posPrice:      number;
   currentSL:     number;   // -1 = not yet set
@@ -256,7 +715,7 @@ export function calcTrailingSL(p: {
   trailBeginPts: number;
   trail:         TrailConfig;
   state:         TrailState; // mutable
-  symbol:        SymbolInfo;
+  symbol:        SymbolInfoBase;
 }): number {
   const { side, bar, bars, posPrice, spreadAbs, trail, state, symbol } = p;
   let { currentSL } = p;
@@ -325,7 +784,7 @@ export interface HitResult {
 
 export function checkSLTP(p: {
   side:        Side;
-  bar:         Candle;
+  bar:         Bar;
   sl:          number;      // -1 = disabled
   tp:          number;      // -1 = disabled
   slActive:    boolean;
@@ -342,12 +801,14 @@ export function checkSLTP(p: {
     const tpHit = tpOn && bar.high >= tp;
     if (!slHit && !tpHit) return null;
     if (slHit && tpHit) {
-      return bar.isBullish()
-        ? { reason: 'TP_BOTH', exitPrice: Math.min(bar.open, tp)  }   // open may gap above tp
-        : { reason: 'SL_BOTH', exitPrice: Math.max(bar.open, sl)  };  // open may gap below sl
+      // MQL rule: Long → SL always wins (conservative worst-case assumption)
+      return { reason: 'SL_BOTH', exitPrice: Math.min(bar.open, sl) };
     }
-    if (slHit) return { reason: 'SL', exitPrice: Math.max(bar.open, sl)  };
-    return          { reason: 'TP', exitPrice: Math.min(bar.open, tp)  };
+    // Gap clamping matches MQL _SimCheckSLTP:
+    //   SL adverse gap (bar.open < sl)  → fill at bar.open (slippage)
+    //   TP favorable gap (bar.open > tp) → fill at bar.open (gap benefit)
+    if (slHit) return { reason: 'SL', exitPrice: Math.min(bar.open, sl) };
+    return          { reason: 'TP', exitPrice: Math.max(bar.open, tp) };
   }
 
   if (side === Side.Short) {
@@ -355,12 +816,14 @@ export function checkSLTP(p: {
     const tpHit = tpOn && bar.low  + spreadAbs <= tp;
     if (!slHit && !tpHit) return null;
     if (slHit && tpHit) {
-      return bar.isBullish()
-        ? { reason: 'TP_BOTH', exitPrice: Math.max(bar.open, tp)  }
-        : { reason: 'SL_BOTH', exitPrice: Math.min(bar.open, sl)  };
+      // MQL rule: Short → TP always wins (conservative worst-case assumption)
+      return { reason: 'TP_BOTH', exitPrice: Math.min(bar.open, tp) };
     }
-    if (slHit) return { reason: 'SL', exitPrice: Math.min(bar.open, sl)  };
-    return          { reason: 'TP', exitPrice: Math.max(bar.open, tp)  };
+    // Gap clamping matches MQL _SimCheckSLTP:
+    //   SL adverse gap (bar.open > sl)  → fill at bar.open (slippage)
+    //   TP favorable gap (bar.open < tp) → fill at bar.open (gap benefit)
+    if (slHit) return { reason: 'SL', exitPrice: Math.max(bar.open, sl) };
+    return          { reason: 'TP', exitPrice: Math.min(bar.open, tp) };
   }
 
   return null;
@@ -371,47 +834,306 @@ export function checkSLTP(p: {
 // ─────────────────────────────────────────────────────────────
 
 export type OrderEntryType =
-  | 'BUY_LIMIT'    // filled when price drops to limit
-  | 'BUY_STOP'     // filled when price rises to stop
-  | 'SELL_LIMIT'   // filled when price rises to limit
-  | 'SELL_STOP'    // filled when price drops to stop
-  | 'BUY_MIT'      // Market-if-Touched — buy at market when price touches level
-  | 'SELL_MIT';    // Market-if-Touched — sell at market when price touches level
+  | 'BUY_LIMIT'       // filled when price drops to limit
+  | 'BUY_STOP'        // filled when price rises to stop
+  | 'SELL_LIMIT'      // filled when price rises to limit
+  | 'SELL_STOP'       // filled when price drops to stop
+  | 'BUY_MIT'         // Market-if-Touched — buy at market when price touches level
+  | 'SELL_MIT'        // Market-if-Touched — sell at market when price touches level
+  | 'BUY_STOP_LIMIT'  // stop-limit buy: stop at price, fill only at or below limitPrice
+  | 'SELL_STOP_LIMIT' // stop-limit sell: stop at price, fill only at or above limitPrice
+  | 'BUY_MTO'         // Market-To-Order buy: pending limit below market, fills as market when touched
+  | 'SELL_MTO';       // Market-To-Order sell: pending limit above market, fills as market when touched
 
-export interface PendingOrderAttributes {
-  /** One-Cancels-Other: when filled, cancel all other pending orders */
-  oco?: boolean;
-  /** Close-Opposite: when filled, close the opposite position */
-  co?: boolean;
-  /** Cancel-Same: when filled, cancel all same-direction pending orders */
-  cs?: boolean;
-  /** Reverse: when filled, reverse the current position */
-  rev?: boolean;
-  /** Bracket: automatic SL/TP applied when filled */
-  bracketSL?: number;  // points
-  bracketTP?: number;  // points
-  /** Trailing entry: the pending order price follows the market */
-  trailEntry?: {
-    mode:   TrailMode;
-    distPts: number;
-    periods: number;
-  };
-  /** Limit-pullback: limit order that follows (trails) the price by pullbackPts */
-  pullbackPts?: number;
-  /** Limit-confirm: require candle confirmation before treating as filled */
+// ─────────────────────────────────────────────────────────────
+// Order class hierarchy — polymorphic pending orders
+// ─────────────────────────────────────────────────────────────
+
+interface OrderParams {
+  id:            string;
+  type:          OrderEntryType;
+  side:          Side;
+  price:         number;
+  size:          number;
+  time:          Date;
+  oco?:          boolean;
+  co?:           boolean;
+  cs?:           boolean;
+  rev?:          boolean;
+  bracketSL?:    number;
+  bracketTP?:    number;
   limitConfirm?: LimitConfirm;
+  pullbackPts?:  number;
 }
 
-export interface PendingOrder {
-  id:         string;
-  type:       OrderEntryType;
-  side:       Side;          // Long or Short
-  price:      number;        // trigger price
-  size:       number;
-  time:       Date;
-  attributes: PendingOrderAttributes;
-  // Internal state for trailing entry / pullback
-  _trailRef?: number;       // highest/lowest reference for trailing entry
+/** Abstract base for all pending orders. Each subclass owns fill logic. */
+export abstract class Order {
+  readonly id:            string;
+  readonly type:          OrderEntryType;
+  readonly side:          Side;
+  price:                  number;   // mutable — trailing orders update this each bar
+  readonly size:          number;
+  readonly time:          Date;
+  // Execution modifiers — composable, applicable to any order type
+  oco:           boolean;
+  co:            boolean;
+  cs:            boolean;
+  rev:           boolean;
+  bracketSL?:    number;
+  bracketTP?:    number;
+  limitConfirm?: LimitConfirm;
+  pullbackPts?:  number;
+  // Internal: trailing/pullback reference price
+  protected _trailRef?: number;
+
+  constructor(p: OrderParams) {
+    this.id           = p.id;
+    this.type         = p.type;
+    this.side         = p.side;
+    this.price        = p.price;
+    this.size         = p.size;
+    this.time         = p.time;
+    this.oco          = p.oco  ?? false;
+    this.co           = p.co   ?? false;
+    this.cs           = p.cs   ?? false;
+    this.rev          = p.rev  ?? false;
+    this.bracketSL    = p.bracketSL;
+    this.bracketTP    = p.bracketTP;
+    this.limitConfirm = p.limitConfirm;
+    this.pullbackPts  = p.pullbackPts;
+  }
+
+  abstract isFilled(bar: Bar): boolean;
+  abstract computeFillPrice(bar: Bar): number;
+
+  /** True when fill must be routed through broker.marketOrder() (MIT and MTO types). */
+  get fillsAtMarket(): boolean { return false; }
+
+  /** Per-bar: update this.price for pullback orders. TrailingOrder overrides for trail entry. */
+  updateTrailingRef(bar: Bar, _bars: Bars, symbol: SymbolInfoBase): void {
+    if (this.pullbackPts == null) return;
+    const pullDist = symbol.pointsToPrice(this.pullbackPts);
+    if (this.side === Side.Long) {
+      if (bar.high > (this._trailRef ?? -Infinity)) {
+        this._trailRef = bar.high;
+        this.price     = bar.high - pullDist;
+      }
+    } else {
+      if (bar.low < (this._trailRef ?? Infinity)) {
+        this._trailRef = bar.low;
+        this.price     = bar.low + pullDist;
+      }
+    }
+  }
+
+  /** Returns shape expected by PendingOrderSchema and RedisEventBridge. */
+  toJSON(): { id: string; type: OrderEntryType; side: Side; price: number; size: number; time: Date } {
+    return { id: this.id, type: this.type, side: this.side, price: this.price, size: this.size, time: this.time };
+  }
+}
+
+export class LimitOrder extends Order {
+  isFilled(bar: Bar): boolean {
+    return this.side === Side.Long ? bar.low <= this.price : bar.high >= this.price;
+  }
+  // Gap clamping: MathMax(price, bar_open) for buys, MathMin for sells (MQL GetFillPrice)
+  computeFillPrice(bar: Bar): number {
+    return this.side === Side.Long ? Math.max(this.price, bar.open) : Math.min(this.price, bar.open);
+  }
+}
+
+export class StopOrder extends Order {
+  isFilled(bar: Bar): boolean {
+    return this.side === Side.Long ? bar.high >= this.price : bar.low <= this.price;
+  }
+  computeFillPrice(bar: Bar): number {
+    return this.side === Side.Long ? Math.max(this.price, bar.open) : Math.min(this.price, bar.open);
+  }
+}
+
+export class MITOrder extends Order {
+  // MIT triggers like a limit — touched from the opposite side
+  isFilled(bar: Bar): boolean {
+    return this.side === Side.Long ? bar.low <= this.price : bar.high >= this.price;
+  }
+  computeFillPrice(bar: Bar): number { return bar.close; }
+  override get fillsAtMarket(): boolean { return true; }
+}
+
+export class StopLimitOrder extends Order {
+  readonly limitPrice: number;  // always required — impossible state eliminated at type level
+
+  constructor(p: OrderParams & { limitPrice: number }) {
+    super(p);
+    this.limitPrice = p.limitPrice;
+  }
+  // Stop trigger: same as StopOrder
+  isFilled(bar: Bar): boolean {
+    return this.side === Side.Long ? bar.high >= this.price : bar.low <= this.price;
+  }
+  computeFillPrice(bar: Bar): number {
+    return this.side === Side.Long ? Math.max(this.limitPrice, bar.open) : Math.min(this.limitPrice, bar.open);
+  }
+
+  /** True if the bar's range covers the limit price (fill can proceed). */
+  limitCovered(bar: Bar): boolean {
+    return this.side === Side.Long
+      ? bar.low  <= this.limitPrice   // bar reached the buy limit ceiling
+      : bar.high >= this.limitPrice;  // bar reached the sell limit floor
+  }
+
+  override toJSON() {
+    return { ...super.toJSON(), limitPrice: this.limitPrice };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Trailing-entry orders — price follows the market each bar
+// ─────────────────────────────────────────────────────────────
+
+interface TrailingOrderParams extends OrderParams {
+  trailEntry: { mode: TrailMode; distPts: number; periods: number };
+  _trailRef:  number;
+}
+
+export abstract class TrailingOrder extends Order {
+  readonly trailEntry: { mode: TrailMode; distPts: number; periods: number };
+
+  constructor(p: TrailingOrderParams) {
+    super(p);
+    this.trailEntry = p.trailEntry;
+    this._trailRef  = p._trailRef;
+  }
+
+  override updateTrailingRef(bar: Bar, _bars: Bars, symbol: SymbolInfoBase): void {
+    if (this.pullbackPts != null) { super.updateTrailingRef(bar, _bars, symbol); return; }
+    this._updateTrailRef(bar, symbol);
+  }
+
+  protected abstract _updateTrailRef(bar: Bar, symbol: SymbolInfoBase): void;
+}
+
+export class TrailingLimitOrder extends TrailingOrder {
+  protected override _updateTrailRef(bar: Bar, symbol: SymbolInfoBase): void {
+    const dist = symbol.pointsToPrice(this.trailEntry.distPts);
+    if (this.side === Side.Long) {
+      if (bar.high > (this._trailRef ?? -Infinity)) { this._trailRef = bar.high; this.price = bar.high - dist; }
+    } else {
+      if (bar.low < (this._trailRef ?? Infinity)) { this._trailRef = bar.low; this.price = bar.low + dist; }
+    }
+  }
+  isFilled(bar: Bar): boolean {
+    return this.side === Side.Long ? bar.low <= this.price : bar.high >= this.price;
+  }
+  computeFillPrice(bar: Bar): number {
+    return this.side === Side.Long ? Math.max(this.price, bar.open) : Math.min(this.price, bar.open);
+  }
+}
+
+export class TrailingStopOrder extends TrailingOrder {
+  protected override _updateTrailRef(bar: Bar, symbol: SymbolInfoBase): void {
+    const dist = symbol.pointsToPrice(this.trailEntry.distPts);
+    if (this.side === Side.Long) {
+      if (bar.low < (this._trailRef ?? Infinity)) { this._trailRef = bar.low; this.price = bar.low + dist; }
+    } else {
+      if (bar.high > (this._trailRef ?? -Infinity)) { this._trailRef = bar.high; this.price = bar.high - dist; }
+    }
+  }
+  isFilled(bar: Bar): boolean {
+    return this.side === Side.Long ? bar.high >= this.price : bar.low <= this.price;
+  }
+  computeFillPrice(bar: Bar): number {
+    return this.side === Side.Long ? Math.max(this.price, bar.open) : Math.min(this.price, bar.open);
+  }
+}
+
+export class MTOOrder extends TrailingStopOrder {
+  computeFillPrice(bar: Bar): number { return bar.close; }
+  override get fillsAtMarket(): boolean { return true; }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Type guards
+// ─────────────────────────────────────────────────────────────
+
+export function isTrailingOrder(o: Order): o is TrailingOrder   { return o instanceof TrailingOrder;   }
+export function isStopLimitOrder(o: Order): o is StopLimitOrder { return o instanceof StopLimitOrder; }
+
+// ─────────────────────────────────────────────────────────────
+// OrderFactory — discriminated-union parameter type
+// ─────────────────────────────────────────────────────────────
+
+type CreateOrderBase = Omit<OrderParams, 'type'>;
+
+interface CreateLimitParams extends CreateOrderBase {
+  type: 'BUY_LIMIT' | 'SELL_LIMIT';
+}
+
+interface CreateStopParams extends CreateOrderBase {
+  type: 'BUY_STOP' | 'SELL_STOP';
+}
+
+interface CreateMITParams extends CreateOrderBase {
+  type: 'BUY_MIT' | 'SELL_MIT';
+}
+
+interface CreateStopLimitParams extends CreateOrderBase {
+  type: 'BUY_STOP_LIMIT' | 'SELL_STOP_LIMIT';
+  limitPrice: number;
+}
+
+interface CreateTrailingLimitParams extends CreateOrderBase {
+  type: 'BUY_LIMIT' | 'SELL_LIMIT';
+  trailEntry: { mode: TrailMode; distPts: number; periods: number };
+  _trailRef:  number;
+}
+
+interface CreateTrailingStopParams extends CreateOrderBase {
+  type: 'BUY_STOP' | 'SELL_STOP';
+  trailEntry: { mode: TrailMode; distPts: number; periods: number };
+  _trailRef:  number;
+}
+
+interface CreateMTOParams extends CreateOrderBase {
+  type: 'BUY_MTO' | 'SELL_MTO';
+  trailEntry: { mode: TrailMode; distPts: number; periods: number };
+  _trailRef:  number;
+}
+
+export type CreateOrderParams =
+  | CreateLimitParams
+  | CreateStopParams
+  | CreateMITParams
+  | CreateStopLimitParams
+  | CreateTrailingLimitParams
+  | CreateTrailingStopParams
+  | CreateMTOParams;
+
+export function createOrder(params: CreateOrderParams): Order {
+  // MTO — always trailing
+  if (params.type === 'BUY_MTO' || params.type === 'SELL_MTO') {
+    return new MTOOrder(params as CreateMTOParams);
+  }
+
+  // Stop-limit — needs limitPrice
+  if (params.type === 'BUY_STOP_LIMIT' || params.type === 'SELL_STOP_LIMIT') {
+    return new StopLimitOrder(params as CreateStopLimitParams);
+  }
+
+  // Trailing variants (limit or stop with trailEntry)
+  if ('trailEntry' in params) {
+    if (params.type === 'BUY_LIMIT' || params.type === 'SELL_LIMIT') {
+      return new TrailingLimitOrder(params as CreateTrailingLimitParams);
+    }
+    return new TrailingStopOrder(params as CreateTrailingStopParams);
+  }
+
+  // Simple types
+  switch (params.type) {
+    case 'BUY_LIMIT':  case 'SELL_LIMIT': return new LimitOrder(params);
+    case 'BUY_STOP':   case 'SELL_STOP':  return new StopOrder(params);
+    case 'BUY_MIT':    case 'SELL_MIT':   return new MITOrder(params);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -436,6 +1158,11 @@ export interface PositionSlot {
   trailBeginPts: number;
   beActive:   boolean;
   beAddPts:   number;
+  // Per-trade tracking (reset on close)
+  barsHeld:    number;   // bars the position has been open
+  entryReason: string;   // 'market', order type, etc.
+  mae:         number;   // Maximum Adverse Excursion in points (≥ 0)
+  mfe:         number;   // Maximum Favorable Excursion in points (≥ 0)
 }
 
 function emptySlot(side: Side): PositionSlot {
@@ -446,7 +1173,66 @@ function emptySlot(side: Side): PositionSlot {
     trailState: { active: false, plhRef: side === Side.Long ? 0 : Infinity },
     trailActive: false, trailBeginPts: 0,
     beActive: false, beAddPts: 0,
+    barsHeld: 0, entryReason: '', mae: 0, mfe: 0,
   };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Closed-trade record — ported from CSEADeal in SEA_OrderManagement.mqh
+// ─────────────────────────────────────────────────────────────
+
+/** Maximum number of deal records retained before oldest entries are discarded. */
+const MAX_DEALS = 10_000;
+
+export interface DealRecord {
+  id:          number;
+  side:        Side;
+  entryPrice:  number;
+  exitPrice:   number;
+  size:        number;
+  openTime:    Date;
+  closeTime:   Date;
+  barsHeld:    number;
+  entryReason: string;
+  exitReason:  string;
+  /** Gross P&L in points from the position holder's perspective. */
+  plPoints:    number;
+  result:      'win' | 'loss' | 'breakeven';
+  /** Maximum Adverse Excursion — worst intra-trade drawdown in points. */
+  mae:         number;
+  /** Maximum Favorable Excursion — best intra-trade run-up in points. */
+  mfe:         number;
+}
+
+/** Cumulative backtest statistics — ported from SDealStats in SEA_OrderManagement.mqh. */
+export interface DealStats {
+  totalDeals:     number;
+  winningDeals:   number;
+  losingDeals:    number;
+  breakevenDeals: number;
+  grossProfitPts: number;
+  grossLossPts:   number;    // always ≤ 0
+  netPLPts:       number;
+  maxWinStreak:   number;
+  maxLossStreak:  number;
+  maxDrawdownPts: number;    // always ≥ 0
+  marRatio:       number;    // netPL / maxDrawdown (0 when drawdown = 0)
+}
+
+/** Computed statistics derived from DealStats (call after every update). */
+export function dealStatsComputed(s: DealStats): {
+  winRate:         number;
+  profitFactor:    number;
+  avgWinPts:       number;
+  avgLossPts:      number;
+  expectedValuePts: number;
+} {
+  const winRate      = s.totalDeals > 0 ? s.winningDeals / s.totalDeals : 0;
+  const profitFactor = s.grossLossPts !== 0 ? Math.abs(s.grossProfitPts / s.grossLossPts) : Infinity;
+  const avgWinPts    = s.winningDeals > 0 ? s.grossProfitPts / s.winningDeals : 0;
+  const avgLossPts   = s.losingDeals  > 0 ? s.grossLossPts  / s.losingDeals  : 0;
+  const expectedValuePts = winRate * avgWinPts + (1 - winRate) * avgLossPts;
+  return { winRate, profitFactor, avgWinPts, avgLossPts, expectedValuePts };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -502,7 +1288,7 @@ export class TradingEngine {
   private longPos:  PositionSlot = emptySlot(Side.Long);
   private shortPos: PositionSlot = emptySlot(Side.Short);
 
-  private orders: PendingOrder[] = [];
+  private orders: Order[] = [];
   private _orderSeq = 0;
 
   // Defaults applied to next order/position
@@ -516,12 +1302,34 @@ export class TradingEngine {
   private _nextREV     = false;
   private _nextLimitConfirm: LimitConfirm = LimitConfirm.None;
   private _removeOrdersOnFlat = false;
+  onOrderExpired?: (orders: Order[]) => void;
 
   // Spread cache
   private _spreadAbs = 0;
 
+  // Last bar timestamp — used for deterministic deal close-time in _closeSlot
+  private _lastBarTime: Date = new Date(0);
+  private _lastBars: Bars | null = null;
+
+  // Deal history and statistics — ported from CSEADeal / SDealStats
+  private _deals: DealRecord[] = [];
+  private _dealSeq = 0;
+  private _stats: DealStats = {
+    totalDeals: 0, winningDeals: 0, losingDeals: 0, breakevenDeals: 0,
+    grossProfitPts: 0, grossLossPts: 0, netPLPts: 0,
+    maxWinStreak: 0, maxLossStreak: 0, maxDrawdownPts: 0, marRatio: 0,
+  };
+  private _runningEquityPts  = 0;
+  private _maxEquityPeak     = 0;
+  private _currentWinStreak  = 0;
+  private _currentLossStreak = 0;
+
+  // Global default SL/TP applied when no explicit bracket is set (MQL _ResolveSLDist/_ResolveTPDist)
+  private _defaultSLDist = 0;
+  private _defaultTPDist = 0;
+
   constructor(
-    private readonly symbol:  SymbolInfo,
+    private readonly symbol:  SymbolInfoBase,
     private readonly broker:  IBrokerAdapter,
     private readonly hedging  = true,   // false = net-mode (like MT4 non-hedge)
   ) {}
@@ -532,20 +1340,49 @@ export class TradingEngine {
 
   /**
    * Call this on every new closed bar.
-   * Sequence: fill pending orders → update trailing stops → check SL/TP exits.
+   * Sequence (matches MQL _SimOnNewBar):
+   *   1. Update trailing-entry order prices
+   *   2. Increment barsHeld + update MAE/MFE + trailing SL + break-even + SL/TP exits
+   *   3. Fill pending orders (exits fire before new fills on the same bar)
    */
-  async onBar(bar: Candle, bars: Bars): Promise<void> {
+  async onBar(bar: Bar, bars: Bars): Promise<void> {
+    this._lastBars = bars;
     this._spreadAbs = await this.broker.getSpread(this.symbol.name);
+    this._lastBarTime = bar.time;
 
     await this._updateTrailingEntryOrders(bar, bars);
-    await this._checkOrderFills(bar, bars);
 
     for (const slot of [this.longPos, this.shortPos]) {
       if (slot.size === 0) continue;
+      slot.barsHeld++;
+      this._updateMAEMFE(slot, bar);
       await this._updateTrailingSL(slot, bar, bars);
       await this._updateBreakEven(slot, bar);
       await this._checkExits(slot, bar);
     }
+
+    await this._checkOrderFills(bar, bars);
+  }
+
+  /**
+   * Process a single price tick.
+   * Runs fill checks and SL/TP exits using a synthetic bar (all OHLC = price).
+   * Indicator updates (ATR, trailing entry) are bar-level — NOT run here.
+   * Requires at least one prior onBar call to establish bar context.
+   */
+  async onTick(price: number, time: Date): Promise<void> {
+    if (!this._lastBars) {
+      throw new Error('onTick requires at least one onBar call first');
+    }
+    this._spreadAbs = await this.broker.getSpread(this.symbol.name);
+
+    const tick = new Bar(price, price, price, price, time);
+
+    for (const slot of [this.longPos, this.shortPos]) {
+      if (slot.size === 0) continue;
+      await this._checkExits(slot, tick);
+    }
+    await this._checkOrderFills(tick, this._lastBars);
   }
 
   // ──────────────────────────────────────────────────────────
@@ -561,7 +1398,7 @@ export class TradingEngine {
     const s = size ?? this._nextOrderSize;
     if (!this.hedging && this.shortPos.size > 0) await this._closeSlot(this.shortPos, info);
     const r = await this.broker.marketOrder(Side.Long, s, info);
-    this._applyFill(this.longPos, r.price, s, r.time);
+    this._applyFill(this.longPos, r.price, s, r.time, info ?? 'market');
     this._applyBracket(this.longPos);
     await this._pushSLTP(this.longPos);
     return true;
@@ -576,7 +1413,7 @@ export class TradingEngine {
     const s = size ?? this._nextOrderSize;
     if (!this.hedging && this.longPos.size > 0) await this._closeSlot(this.longPos, info);
     const r = await this.broker.marketOrder(Side.Short, s, info);
-    this._applyFill(this.shortPos, r.price, s, r.time);
+    this._applyFill(this.shortPos, r.price, s, r.time, info ?? 'market');
     this._applyBracket(this.shortPos);
     await this._pushSLTP(this.shortPos);
     return true;
@@ -629,22 +1466,22 @@ export class TradingEngine {
 
   /** Buy-limit: buy when price drops to `price`. */
   addBuyLimit(price: number, size?: number): string {
-    return this._addOrder('BUY_LIMIT', Side.Long, price, size);
+    return this._addOrder('BUY_LIMIT', Side.Long, price, size).id;
   }
 
   /** Buy-stop: buy when price rises to `price`. */
   addBuyStop(price: number, size?: number): string {
-    return this._addOrder('BUY_STOP', Side.Long, price, size);
+    return this._addOrder('BUY_STOP', Side.Long, price, size).id;
   }
 
   /** Sell-limit: sell when price rises to `price`. */
   addSellLimit(price: number, size?: number): string {
-    return this._addOrder('SELL_LIMIT', Side.Short, price, size);
+    return this._addOrder('SELL_LIMIT', Side.Short, price, size).id;
   }
 
   /** Sell-stop: sell when price drops to `price`. */
   addSellStop(price: number, size?: number): string {
-    return this._addOrder('SELL_STOP', Side.Short, price, size);
+    return this._addOrder('SELL_STOP', Side.Short, price, size).id;
   }
 
   /**
@@ -653,11 +1490,61 @@ export class TradingEngine {
    * Sell: converts to market sell the first time price touches `price` (from below).
    */
   addBuyMIT(price: number, size?: number): string {
-    return this._addOrder('BUY_MIT', Side.Long, price, size);
+    return this._addOrder('BUY_MIT', Side.Long, price, size).id;
   }
 
   addSellMIT(price: number, size?: number): string {
-    return this._addOrder('SELL_MIT', Side.Short, price, size);
+    return this._addOrder('SELL_MIT', Side.Short, price, size).id;
+  }
+
+  /**
+   * Stop-limit buy: triggers when price rises to `stopPrice`, then fills as a
+   * limit buy only if the bar's low reaches `limitPrice` (must be ≤ stopPrice).
+   * If `limitPrice` is not reached on the trigger bar the order converts to a
+   * plain BUY_LIMIT at `limitPrice` for subsequent bars.
+   */
+  addBuyStopLimit(stopPrice: number, limitPrice: number, size?: number): string {
+    const id = this._nextOrderId();
+    const p  = this._consumeNextParams(id, 'BUY_STOP_LIMIT', Side.Long, stopPrice, size);
+    this._resetNextAttrs();
+    return this._registerOrder(createOrder({ ...p, limitPrice })).id;
+  }
+
+  /**
+   * Stop-limit sell: triggers when price drops to `stopPrice`, then fills as a
+   * limit sell only if the bar's high reaches `limitPrice` (must be ≥ stopPrice).
+   */
+  addSellStopLimit(stopPrice: number, limitPrice: number, size?: number): string {
+    const id = this._nextOrderId();
+    const p  = this._consumeNextParams(id, 'SELL_STOP_LIMIT', Side.Short, stopPrice, size);
+    this._resetNextAttrs();
+    return this._registerOrder(createOrder({ ...p, limitPrice })).id;
+  }
+
+  /**
+   * MTO (Market Trail Order) buy: a trailing stop order that fills as a market
+   * order when triggered. The stop price trails below the market by `distancePts`,
+   * anchoring lower each bar. When the bar's high crosses the stop price a
+   * market buy is executed.
+   */
+  addBuyMTO(mode: TrailMode, distancePts: number, periods = 0): string {
+    const id = this._nextOrderId();
+    const p  = this._consumeNextParams(id, 'BUY_MTO', Side.Long, Infinity);
+    this._resetNextAttrs();
+    return this._registerOrder(createOrder({ ...p, trailEntry: { mode, distPts: distancePts, periods }, _trailRef: Infinity })).id;
+  }
+
+  /**
+   * MTO (Market Trail Order) sell: a trailing stop order that fills as a market
+   * order when triggered. The stop price trails above the market by `distancePts`,
+   * anchoring higher each bar. When the bar's low crosses the stop price a
+   * market sell is executed.
+   */
+  addSellMTO(mode: TrailMode, distancePts: number, periods = 0): string {
+    const id = this._nextOrderId();
+    const p  = this._consumeNextParams(id, 'SELL_MTO', Side.Short, -Infinity);
+    this._resetNextAttrs();
+    return this._registerOrder(createOrder({ ...p, trailEntry: { mode, distPts: distancePts, periods }, _trailRef: -Infinity })).id;
   }
 
   /**
@@ -666,36 +1553,32 @@ export class TradingEngine {
    * each bar as long as price rises.
    */
   addBuyLimitTrail(mode: TrailMode, distancePts: number, periods = 0): string {
-    const id = this._addOrder('BUY_LIMIT', Side.Long, 0, undefined);
-    const o = this._findOrder(id)!;
-    o.attributes.trailEntry = { mode, distPts: distancePts, periods };
-    o._trailRef = -Infinity;
-    return id;
+    const id = this._nextOrderId();
+    const p  = this._consumeNextParams(id, 'BUY_LIMIT', Side.Long, 0);
+    this._resetNextAttrs();
+    return this._registerOrder(createOrder({ ...p, trailEntry: { mode, distPts: distancePts, periods }, _trailRef: -Infinity })).id;
   }
 
   addSellLimitTrail(mode: TrailMode, distancePts: number, periods = 0): string {
-    const id = this._addOrder('SELL_LIMIT', Side.Short, 0, undefined);
-    const o = this._findOrder(id)!;
-    o.attributes.trailEntry = { mode, distPts: distancePts, periods };
-    o._trailRef = Infinity;
-    return id;
+    const id = this._nextOrderId();
+    const p  = this._consumeNextParams(id, 'SELL_LIMIT', Side.Short, 0);
+    this._resetNextAttrs();
+    return this._registerOrder(createOrder({ ...p, trailEntry: { mode, distPts: distancePts, periods }, _trailRef: Infinity })).id;
   }
 
   /** Trailing buy-stop — stop price trails above the market. */
   addBuyStopTrail(mode: TrailMode, distancePts: number, periods = 0): string {
-    const id = this._addOrder('BUY_STOP', Side.Long, Infinity, undefined);
-    const o = this._findOrder(id)!;
-    o.attributes.trailEntry = { mode, distPts: distancePts, periods };
-    o._trailRef = Infinity;
-    return id;
+    const id = this._nextOrderId();
+    const p  = this._consumeNextParams(id, 'BUY_STOP', Side.Long, Infinity);
+    this._resetNextAttrs();
+    return this._registerOrder(createOrder({ ...p, trailEntry: { mode, distPts: distancePts, periods }, _trailRef: Infinity })).id;
   }
 
   addSellStopTrail(mode: TrailMode, distancePts: number, periods = 0): string {
-    const id = this._addOrder('SELL_STOP', Side.Short, 0, undefined);
-    const o = this._findOrder(id)!;
-    o.attributes.trailEntry = { mode, distPts: distancePts, periods };
-    o._trailRef = -Infinity;
-    return id;
+    const id = this._nextOrderId();
+    const p  = this._consumeNextParams(id, 'SELL_STOP', Side.Short, 0);
+    this._resetNextAttrs();
+    return this._registerOrder(createOrder({ ...p, trailEntry: { mode, distPts: distancePts, periods }, _trailRef: -Infinity })).id;
   }
 
   /**
@@ -710,11 +1593,10 @@ export class TradingEngine {
     size?:      number;
   }): string {
     const side = opts.entryType.startsWith('BUY') ? Side.Long : Side.Short;
-    const id = this._addOrder(opts.entryType, side, opts.entryPrice, opts.size);
-    const o  = this._findOrder(id)!;
-    o.attributes.bracketSL = opts.slPts;
-    o.attributes.bracketTP = opts.tpPts;
-    return id;
+    const o    = this._addOrder(opts.entryType, side, opts.entryPrice, opts.size);
+    o.bracketSL = opts.slPts;
+    o.bracketTP = opts.tpPts;
+    return o.id;
   }
 
   async deleteBuyOrders():  Promise<void> { this.orders = this.orders.filter(o => o.side !== Side.Long);  }
@@ -848,7 +1730,7 @@ export class TradingEngine {
   getCntOrdersBuy():  number  { return this.orders.filter(o => o.side === Side.Long).length;  }
   getCntOrdersSell(): number  { return this.orders.filter(o => o.side === Side.Short).length; }
   getCntOrders():     number  { return this.orders.length; }
-  getOrders(): readonly PendingOrder[] { return this.orders; }
+  getOrders(): readonly Order[] { return this.orders; }
   isLong():           boolean { return this.longPos.size  > 0; }
   isShort():          boolean { return this.shortPos.size > 0; }
   isFlat(inclOrders = false): boolean {
@@ -901,115 +1783,68 @@ export class TradingEngine {
   // Private — order book processing
   // ──────────────────────────────────────────────────────────
 
-  private _addOrder(
-    type:  OrderEntryType,
-    side:  Side,
-    price: number,
-    size?: number,
-  ): string {
-    const id = `ord_${++this._orderSeq}`;
-    this.orders.push({
-      id,
-      type,
-      side,
-      price,
+  /** Build OrderParams from current next-attributes and reset them. */
+  private _consumeNextParams<T extends OrderEntryType>(id: string, type: T, side: Side, price: number, size?: number): OrderParams & { type: T } {
+    return {
+      id, type, side, price,
       size: size ?? this._nextOrderSize,
-      time: new Date(),
-      attributes: {
-        ...(this._nextOCO  && { oco:  true as const }),
-        ...(this._nextCO   && { co:   true as const }),
-        ...(this._nextCS   && { cs:   true as const }),
-        ...(this._nextREV  && { rev:  true as const }),
-        ...(this._nextBracketSL != null && { bracketSL: this._nextBracketSL }),
-        ...(this._nextBracketTP != null && { bracketTP: this._nextBracketTP }),
-        ...(this._nextPullback  != null && { pullbackPts: this._nextPullback }),
-        ...(this._nextLimitConfirm !== LimitConfirm.None && { limitConfirm: this._nextLimitConfirm }),
-      },
-    });
-    // Reset one-shot attributes
+      // Use last bar time so order creation timestamps are deterministic during historical replay.
+      // Falls back to epoch (new Date(0)) before the first onBar call, which is acceptable.
+      time: this._lastBarTime,
+      oco:  this._nextOCO  ? true : undefined,
+      co:   this._nextCO   ? true : undefined,
+      cs:   this._nextCS   ? true : undefined,
+      rev:  this._nextREV  ? true : undefined,
+      bracketSL:    this._nextBracketSL,
+      bracketTP:    this._nextBracketTP,
+      pullbackPts:  this._nextPullback,
+      limitConfirm: this._nextLimitConfirm !== LimitConfirm.None ? this._nextLimitConfirm : undefined,
+    };
+  }
+
+  private _resetNextAttrs(): void {
     this._nextOCO = false; this._nextCO = false; this._nextCS = false;
     this._nextREV = false;
     this._nextBracketSL = undefined; this._nextBracketTP = undefined;
     this._nextPullback  = undefined;
     this._nextLimitConfirm = LimitConfirm.None;
-    return id;
   }
 
-  private _findOrder(id: string): PendingOrder | undefined {
+  private _nextOrderId(): string {
+    return `ord_${++this._orderSeq}`;
+  }
+
+  private _registerOrder(o: Order): Order {
+    this.orders.push(o);
+    return o;
+  }
+
+  /** Factory for simple (non-trailing, non-stop-limit) order types. */
+  private _addOrder(type: 'BUY_LIMIT' | 'SELL_LIMIT' | 'BUY_STOP' | 'SELL_STOP' | 'BUY_MIT' | 'SELL_MIT',
+    side: Side, price: number, size?: number,
+  ): Order {
+    const id = this._nextOrderId();
+    const p  = this._consumeNextParams(id, type, side, price, size);
+    this._resetNextAttrs();
+    return this._registerOrder(createOrder(p as CreateOrderParams));
+  }
+
+  private _findOrder(id: string): Order | undefined {
     return this.orders.find(o => o.id === id);
   }
 
-  /** Per-bar: update trailing-entry order prices */
-  private async _updateTrailingEntryOrders(bar: Candle, bars: Bars): Promise<void> {
-    for (const o of this.orders) {
-      // Limit-pullback: trailing pending limit that follows the market
-      if (o.attributes.pullbackPts != null) {
-        const pullDist = this.symbol.pointsToPrice(o.attributes.pullbackPts);
-        if (o.side === Side.Long) {
-          // Buy-limit follows price down: anchor = highest high, limit = anchor - pullback
-          if (bar.high > (o._trailRef ?? -Infinity)) {
-            o._trailRef = bar.high;
-            o.price = bar.high - pullDist;
-          }
-        } else {
-          // Sell-limit follows price up: anchor = lowest low, limit = anchor + pullback
-          if (bar.low < (o._trailRef ?? Infinity)) {
-            o._trailRef = bar.low;
-            o.price = bar.low + pullDist;
-          }
-        }
-      }
 
-      // Trailing entry (stop/limit that follows the market)
-      if (o.attributes.trailEntry) {
-        const te = o.attributes.trailEntry;
-        const dist = this.symbol.pointsToPrice(te.distPts);
-        if (o.type === 'BUY_LIMIT') {
-          // Anchor rises with the market; limit = anchor - dist
-          if (bar.high > (o._trailRef ?? -Infinity)) {
-            o._trailRef = bar.high;
-            o.price = bar.high - dist;
-          }
-        } else if (o.type === 'SELL_LIMIT') {
-          // Anchor falls with the market; limit = anchor + dist
-          if (bar.low < (o._trailRef ?? Infinity)) {
-            o._trailRef = bar.low;
-            o.price = bar.low + dist;
-          }
-        } else if (o.type === 'BUY_STOP') {
-          // Stop trails below, anchors down
-          if (bar.low < (o._trailRef ?? Infinity)) {
-            o._trailRef = bar.low;
-            o.price = bar.low + dist;
-          }
-        } else if (o.type === 'SELL_STOP') {
-          // Stop trails above, anchors up
-          if (bar.high > (o._trailRef ?? -Infinity)) {
-            o._trailRef = bar.high;
-            o.price = bar.high - dist;
-          }
-        }
-      }
-    }
+  /** Per-bar: update trailing-entry order prices — each order class owns its own logic. */
+  private async _updateTrailingEntryOrders(bar: Bar, bars: Bars): Promise<void> {
+    for (const o of this.orders) o.updateTrailingRef(bar, bars, this.symbol);
   }
 
-  /** Per-bar: check which pending orders were triggered */
-  private async _checkOrderFills(bar: Candle, bars: Bars): Promise<void> {
-    const toFill: PendingOrder[] = [];
-
+  /** Per-bar: check which pending orders were triggered — each class owns isFilled(). */
+  private async _checkOrderFills(bar: Bar, bars: Bars): Promise<void> {
+    const toFill: Order[] = [];
     for (const o of this.orders) {
-      let triggered = false;
-      switch (o.type) {
-        case 'BUY_LIMIT':  triggered = bar.low  <= o.price; break;
-        case 'BUY_STOP':   triggered = bar.high >= o.price; break;
-        case 'SELL_LIMIT': triggered = bar.high >= o.price; break;
-        case 'SELL_STOP':  triggered = bar.low  <= o.price; break;
-        case 'BUY_MIT':    triggered = bar.low  <= o.price; break;
-        case 'SELL_MIT':   triggered = bar.high >= o.price; break;
-      }
-      if (triggered) toFill.push(o);
+      if (o.isFilled(bar)) toFill.push(o);
     }
-
     for (const o of toFill) {
       // Skip if a prior fill on this bar cancelled this order (OCO / CS).
       if (!this.orders.some(x => x.id === o.id)) continue;
@@ -1017,30 +1852,19 @@ export class TradingEngine {
     }
   }
 
-  private async _fillOrder(o: PendingOrder, bar: Candle, bars: Bars): Promise<void> {
-    const attrs = o.attributes;
-
+  private async _fillOrder(o: Order, bar: Bar, _bars: Bars): Promise<void> {
     // Limit-confirm check (require wick / color confirmation)
-    if (attrs.limitConfirm != null) {
-      if (!this._checkLimitConfirm(o, bar, attrs.limitConfirm)) return;
+    if (o.limitConfirm != null) {
+      if (!this._checkLimitConfirm(o, bar, o.limitConfirm)) return;
     }
 
     // Remove this order from the book
     this.orders = this.orders.filter(x => x.id !== o.id);
 
-    const fillPrice = o.price; // simplified — market fill at trigger price
-
     // Apply order attributes before executing
-    if (attrs.oco) {
-      // Cancel all other pending orders
-      this.orders = [];
-    }
-    if (attrs.cs) {
-      // Cancel same-direction pending orders
-      this.orders = this.orders.filter(x => x.side !== o.side);
-    }
-    if (attrs.co) {
-      // Close opposite position
+    if (o.oco) this.orders = [];
+    if (o.cs)  this.orders = this.orders.filter(x => x.side !== o.side);
+    if (o.co) {
       if (o.side === Side.Long  && this.shortPos.size > 0) await this._closeSlot(this.shortPos, 'CO');
       if (o.side === Side.Short && this.longPos.size  > 0) await this._closeSlot(this.longPos,  'CO');
     }
@@ -1048,36 +1872,49 @@ export class TradingEngine {
     // Execute the fill
     const slot = o.side === Side.Long ? this.longPos : this.shortPos;
 
-    if (attrs.rev) {
+    if (o.rev) {
       // Reverse: close current + open opposite of same size
       const curSize = slot.size;
       if (curSize > 0) await this._closeSlot(slot, 'REV');
       if (o.side === Side.Long) {
         await this.broker.marketOrder(Side.Long, o.size + curSize);
-        this._applyFill(this.longPos, fillPrice, o.size + curSize, bar.time);
+        this._applyFill(this.longPos, o.computeFillPrice(bar), o.size + curSize, bar.time, o.type);
       } else {
         await this.broker.marketOrder(Side.Short, o.size + curSize);
-        this._applyFill(this.shortPos, fillPrice, o.size + curSize, bar.time);
+        this._applyFill(this.shortPos, o.computeFillPrice(bar), o.size + curSize, bar.time, o.type);
       }
+    } else if (isStopLimitOrder(o)) {
+      // Stop-limit: only fill if bar's range covers the limit price
+      if (!o.limitCovered(bar)) {
+        // Re-queue as a plain LimitOrder at limitPrice for subsequent bars
+        this.orders.push(new LimitOrder({
+          id: o.id,
+          type: o.side === Side.Long ? 'BUY_LIMIT' : 'SELL_LIMIT',
+          side: o.side, price: o.limitPrice, size: o.size, time: o.time,
+          oco: o.oco, co: o.co, cs: o.cs, rev: o.rev,
+          bracketSL: o.bracketSL, bracketTP: o.bracketTP, limitConfirm: o.limitConfirm,
+          pullbackPts: o.pullbackPts,
+        }));
+        return;
+      }
+      this._applyFill(slot, o.computeFillPrice(bar), o.size, bar.time, o.type);
+    } else if (o.fillsAtMarket) {
+      // MIT / MTO: execute as market order; actual fill price comes from broker
+      const r = await this.broker.marketOrder(o.side, o.size);
+      this._applyFill(slot, r.price, o.size, r.time, o.type);
     } else {
-      if (o.type === 'BUY_MIT' || o.type === 'SELL_MIT') {
-        // MIT: execute as market order
-        const r = await this.broker.marketOrder(o.side, o.size);
-        this._applyFill(slot, r.price, o.size, r.time);
-      } else {
-        // Limit / stop fill
-        this._applyFill(slot, fillPrice, o.size, bar.time);
-      }
+      // Limit / stop fill at computed price (gap-clamped per MQL GetFillPrice)
+      this._applyFill(slot, o.computeFillPrice(bar), o.size, bar.time, o.type);
     }
 
     // Apply bracket SL/TP
-    this._applyBracketPts(slot, attrs.bracketSL, attrs.bracketTP);
+    this._applyBracketPts(slot, o.bracketSL, o.bracketTP);
 
     await this._pushSLTP(slot);
   }
 
   /** Check limit-confirmation candle logic */
-  private _checkLimitConfirm(o: PendingOrder, bar: Candle, confirm: LimitConfirm): boolean {
+  private _checkLimitConfirm(o: Order, bar: Bar, confirm: LimitConfirm): boolean {
     switch (confirm) {
       case LimitConfirm.Wick:
         // Price must have wicked through the limit but closed on the other side
@@ -1102,7 +1939,7 @@ export class TradingEngine {
   // Private — per-slot updates
   // ──────────────────────────────────────────────────────────
 
-  private async _updateTrailingSL(slot: PositionSlot, bar: Candle, bars: Bars): Promise<void> {
+  private async _updateTrailingSL(slot: PositionSlot, bar: Bar, bars: Bars): Promise<void> {
     if (slot.trailCfg.mode === TrailMode.None) return;
     const newSL = calcTrailingSL({
       side:          slot.side,
@@ -1122,14 +1959,15 @@ export class TradingEngine {
     }
   }
 
-  private async _updateBreakEven(slot: PositionSlot, bar: Candle): Promise<void> {
+  private async _updateBreakEven(slot: PositionSlot, bar: Bar): Promise<void> {
     if (!slot.beActive || slot.openPrice < 0) return;
     const triggerDist = this.symbol.pointsToPrice(slot.trailBeginPts);
     const beDist      = this.symbol.pointsToPrice(slot.beAddPts);
     let newSL         = slot.sl;
-    if (slot.side === Side.Long && bar.high >= slot.openPrice + triggerDist) {
+    // MQL uses bar_close as trigger reference (not high/low) — close-based avoids wick-only activation
+    if (slot.side === Side.Long && bar.close >= slot.openPrice + triggerDist) {
       newSL = Math.max(newSL === -1 ? -Infinity : newSL, slot.openPrice + beDist);
-    } else if (slot.side === Side.Short && bar.low + this._spreadAbs <= slot.openPrice - triggerDist) {
+    } else if (slot.side === Side.Short && bar.close <= slot.openPrice - triggerDist) {
       newSL = newSL === -1 ? slot.openPrice - beDist : Math.min(newSL, slot.openPrice - beDist);
     }
     if (newSL !== slot.sl) {
@@ -1138,7 +1976,7 @@ export class TradingEngine {
     }
   }
 
-  private async _checkExits(slot: PositionSlot, bar: Candle): Promise<void> {
+  private async _checkExits(slot: PositionSlot, bar: Bar): Promise<void> {
     const hit = checkSLTP({
       side:        slot.side,
       bar,
@@ -1150,14 +1988,21 @@ export class TradingEngine {
       spreadAbs:   this._spreadAbs,
     });
     if (!hit) return;
+    this._recordDeal(slot, hit.exitPrice, hit.reason.toLowerCase(), bar.time);
     await this.broker.closePosition(slot.side, slot.size, hit.reason);
     this._resetSlot(slot);
-    if (this._removeOrdersOnFlat && this.getCntPos() === 0) this.orders = [];
+    if (this._removeOrdersOnFlat && this.getCntPos() === 0) {
+      if (this.onOrderExpired && this.orders.length > 0) {
+        this.onOrderExpired([...this.orders]);
+      }
+      this.orders = [];
+    }
   }
 
   private async _closeSlot(slot: PositionSlot, info?: string): Promise<boolean> {
     if (slot.size === 0) return false;
-    await this.broker.closePosition(slot.side, slot.size, info);
+    const r = await this.broker.closePosition(slot.side, slot.size, info);
+    this._recordDeal(slot, r.price, info ?? 'market', this._lastBarTime);
     this._resetSlot(slot);
     return true;
   }
@@ -1180,11 +2025,15 @@ export class TradingEngine {
     }
   }
 
-  private _applyFill(slot: PositionSlot, price: number, size: number, time: Date): void {
+  private _applyFill(slot: PositionSlot, price: number, size: number, time: Date, reason = ''): void {
     if (slot.size === 0) {
-      slot.openPrice  = price;
-      slot.openTime   = time;
-      slot.trailState = { active: false, plhRef: slot.side === Side.Long ? 0 : Infinity };
+      slot.openPrice   = price;
+      slot.openTime    = time;
+      slot.entryReason = reason;
+      slot.barsHeld    = 0;
+      slot.mae         = 0;
+      slot.mfe         = 0;
+      slot.trailState  = { active: false, plhRef: slot.side === Side.Long ? 0 : Infinity };
       if (slot.slOffsetPts > 0) {
         slot.sl = slot.side === Side.Long
           ? price - this.symbol.pointsToPrice(slot.slOffsetPts)
@@ -1203,16 +2052,19 @@ export class TradingEngine {
   }
 
   private _applyBracketPts(slot: PositionSlot, slPts?: number, tpPts?: number): void {
-    if (slPts != null) {
+    // Fall back to engine-level defaults when no explicit bracket is set (MQL _ResolveSLDist pattern)
+    const sl = slPts ?? (this._defaultSLDist > 0 ? this._defaultSLDist : undefined);
+    const tp = tpPts ?? (this._defaultTPDist > 0 ? this._defaultTPDist : undefined);
+    if (sl != null) {
       slot.sl = slot.side === Side.Long
-        ? slot.openPrice - this.symbol.pointsToPrice(slPts)
-        : slot.openPrice + this.symbol.pointsToPrice(slPts);
+        ? slot.openPrice - this.symbol.pointsToPrice(sl)
+        : slot.openPrice + this.symbol.pointsToPrice(sl);
       slot.slActive = true;
     }
-    if (tpPts != null) {
+    if (tp != null) {
       slot.tp = slot.side === Side.Long
-        ? slot.openPrice + this.symbol.pointsToPrice(tpPts)
-        : slot.openPrice - this.symbol.pointsToPrice(tpPts);
+        ? slot.openPrice + this.symbol.pointsToPrice(tp)
+        : slot.openPrice - this.symbol.pointsToPrice(tp);
       slot.tpActive = true;
     }
   }
@@ -1246,10 +2098,134 @@ export class TradingEngine {
       : slot.openPrice - currentPrice;
     return diff * slot.size;
   }
+
+  // ──────────────────────────────────────────────────────────
+  // Per-bar: MAE/MFE update (ported from CSEADeal concept in SEA_OrderManagement.mqh)
+  // ──────────────────────────────────────────────────────────
+
+  private _updateMAEMFE(slot: PositionSlot, bar: Bar): void {
+    if (slot.openPrice < 0) return;
+    const pt = this.symbol.pointsToPrice(1);
+    if (pt === 0) return;
+    let adverse: number;
+    let favorable: number;
+    if (slot.side === Side.Long) {
+      adverse   = (slot.openPrice - bar.low)  / pt;
+      favorable = (bar.high - slot.openPrice) / pt;
+    } else {
+      adverse   = (bar.high + this._spreadAbs - slot.openPrice) / pt;
+      favorable = (slot.openPrice - bar.low  - this._spreadAbs) / pt;
+    }
+    if (adverse  > slot.mae) slot.mae = adverse;
+    if (favorable > slot.mfe) slot.mfe = favorable;
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // Deal recording (ported from _SimRecordDeal / _SimUpdateStats in SEA_OrderManagement.mqh)
+  // ──────────────────────────────────────────────────────────
+
+  private _recordDeal(slot: PositionSlot, exitPrice: number, exitReason: string, closeTime: Date): void {
+    if (slot.size === 0 || slot.openPrice < 0) return;
+    const pt = this.symbol.pointsToPrice(1);
+    const plPoints = pt > 0
+      ? (slot.side === Side.Long
+          ? (exitPrice - slot.openPrice) / pt
+          : (slot.openPrice - exitPrice) / pt)
+      : 0;
+    const result: 'win' | 'loss' | 'breakeven' =
+      plPoints > 0 ? 'win' : plPoints < 0 ? 'loss' : 'breakeven';
+    const deal: DealRecord = {
+      id:          ++this._dealSeq,
+      side:        slot.side,
+      entryPrice:  slot.openPrice,
+      exitPrice,
+      size:        slot.size,
+      openTime:    slot.openTime,
+      closeTime,
+      barsHeld:    slot.barsHeld,
+      entryReason: slot.entryReason,
+      exitReason,
+      plPoints,
+      result,
+      mae:         Math.max(0, slot.mae),
+      mfe:         Math.max(0, slot.mfe),
+    };
+    this._deals.push(deal);
+    if (this._deals.length > MAX_DEALS) this._deals = this._deals.slice(-MAX_DEALS);
+    this._updateStats(deal);
+  }
+
+  private _updateStats(deal: DealRecord): void {
+    this._stats.totalDeals++;
+    this._stats.netPLPts       += deal.plPoints;
+    // Note: incremental float addition can accumulate rounding drift over thousands of deals.
+    // Acceptable for backtest precision; use Kahan summation if sub-pip accuracy is required.
+    this._runningEquityPts     += deal.plPoints;
+    if (deal.plPoints > 0) {
+      this._stats.winningDeals++;
+      this._stats.grossProfitPts += deal.plPoints;
+      this._currentWinStreak++;
+      this._currentLossStreak = 0;
+      if (this._currentWinStreak > this._stats.maxWinStreak)
+        this._stats.maxWinStreak = this._currentWinStreak;
+    } else if (deal.plPoints < 0) {
+      this._stats.losingDeals++;
+      this._stats.grossLossPts += deal.plPoints;
+      this._currentLossStreak++;
+      this._currentWinStreak = 0;
+      if (this._currentLossStreak > this._stats.maxLossStreak)
+        this._stats.maxLossStreak = this._currentLossStreak;
+    } else {
+      this._stats.breakevenDeals++;
+    }
+    if (this._runningEquityPts > this._maxEquityPeak)
+      this._maxEquityPeak = this._runningEquityPts;
+    const dd = this._maxEquityPeak - this._runningEquityPts;
+    if (dd > this._stats.maxDrawdownPts) this._stats.maxDrawdownPts = dd;
+    if (this._stats.maxDrawdownPts > 0)
+      this._stats.marRatio = this._stats.netPLPts / this._stats.maxDrawdownPts;
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // Public: deal history, statistics, defaults
+  // ──────────────────────────────────────────────────────────
+
+  /** All closed trades since last {@link resetStats}. */
+  getDeals(): readonly DealRecord[] { return this._deals; }
+
+  /** Cumulative backtest statistics. Use {@link dealStatsComputed} for derived ratios. */
+  getStats(): Readonly<DealStats> { return this._stats; }
+
+  /** Reset deal history and all statistics counters. */
+  resetStats(): void {
+    this._deals             = [];
+    this._dealSeq           = 0;
+    this._runningEquityPts  = 0;
+    this._maxEquityPeak     = 0;
+    this._currentWinStreak  = 0;
+    this._currentLossStreak = 0;
+    this._stats = {
+      totalDeals: 0, winningDeals: 0, losingDeals: 0, breakevenDeals: 0,
+      grossProfitPts: 0, grossLossPts: 0, netPLPts: 0,
+      maxWinStreak: 0, maxLossStreak: 0, maxDrawdownPts: 0, marRatio: 0,
+    };
+  }
+
+  /**
+   * Set a global default SL distance (points) applied to any fill that has no explicit bracket SL.
+   * Matches MQL `_ResolveSLDist` / `m_default_sl_dist`.  Pass 0 to disable.
+   */
+  setDefaultSLDist(pts: number): void { this._defaultSLDist = pts; }
+
+  /**
+   * Set a global default TP distance (points) applied to any fill that has no explicit bracket TP.
+   * Matches MQL `_ResolveTPDist` / `m_default_tp_dist`.  Pass 0 to disable.
+   */
+  setDefaultTPDist(pts: number): void { this._defaultTPDist = pts; }
 }
 
 // ─────────────────────────────────────────────────────────────
-// Strategy: CandleATR_03  (port of CandleATR_03.mq5)
+// Strategy: BarATR_03  (port of CandleATR_03.mq5)
 // ─────────────────────────────────────────────────────────────
 
 /**
@@ -1264,9 +2240,9 @@ export class TradingEngine {
 export async function evaluateCandleATR03(
   bars:   Bars,
   engine: TradingEngine,
-  symbol: SymbolInfo,
+  symbol: SymbolInfoBase,
 ): Promise<void> {
-  const prev  = bars.candle(1);
+  const prev  = bars.bar(1);
   const atr14 = bars.atr(14, 1);
 
   if (prev.range() < atr14 * 2.0) return;
@@ -1321,6 +2297,17 @@ export interface AtrModuleConfig {
    * When false: update every bar regardless.
    */
   onlyWhenFlat: boolean;
+  /**
+   * Filter which bar types contribute to ATR calculation.
+   * Normal = all bars, Bullish = only up-bars, Bearish = only down-bars.
+   */
+  barsAtrMode: BarsAtrMode;
+  /**
+   * Which price range forms each TR measurement.
+   * HiLo = standard True Range (High-Low + prev-close gaps).
+   * OpenClose = body range only (|Open - Close|).
+   */
+  barBase: BarBase;
 }
 
 /**
@@ -1333,11 +2320,11 @@ export class AtrModule {
   constructor(
     private readonly cfg:    AtrModuleConfig,
     private readonly engine: TradingEngine,
-    private readonly symbol: SymbolInfo,
+    private readonly symbol: SymbolInfoBase,
   ) {}
 
   onBar(bars: Bars): void {
-    const atrPrice = bars.atr(this.cfg.period, this.cfg.shift, this.cfg.method);
+    const atrPrice = bars.atr(this.cfg.period, this.cfg.shift, this.cfg.method, this.cfg.barsAtrMode, this.cfg.barBase);
     if (atrPrice === 0) return;
     const atrPts = this.symbol.priceToPoints(atrPrice);
 
@@ -1420,7 +2407,7 @@ function parseAtrMode(mode: AtrModeString): { period: number; daily: boolean } |
   if (mode === 'None') return null;
   const m = mode.match(/^ATR\s+(\d+)(d?)$/);
   if (!m) return null;
-  return { period: parseInt(m[1]), daily: m[2] === 'd' };
+  return { period: parseInt(m[1], 10), daily: m[2] === 'd' };
 }
 
 /**
@@ -1483,7 +2470,7 @@ export class ScaledOrderEngine {
 
   constructor(
     private readonly engine:  TradingEngine,
-    private readonly symbol:  SymbolInfo,
+    private readonly symbol:  SymbolInfoBase,
     preset: ScaledOrderPreset | string,
   ) {
     this._preset = typeof preset === 'string'
@@ -1589,6 +2576,8 @@ export class ScaledOrderEngine {
 
       // Chain mode: each limit has OCO so nearest fill cancels the rest
       if (p.chainLimits) this.engine.orderAttrOCO(true);
+      if (p.attrCO)  this.engine.orderAttrCO(true);
+      if (p.attrREV) this.engine.orderAttrREV(true);
       this.engine.orderSize(sizeFactor);
 
       const id = isLong
@@ -1609,6 +2598,8 @@ export class ScaledOrderEngine {
         ? currentPrice + stopCumulDist
         : currentPrice - stopCumulDist;
 
+      if (p.attrCO)  this.engine.orderAttrCO(true);
+      if (p.attrREV) this.engine.orderAttrREV(true);
       this.engine.orderSize(sizeFactor);
       const id = isLong
         ? this.engine.addBuyStop(stopPrice, sizeFactor)
@@ -1647,7 +2638,7 @@ class MyBroker implements IBrokerAdapter {
 }
 
 // 2. Set up
-const symbol = new SymbolInfo('EURUSD', 5);
+const symbol = new SymbolInfoForex('EURUSD', 5);
 const engine = new TradingEngine(symbol, new MyBroker(), true); // hedging=true
 
 // 3. Example: OCO bracket order
@@ -1666,7 +2657,7 @@ engine.addBuyLimit(0);          // price set dynamically each bar
 // 6. On each bar
 async function onBar(allBars: OHLC[]) {
   const bars = new Bars(allBars);
-  await engine.onBar(bars.candle(0), bars);
+  await engine.onBar(bars.bar(0), bars);
   await evaluateCandleATR03(bars, engine, symbol);
 }
 */

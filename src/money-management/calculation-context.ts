@@ -1,5 +1,5 @@
-import type { Result } from '../lib/result.js';
-import type { DomainError } from '../lib/errors.js';
+import type { Result } from '../shared/lib/result.js';
+import type { DomainError } from '../shared/lib/errors.js';
 import type { ITradingCalculator } from './types.js';
 
 export class CalculationContext {

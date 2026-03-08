@@ -1,0 +1,51 @@
+import type { EventDefinition } from './types.js';
+import {
+  EventDomain, EventFrequency, EventImportance, EventMultiplier,
+  EventSector, EventTimeMode, EventType, EventUnit,
+} from './types.js';
+
+const EQUITY_BASE = {
+  type: EventType.Event,
+  sector: EventSector.Equity,
+  domain: EventDomain.Equity,
+  timeMode: EventTimeMode.Tentative,
+  unit: EventUnit.None,
+  multiplier: EventMultiplier.None,
+  digits: 0,
+  currency: 'ALL',
+} as const;
+
+export const EQUITY_EVENTS: readonly EventDefinition[] = [
+  { id: 'EQUITY.EQUITY.EARNINGS_REPORT', name: 'Earnings Report', importance: EventImportance.High, frequency: EventFrequency.Quarter, description: 'Quarterly earnings report release', ...EQUITY_BASE },
+  { id: 'EQUITY.EQUITY.EARNINGS_GUIDANCE', name: 'Earnings Guidance Revision', importance: EventImportance.High, frequency: EventFrequency.None, description: 'Company revises forward earnings guidance', ...EQUITY_BASE },
+  { id: 'EQUITY.EQUITY.DIVIDEND_EXDATE', name: 'Ex-Dividend Date', importance: EventImportance.Moderate, frequency: EventFrequency.Quarter, description: 'Stock trades ex-dividend (buyer no longer receives declared dividend)', ...EQUITY_BASE },
+  { id: 'EQUITY.EQUITY.DIVIDEND_SPECIAL', name: 'Special Dividend', importance: EventImportance.High, frequency: EventFrequency.None, description: 'One-time special dividend distribution', ...EQUITY_BASE },
+  { id: 'EQUITY.EQUITY.STOCK_SPLIT', name: 'Stock Split', importance: EventImportance.High, frequency: EventFrequency.None, description: 'Forward stock split (increases share count, reduces price)', ...EQUITY_BASE },
+  { id: 'EQUITY.EQUITY.REVERSE_SPLIT', name: 'Reverse Stock Split', importance: EventImportance.High, frequency: EventFrequency.None, description: 'Reverse stock split (decreases share count, increases price)', ...EQUITY_BASE },
+  { id: 'EQUITY.EQUITY.IPO', name: 'Initial Public Offering', importance: EventImportance.High, frequency: EventFrequency.None, description: 'Company goes public via IPO', ...EQUITY_BASE },
+  { id: 'EQUITY.EQUITY.DIRECT_LISTING', name: 'Direct Listing', importance: EventImportance.High, frequency: EventFrequency.None, description: 'Company goes public via direct listing (no underwriter)', ...EQUITY_BASE },
+  { id: 'EQUITY.EQUITY.MERGER_ACQUISITION', name: 'Merger & Acquisition', importance: EventImportance.High, frequency: EventFrequency.None, description: 'Merger, acquisition, or tender offer announcement', ...EQUITY_BASE },
+  { id: 'EQUITY.EQUITY.BUYBACK', name: 'Share Buyback Program', importance: EventImportance.Moderate, frequency: EventFrequency.None, description: 'Company announces or executes share repurchase program', ...EQUITY_BASE },
+  { id: 'EQUITY.EQUITY.SECONDARY_OFFERING', name: 'Secondary Offering', importance: EventImportance.Moderate, frequency: EventFrequency.None, description: 'Follow-on equity offering or seasoned equity offering', ...EQUITY_BASE },
+  { id: 'EQUITY.EQUITY.SPINOFF', name: 'Corporate Spinoff', importance: EventImportance.Moderate, frequency: EventFrequency.None, description: 'Company spins off division as independent entity', ...EQUITY_BASE },
+  { id: 'EQUITY.EQUITY.INDEX_ADDITION', name: 'Index Addition', importance: EventImportance.High, frequency: EventFrequency.None, description: 'Stock added to major index (S&P 500, FTSE 100, etc.)', ...EQUITY_BASE },
+  { id: 'EQUITY.EQUITY.INDEX_REMOVAL', name: 'Index Removal', importance: EventImportance.High, frequency: EventFrequency.None, description: 'Stock removed from major index', ...EQUITY_BASE },
+  { id: 'EQUITY.EQUITY.DELISTING', name: 'Exchange Delisting', importance: EventImportance.High, frequency: EventFrequency.None, description: 'Stock delisted from exchange (voluntary or involuntary)', ...EQUITY_BASE },
+  { id: 'EQUITY.EQUITY.REGULATORY_ACTION', name: 'Regulatory Action (SEC/FCA)', importance: EventImportance.High, frequency: EventFrequency.None, description: 'Significant regulatory action by SEC, FCA, or similar authority', ...EQUITY_BASE },
+  { id: 'EQUITY.EQUITY.SHAREHOLDER_MEETING', name: 'Annual Shareholder Meeting', importance: EventImportance.Moderate, frequency: EventFrequency.Year, description: 'Annual general meeting of shareholders', ...EQUITY_BASE },
+  { id: 'EQUITY.EQUITY.PROXY_VOTE', name: 'Proxy Vote / Activist Campaign', importance: EventImportance.Moderate, frequency: EventFrequency.None, description: 'Proxy vote, activist investor campaign, or contested board election', ...EQUITY_BASE },
+  { id: 'EQUITY.EQUITY.BOARD_CHANGE', name: 'Major Board/CEO Change', importance: EventImportance.High, frequency: EventFrequency.None, description: 'CEO resignation/appointment or major board of directors change', ...EQUITY_BASE },
+  { id: 'EQUITY.EQUITY.INSIDER_TRADE', name: 'Major Insider Transaction', importance: EventImportance.Moderate, frequency: EventFrequency.None, description: 'Significant insider buy or sell (Form 4 filing)', ...EQUITY_BASE },
+  { id: 'EQUITY.EQUITY.CREDIT_RATING', name: 'Credit Rating Change', importance: EventImportance.High, frequency: EventFrequency.None, description: "Upgrade, downgrade, or outlook change by Moody's/S&P/Fitch", ...EQUITY_BASE },
+  { id: 'EQUITY.EQUITY.DEBT_ISSUANCE', name: 'Major Debt Issuance', importance: EventImportance.Moderate, frequency: EventFrequency.None, description: 'Significant corporate bond or debt issuance', ...EQUITY_BASE },
+  { id: 'EQUITY.EQUITY.BANKRUPTCY', name: 'Bankruptcy Filing', importance: EventImportance.High, frequency: EventFrequency.None, description: 'Chapter 7 or Chapter 11 bankruptcy filing', ...EQUITY_BASE },
+  { id: 'EQUITY.EQUITY.SHELF_REGISTRATION', name: 'Shelf Registration', importance: EventImportance.Low, frequency: EventFrequency.None, description: 'SEC shelf registration (S-3) for future securities issuance', ...EQUITY_BASE },
+  { id: 'EQUITY.EQUITY.SHORT_SQUEEZE', name: 'Short Squeeze', importance: EventImportance.High, frequency: EventFrequency.None, description: 'Rapid price increase forcing short sellers to cover positions', ...EQUITY_BASE },
+  { id: 'EQUITY.EQUITY.HALT_TRADING', name: 'Trading Halt / Circuit Breaker', importance: EventImportance.High, frequency: EventFrequency.None, description: 'Exchange trading halt or circuit breaker triggered', ...EQUITY_BASE },
+  { id: 'EQUITY.EQUITY.DARK_POOL_PRINT', name: 'Large Dark Pool Print', importance: EventImportance.Moderate, frequency: EventFrequency.None, description: 'Unusually large dark pool or block trade print', ...EQUITY_BASE },
+  { id: 'EQUITY.EQUITY.ANALYST_UPGRADE', name: 'Analyst Upgrade/Downgrade', importance: EventImportance.Moderate, frequency: EventFrequency.None, description: 'Major analyst rating upgrade, downgrade, or initiation', ...EQUITY_BASE },
+  { id: 'EQUITY.EQUITY.SECTOR_ROTATION', name: 'Major Sector Rotation', importance: EventImportance.Moderate, frequency: EventFrequency.None, description: 'Significant capital flow rotation between equity sectors', ...EQUITY_BASE },
+  { id: 'EQUITY.EQUITY.ETF_LAUNCH', name: 'New ETF Launch', importance: EventImportance.Low, frequency: EventFrequency.None, description: 'Launch of new exchange-traded fund', ...EQUITY_BASE },
+  { id: 'EQUITY.EQUITY.ETF_CLOSURE', name: 'ETF Closure/Liquidation', importance: EventImportance.Moderate, frequency: EventFrequency.None, description: 'ETF closure, liquidation, or delisting', ...EQUITY_BASE },
+  { id: 'EQUITY.EQUITY.CONFERENCE', name: 'Major Investor Conference', importance: EventImportance.Low, frequency: EventFrequency.None, description: 'Significant investor conference (JPM Healthcare, GS Tech, etc.)', ...EQUITY_BASE },
+] as const;
