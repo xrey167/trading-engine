@@ -40,18 +40,20 @@ async function fetchWithRetry(
   for (let attempt = 0; attempt < retries; attempt++) {
     const res = await fetch(url, init);
     if (res.status !== 429) return res;
-    await new Promise<void>((r) => setTimeout(r, 100 * 2 ** attempt));
+    if (attempt < retries - 1) {
+      await new Promise<void>((r) => setTimeout(r, 100 * 2 ** attempt));
+    }
   }
   throw new Error('OpenFIGI rate limit exceeded after retries');
 }
 
 function parseRawItem(item: RawFigiItem): FigiInstrument[] | null {
   if (item.error !== undefined || item.data === undefined) return null;
-  return item.data.map((d) => {
-    const instrument: FigiInstrument = {
-      figi: isFigi(d.figi) ? d.figi : (d.figi as FigiInstrument['figi']),
-      name: d.name,
-    };
+  const instruments: FigiInstrument[] = [];
+  for (const d of item.data) {
+    // Skip items where the primary FIGI is malformed — don't force-cast invalid data
+    if (!isFigi(d.figi)) continue;
+    const instrument: FigiInstrument = { figi: d.figi, name: d.name };
     if (d.ticker !== undefined) instrument.ticker = d.ticker;
     if (d.exchCode !== undefined) instrument.exchCode = d.exchCode;
     if (d.securityType !== undefined) instrument.securityType = d.securityType;
@@ -64,8 +66,9 @@ function parseRawItem(item: RawFigiItem): FigiInstrument[] | null {
     if (d.shareClassFIGI !== undefined && isFigi(d.shareClassFIGI)) {
       instrument.shareClassFIGI = d.shareClassFIGI;
     }
-    return instrument;
-  });
+    instruments.push(instrument);
+  }
+  return instruments;
 }
 
 async function fetchChunk(
@@ -88,14 +91,18 @@ async function fetchChunk(
     return err(gatewayError(`OpenFIGI returned HTTP ${res.status}`));
   }
 
-  let raw: RawFigiItem[];
+  let raw: unknown;
   try {
-    raw = (await res.json()) as RawFigiItem[];
+    raw = await res.json();
   } catch (e) {
     return err(gatewayError('Failed to parse OpenFIGI response', e));
   }
 
-  return ok(raw.map(parseRawItem));
+  if (!Array.isArray(raw)) {
+    return err(gatewayError('OpenFIGI response was not an array'));
+  }
+
+  return ok((raw as RawFigiItem[]).map(parseRawItem));
 }
 
 export function createOpenFigiClient(options?: {
@@ -107,30 +114,30 @@ export function createOpenFigiClient(options?: {
   const headers: Record<string, string> = {};
   if (apiKey) headers['X-OPENFIGI-APIKEY'] = apiKey;
 
-  return {
-    async map(
-      requests: FigiMappingRequest[],
-    ): Promise<Result<Array<FigiInstrument[] | null>, DomainError>> {
-      const results: Array<FigiInstrument[] | null> = [];
+  async function map(
+    requests: FigiMappingRequest[],
+  ): Promise<Result<Array<FigiInstrument[] | null>, DomainError>> {
+    const results: Array<FigiInstrument[] | null> = [];
 
-      for (let i = 0; i < requests.length; i += BATCH_SIZE) {
-        const chunk = requests.slice(i, i + BATCH_SIZE);
-        const chunkResult = await fetchChunk(chunk, headers, baseUrl);
-        if (!chunkResult.ok) return chunkResult;
-        results.push(...chunkResult.value);
-      }
+    for (let i = 0; i < requests.length; i += BATCH_SIZE) {
+      const chunk = requests.slice(i, i + BATCH_SIZE);
+      const chunkResult = await fetchChunk(chunk, headers, baseUrl);
+      if (!chunkResult.ok) return chunkResult;
+      results.push(...chunkResult.value);
+    }
 
-      return ok(results);
-    },
+    return ok(results);
+  }
 
-    async mapOne(
-      request: FigiMappingRequest,
-    ): Promise<Result<FigiInstrument | null, DomainError>> {
-      const result = await this.map([request]);
-      if (!result.ok) return result;
-      const items = result.value[0];
-      if (items === null || items.length === 0) return ok(null);
-      return ok(items[0]);
-    },
-  };
+  async function mapOne(
+    request: FigiMappingRequest,
+  ): Promise<Result<FigiInstrument | null, DomainError>> {
+    const result = await map([request]);
+    if (!result.ok) return result;
+    const items = result.value[0];
+    if (items === null || items.length === 0) return ok(null);
+    return ok(items[0]);
+  }
+
+  return { map, mapOne };
 }

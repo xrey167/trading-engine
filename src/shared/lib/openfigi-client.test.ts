@@ -12,6 +12,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.clearAllMocks();
+  vi.useRealTimers();
 });
 
 function makeResponse(body: unknown, status = 200): Response {
@@ -111,10 +112,10 @@ describe('map()', () => {
     // Advance timers for retry delays: 100ms, 200ms
     await vi.runAllTimersAsync();
     const result = await promise;
-    vi.useRealTimers();
 
     expect(result.ok).toBe(true);
     expect(mockFetch).toHaveBeenCalledTimes(3);
+    // vi.useRealTimers() is called in afterEach
   });
 
   it('sets API key header when provided', async () => {
@@ -126,12 +127,17 @@ describe('map()', () => {
   });
 
   it('does not set API key header when not provided', async () => {
+    const prev = process.env['OPENFIGI_API_KEY'];
     delete process.env['OPENFIGI_API_KEY'];
-    mockFetch.mockResolvedValueOnce(makeResponse([{ data: figiData }]));
-    const client = createOpenFigiClient({ baseUrl: 'http://test' });
-    await client.map([req]);
-    const [, init] = mockFetch.mock.calls[0]!;
-    expect((init?.headers as Record<string, string>)['X-OPENFIGI-APIKEY']).toBeUndefined();
+    try {
+      mockFetch.mockResolvedValueOnce(makeResponse([{ data: figiData }]));
+      const client = createOpenFigiClient({ baseUrl: 'http://test' });
+      await client.map([req]);
+      const [, init] = mockFetch.mock.calls[0]!;
+      expect((init?.headers as Record<string, string>)['X-OPENFIGI-APIKEY']).toBeUndefined();
+    } finally {
+      if (prev !== undefined) process.env['OPENFIGI_API_KEY'] = prev;
+    }
   });
 });
 
