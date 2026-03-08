@@ -4,7 +4,9 @@ import type { IBrokerAdapter, ExecutionReport } from '../../engine/core/position
 import type { Side } from '../../shared/domain/engine-enums.js';
 import { Bars } from '../../market-data/bars.js';
 import type { OHLC } from '../../market-data/ohlc.js';
-import type { PositionInfoVO, DealInfoVO, HistoryOrderInfoVO } from '../../shared/domain/position.js';
+import type { PositionInfoVO } from '../../shared/domain/position/position.js';
+import type { DealInfoVO } from '../../shared/domain/deal/deal.js';
+import type { HistoryOrderInfoVO } from '../../shared/domain/order/order.js';
 import type { AccountInfoVO } from '../../shared/domain/account/account.js';
 import type { SymbolInfoVO, Tick } from '../../shared/domain/symbol/symbol.js';;
 import type {

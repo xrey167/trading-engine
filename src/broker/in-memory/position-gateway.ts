@@ -2,7 +2,7 @@ import type { Result } from '../../shared/lib/result.js';
 import { ok, err } from '../../shared/lib/result.js';
 import type { DomainError } from '../../shared/lib/errors.js';
 import { notFound } from '../../shared/lib/errors.js';
-import type { PositionInfoVO } from '../../shared/domain/position.js';
+import type { PositionInfoVO } from '../../shared/domain/position/position.js';
 import type { IPositionGateway } from '../types.js';
 
 export class InMemoryPositionGateway implements IPositionGateway {

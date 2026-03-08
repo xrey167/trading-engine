@@ -1,6 +1,8 @@
 import type { Result } from '../shared/lib/result.js';
 import type { DomainError } from '../shared/lib/errors.js';
-import type { PositionInfoVO, DealInfoVO, HistoryOrderInfoVO } from '../shared/domain/position.js';
+import type { PositionInfoVO } from '../shared/domain/position/position.js';
+import type { DealInfoVO } from '../shared/domain/deal/deal.js';
+import type { HistoryOrderInfoVO } from '../shared/domain/order/order.js';
 import type { AccountInfoVO } from '../shared/domain/account/account.js';
 import type { SymbolInfoVO, Tick } from '../shared/domain/symbol/symbol.js';;
 // TODO(architecture): Dependency inversion — gateway interfaces (ports) should not depend

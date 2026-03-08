@@ -2,9 +2,9 @@ import type { Result } from '../../shared/lib/result.js';
 import { ok, err } from '../../shared/lib/result.js';
 import type { DomainError } from '../../shared/lib/errors.js';
 import { notFound } from '../../shared/lib/errors.js';
-import type { DealInfoVO } from '../../shared/domain/position.js';
+import type { DealInfoVO } from '../../shared/domain/deal/deal.js';
 import type { IHistoryGateway } from '../types.js';
-import type { HistoryOrderInfoVO } from '../../shared/domain/position.js';
+import type { HistoryOrderInfoVO } from '../../shared/domain/order/order.js';
 
 export class InMemoryDealGateway implements IHistoryGateway {
   private deals: DealInfoVO[] = [];

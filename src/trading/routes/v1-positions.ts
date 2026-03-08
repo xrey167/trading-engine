@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { Type } from '@sinclair/typebox';
 import { ErrorResponseSchema } from '../../shared/schemas/common.js';
-import { PositionInfoVOSchema } from '../../shared/domain/position.js';
+import { PositionInfoVOSchema } from '../../shared/domain/position/position.js';
 import { createTradingUseCases } from '../use-cases/index.js';
 
 const DEFAULT_USER_ID = 'default';

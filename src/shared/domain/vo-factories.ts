@@ -1,6 +1,8 @@
 // Value-object factory helpers — ported from quant-lib/domain
 // These provide sensible defaults so tests only need to specify the fields that matter.
-import type { PositionInfoVO, DealInfoVO, HistoryOrderInfoVO } from './position.js';
+import type { PositionInfoVO } from './position/position.js';
+import type { DealInfoVO } from './deal/deal.js';
+import type { HistoryOrderInfoVO } from './order/order.js';
 
 export const PositionVOFactory = {
   make(overrides: Partial<PositionInfoVO> & Pick<PositionInfoVO, 'userId' | 'symbol'>): PositionInfoVO {

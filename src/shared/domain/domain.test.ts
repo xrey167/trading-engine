@@ -20,7 +20,7 @@ import {
   TradeStatsSchema,
   TradeParamsSchema,
 } from './trade-params.js';
-import { PositionInfoVOSchema } from './position.js';
+import { PositionInfoVOSchema } from './position/position.js';
 import { AccountInfoVOSchema } from './account/account.js';
 import { SymbolInfoVOSchema, TickSchema } from './symbol/symbol.js';;
 import { MoneyManagementFactoryConfigSchema } from '../../trading/money-management/types.js';
