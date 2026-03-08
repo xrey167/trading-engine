@@ -20,7 +20,7 @@ import { OrderType, OrderFilling, OrderSide, OrderEntryType } from '../domain/or
 import {
   PositionSizeType,
   StopLimitType, StopLossType, TakeProfitType,
-} from '../domain/enums.js';
+} from '../domain/risk/risk.js';
 
 // Unit 3 — Analysis
 import { isLocalHigh, isLocalLow } from '../../analysis/local-extremes.js';

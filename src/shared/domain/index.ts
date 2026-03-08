@@ -7,7 +7,7 @@ export * from './order/order.js';
 export * from './account/account.js';
 export * from './symbol/symbol.js';
 export * from './symbol/tick.js';
-export * from './enums.js';
+export * from './risk/risk.js';
 export * from './ea/ea-enums.js';
 export * from './trail/trail.js';
 export * from './history/history.js';

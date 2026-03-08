@@ -4,7 +4,7 @@ import type { IStopLossCalculator, ILotsProvider, StopLossParams } from '../type
 import type { IAccountGateway } from '../../../broker/types.js';
 import type { Result } from '../../../shared/lib/result.js';
 import type { DomainError } from '../../../shared/lib/errors.js';
-import { StopLimitType } from '../../../shared/domain/enums.js';
+import { StopLimitType } from '../../../shared/domain/risk/risk.js';
 
 /**
  * Risk-balance stop-loss calculator.

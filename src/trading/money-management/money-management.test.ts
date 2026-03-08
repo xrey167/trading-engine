@@ -7,7 +7,7 @@ import { RiskToRewardTakeProfitCalculator } from './take-profit/risk-reward-tp-c
 import { CalculationContext } from './calculation-context.js';
 import { priceDelta, targetPrice, percentageToPrice } from './price-utils.js';
 import { ok, err } from '../../shared/lib/result.js';
-import { StopLimitType } from '../../shared/domain/enums.js';
+import { StopLimitType } from '../../shared/domain/risk/risk.js';
 import type { ILotsProvider, IStopLossCalculator, ITakeProfitCalculator, MoneyManagementParams, ITradingCalculator } from './types.js';
 import type { DomainError } from '../../shared/lib/errors.js';
 
