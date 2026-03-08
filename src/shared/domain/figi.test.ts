@@ -51,7 +51,7 @@ describe('figi()', () => {
   });
 
   it('includes the invalid string in the error message', () => {
-    expect(() => figi('bad')).toThrow('bad');
+    expect(() => figi('bad')).toThrow('Invalid FIGI: "bad"');
   });
 });
 
@@ -74,8 +74,8 @@ describe('FigiSecurityType', () => {
     expect(FigiSecurityType.CommonStock).toBe('Common Stock');
   });
 
-  it('contains ETF', () => {
-    expect(FigiSecurityType.ETF).toBe('ETP');
+  it('contains ETP', () => {
+    expect(FigiSecurityType.ETP).toBe('ETP');
   });
 });
 

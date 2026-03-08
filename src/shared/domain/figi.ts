@@ -40,7 +40,7 @@ export type FigiMarketSector = (typeof FigiMarketSector)[keyof typeof FigiMarket
 export const FigiSecurityType = {
   CommonStock:       'Common Stock',
   DepositaryReceipt: 'Depositary Receipt',
-  ETF:               'ETP',
+  ETP:               'ETP',
   Warrant:           'Warrant',
   Right:             'Right',
   PreferredStock:    'Preferred Stock',
@@ -62,7 +62,7 @@ export const FigiIdType = {
   ID_CUSIP:     'ID_CUSIP',
   ID_SEDOL:     'ID_SEDOL',
   TICKER:       'TICKER',
-  ID_WERTPAPIER:'ID_WERTPAPIER',
+  ID_WERTPAPIER: 'ID_WERTPAPIER',
   ID_COMMON:    'ID_COMMON',
   ID_BB_UNIQUE: 'ID_BB_UNIQUE',
 } as const;
@@ -75,8 +75,8 @@ export interface FigiInstrument {
   ticker?: string;
   exchCode?: string;
   compositeFIGI?: Figi;
-  securityType?: string;
-  marketSector?: string;
+  securityType?: FigiSecurityType | (string & {});
+  marketSector?: FigiMarketSector | (string & {});
   shareClassFIGI?: Figi;
   securityDescription?: string;
   uniqueID?: string;
@@ -87,5 +87,5 @@ export interface FigiMappingRequest {
   idValue: string;
   exchCode?: string;
   currency?: string;
-  marketSecDes?: string;
+  marketSecDes?: FigiMarketSector;
 }
