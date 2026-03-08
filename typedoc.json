@@ -36,6 +36,7 @@
     "src/managers/execution-saga.ts",
     "src/shared/lib/amqp-client.ts",
     "src/shared/lib/amqp-event-bridge.ts",
+    "src/shared/lib/openfigi-client.ts",
     "src/audit/audit-consumer.ts",
     "src/shared/db/snapshot-writer.ts",
     "src/shared/db/deal-writer.ts",
