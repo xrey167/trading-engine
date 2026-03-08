@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { Bar } from '../../../trading-engine.js';
+import { Bar } from '../../market-data/bar.js';
 
 // Unit 1 — Result
 import {

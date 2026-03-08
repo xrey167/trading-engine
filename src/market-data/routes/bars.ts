@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { Bar, Bars } from '../../../trading-engine.js';
+import { Bar } from '../bar.js';
+import { Bars } from '../bars.js';
 import { OkResponseSchema } from '../../shared/schemas/common.js';
 import {
   PostBarsBodySchema,

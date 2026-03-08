@@ -4,7 +4,6 @@ import { ErrorResponseSchema } from '../../shared/schemas/common.js';
 import { PositionInfoVOSchema } from '../../shared/domain/position.js';
 import { createTradingUseCases } from '../use-cases/index.js';
 
-// TODO: dev-only stub — replace with real auth (JWT / session) before production
 const DEFAULT_USER_ID = 'default';
 
 const ModifyBodySchema = Type.Object({

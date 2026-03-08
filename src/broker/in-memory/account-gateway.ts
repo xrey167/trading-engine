@@ -4,8 +4,8 @@ import type { DomainError } from '../../shared/lib/errors.js';
 import { notFound } from '../../shared/lib/errors.js';
 import type { AccountInfoVO, SymbolInfoVO, Tick } from '../../shared/domain/account.js';
 import type { IAccountGateway, IMarketDataGateway, IIndicatorGateway } from '../types.js';
-import { Bars } from '../../../trading-engine.js';
-import type { OHLC } from '../../../trading-engine.js';
+import { Bars } from '../../market-data/bars.js';
+import type { OHLC } from '../../market-data/ohlc.js';
 
 export class InMemoryAccountGateway implements IAccountGateway, IMarketDataGateway, IIndicatorGateway {
   private accountInfo: AccountInfoVO | null = null;

@@ -1,6 +1,7 @@
 import fp from 'fastify-plugin';
 import type { FastifyPluginAsync } from 'fastify';
-import { AtrModule, AtrMethod, BarsAtrMode, BarBase, type AtrModuleConfig } from '../../trading-engine.js';
+import { AtrModule, type AtrModuleConfig } from './core/atr-module.js';
+import { AtrMethod, BarsAtrMode, BarBase } from '../shared/domain/engine-enums.js';
 
 /**
  * AtrModule plugin — decorates fastify.atrModule with a live AtrModule instance.

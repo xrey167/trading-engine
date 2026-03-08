@@ -1,5 +1,5 @@
 // Forex session helpers — ported from quant-lib/domain
-import type { OHLC } from '../../../trading-engine.js';
+import type { OHLC } from '../../market-data/ohlc.js';
 
 export const ForexSession = {
   Sydney:  'SYDNEY',

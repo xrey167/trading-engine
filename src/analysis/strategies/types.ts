@@ -1,4 +1,4 @@
-import type { Bars } from '../../../trading-engine.js';
+import type { Bars } from '../../market-data/bars.js';
 
 // Signal results
 export const SignalResult = { BUY: 'BUY', SELL: 'SELL', HOLD: 'HOLD' } as const;

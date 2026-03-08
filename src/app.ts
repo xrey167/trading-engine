@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
 import websocket from '@fastify/websocket';
-import { SymbolInfoForex } from '../trading-engine.js';
+import { SymbolInfoForex } from './engine/core/symbol.js';
 import { PaperBroker } from './broker/paper/paper-broker.js';
 import { InMemoryBarCache } from './market-data/bar-cache.js';
 import { RedisBarCache } from './market-data/redis-bar-cache.js';
@@ -19,6 +19,7 @@ import { RedisEventBridge } from './shared/lib/redis-event-bridge.js';
 import type { BridgeableEvent } from './shared/lib/redis-event-bridge.js';
 import { createAmqpClient, closeAmqpClient } from './shared/lib/amqp-client.js';
 import { AmqpEventBridge } from './shared/lib/amqp-event-bridge.js';
+import { PostgresEventBridge } from './shared/lib/pg-event-bridge.js';
 import { AuditConsumer } from './audit/audit-consumer.js';
 import { createDatabase, OrderWriter } from './shared/db/index.js';
 import { TypedEventBus } from './shared/event-bus.js';
@@ -187,37 +188,42 @@ export async function buildApp(
   serviceRegistry.register(internalProvider);
 
   // 1c.3 Event bridges — cross-instance pub/sub
-  // When both REDIS_URL and RABBITMQ_URL are set, split events to prevent duplicate delivery:
-  //   AMQP  → order, risk (persistent, durable — reliability matters)
-  //   Redis → signal, normalized_bar (ephemeral, high-frequency — speed matters)
-  // When only one bridge is configured, it handles all events.
+  // PG bridge handles order/risk (durable, Postgres-native LISTEN/NOTIFY).
+  // Redis bridge handles signal/normalized_bar (ephemeral, high-frequency).
+  // AMQP bridge handles signal/normalized_bar only when RABBITMQ_URL is set (optional, legacy).
+  const PG_BRIDGE_EVENTS: readonly BridgeableEvent[] = ['order', 'risk'];
+  const REDIS_ONLY_EVENTS: readonly BridgeableEvent[] = ['signal', 'normalized_bar'];
   const ALL_BRIDGE_EVENTS: readonly BridgeableEvent[] = ['signal', 'order', 'risk', 'normalized_bar'];
-  const AMQP_EVENTS: readonly BridgeableEvent[] = ['order', 'risk'];
-  const REDIS_EVENTS: readonly BridgeableEvent[] = ['signal', 'normalized_bar'];
 
   let redisBridge: RedisEventBridge | undefined;
   let amqpBridge: AmqpEventBridge | undefined;
+  let pgBridge: PostgresEventBridge | undefined;
   const amqpClient = await createAmqpClient(logger);
+
+  if (database) {
+    pgBridge = new PostgresEventBridge(database.pool, emitter, PG_BRIDGE_EVENTS, logger);
+    await pgBridge.start();
+  }
 
   if (redis) {
     const pubClient = createRedisClient(logger, { url: process.env.REDIS_URL, lazyConnect: true });
     const subClient = createRedisClient(logger, { url: process.env.REDIS_URL, lazyConnect: true });
     if (pubClient && subClient) {
-      const redisEvents = amqpClient ? REDIS_EVENTS : ALL_BRIDGE_EVENTS;
+      const redisEvents = (amqpClient || pgBridge) ? REDIS_ONLY_EVENTS : ALL_BRIDGE_EVENTS;
       redisBridge = new RedisEventBridge(emitter, pubClient, subClient, redisEvents, logger);
       await redisBridge.start();
     }
   }
 
-  let auditConsumer: AuditConsumer | null = null;
   if (amqpClient) {
-    const amqpEvents = redisBridge ? AMQP_EVENTS : ALL_BRIDGE_EVENTS;
+    const amqpEvents = (redisBridge || pgBridge) ? REDIS_ONLY_EVENTS : ALL_BRIDGE_EVENTS;
     amqpBridge = new AmqpEventBridge(emitter, amqpClient.channel, amqpEvents, logger);
     await amqpBridge.start();
+  }
 
-    // Dedicated channel for audit consumer — channel failures are isolated per concern
-    const auditChannel = await amqpClient.connection.createConfirmChannel();
-    auditConsumer = new AuditConsumer(auditChannel, logger, { db: database?.db });
+  let auditConsumer: AuditConsumer | null = null;
+  if (database) {
+    auditConsumer = new AuditConsumer(database.pool, logger, { db: database.db });
     await auditConsumer.start();
   }
   app.decorate('auditConsumer', auditConsumer);
@@ -231,6 +237,7 @@ export async function buildApp(
     snapshotWriter.start(60_000, emitter);
   }
   app.decorate('snapshotWriter', snapshotWriter);
+  app.decorate('database', database?.db ?? null);
 
   // 1c.4 Manager services (risk → saga → order-manager)
   const riskManager = new RiskManagerService(
@@ -260,6 +267,7 @@ export async function buildApp(
 
   // 1d. Graceful shutdown — bridges first (prevent cross-instance propagation during teardown)
   app.addHook('onClose', async () => {
+    if (pgBridge) await pgBridge.stop();
     if (redisBridge) await redisBridge.stop();
     if (amqpBridge) await amqpBridge.stop();
     if (auditConsumer) await auditConsumer.stop();

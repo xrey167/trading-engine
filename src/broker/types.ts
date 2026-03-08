@@ -5,7 +5,8 @@ import type { AccountInfoVO, SymbolInfoVO, Tick } from '../shared/domain/account
 // TODO(architecture): Dependency inversion — gateway interfaces (ports) should not depend
 // on the engine implementation layer. Define an abstract IBars interface in domain/ or
 // gateways/ and have trading-engine.Bars implement it, so the dependency arrow points inward.
-import type { Bars, IBrokerAdapter } from '../../trading-engine.js';
+import type { Bars } from '../market-data/bars.js';
+import type { IBrokerAdapter } from '../engine/core/position.js';
 
 // IOrderGateway
 export interface PlaceOrderRequest {

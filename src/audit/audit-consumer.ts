@@ -1,4 +1,5 @@
-import type amqplib from 'amqplib';
+import pg from 'pg';
+import type { Pool } from 'pg';
 import type { Logger } from '../shared/lib/logger.js';
 import type { DrizzleDB } from '../shared/db/client.js';
 import { auditEvents } from '../shared/db/schema.js';
@@ -12,36 +13,27 @@ export interface AuditEntry {
   readonly receivedAt: string;
 }
 
-const EXCHANGE = 'te.events';
-const AUDIT_QUEUE = 'te.audit';
+const CHANNEL = 'te_events';
 const DEFAULT_BUFFER_SIZE = 1000;
 
-/**
- * Consumes ALL bridged events from a durable queue and stores them in a ring buffer
- * for query/replay. The queue survives broker restarts.
- */
 export class AuditConsumer {
   private readonly buffer: AuditEntry[] = [];
   private readonly maxSize: number;
   private nextId = 1;
-  private consumerTag: string | null = null;
+  private listenClient: pg.Client | null = null;
   private started = false;
 
   private readonly db: DrizzleDB | null;
+  private readonly pool: Pool;
+  private readonly logger: Logger;
 
   constructor(
-    channel: amqplib.ConfirmChannel,
+    pool: Pool,
     logger: Logger,
     opts?: { bufferSize?: number; db?: DrizzleDB },
-  );
-  /** @deprecated Use options object instead */
-  constructor(channel: amqplib.ConfirmChannel, logger: Logger, bufferSize?: number);
-  constructor(
-    private readonly channel: amqplib.ConfirmChannel,
-    private readonly logger: Logger,
-    optsOrSize?: number | { bufferSize?: number; db?: DrizzleDB },
   ) {
-    const opts = typeof optsOrSize === 'object' ? optsOrSize : { bufferSize: optsOrSize };
+    this.pool = pool;
+    this.logger = logger;
     this.maxSize = opts?.bufferSize ?? DEFAULT_BUFFER_SIZE;
     this.db = opts?.db ?? null;
   }
@@ -49,63 +41,40 @@ export class AuditConsumer {
   async start(): Promise<void> {
     if (this.started) return;
 
-    // Ensure exchange exists (idempotent)
-    await this.channel.assertExchange(EXCHANGE, 'topic', { durable: true });
+    await this.hydrate();
 
-    // Durable audit queue — survives broker restarts
-    await this.channel.assertQueue(AUDIT_QUEUE, { durable: true });
-    await this.channel.bindQueue(AUDIT_QUEUE, EXCHANGE, 'event.#');
+    this.listenClient = new pg.Client({ connectionString: process.env.DATABASE_URL });
+    await this.listenClient.connect();
+    await this.listenClient.query(`LISTEN ${CHANNEL}`);
 
-    await this.channel.prefetch(50);
+    this.listenClient.on('notification', (notification) => {
+      const rowId = notification.payload;
+      if (!rowId) return;
+      this.pool.query<{ id: number; type: string; payload: unknown; instance_id: string; created_at: Date }>(
+        'UPDATE event_queue SET processed_at = NOW() WHERE id = $1 AND processed_at IS NULL RETURNING id, type, payload, instance_id, created_at',
+        [rowId],
+      ).then((result) => {
+        if (result.rows.length === 0) return;
+        const row = result.rows[0];
+        const entry: AuditEntry = {
+          id: this.nextId++,
+          instanceId: row.instance_id,
+          type: row.type,
+          payload: row.payload,
+          timestamp: row.created_at.toISOString(),
+          receivedAt: new Date().toISOString(),
+        };
+        if (this.buffer.length >= this.maxSize) this.buffer.shift();
+        this.buffer.push(entry);
+        this.persistEntry(entry);
+      }).catch((err: Error) => {
+        this.logger.error(`Audit consumer NOTIFY handler error: ${err.message}`);
+      });
+    });
 
-    const { consumerTag } = await this.channel.consume(
-      AUDIT_QUEUE,
-      (msg) => {
-        if (!msg) return;
-        try {
-          const envelope = JSON.parse(msg.content.toString());
-          const entry: AuditEntry = {
-            id: this.nextId++,
-            instanceId: envelope.instanceId ?? 'unknown',
-            type: envelope.type ?? 'unknown',
-            payload: envelope.payload,
-            timestamp: envelope.timestamp ?? new Date().toISOString(),
-            receivedAt: new Date().toISOString(),
-          };
-
-          // Ring buffer: shift oldest when full
-          if (this.buffer.length >= this.maxSize) {
-            this.buffer.shift();
-          }
-          this.buffer.push(entry);
-
-          // Write-through to Postgres before acking (at-least-once delivery to DB)
-          void (async () => {
-            if (this.db) {
-              try {
-                const now = new Date();
-                await this.db.insert(auditEvents).values({
-                  instanceId: entry.instanceId,
-                  type: entry.type,
-                  payload: entry.payload as Record<string, unknown>,
-                  timestamp: new Date(entry.timestamp),
-                  receivedAt: now,
-                });
-              } catch (err) {
-                // Log and continue — ack still fires to prevent infinite requeue loops
-                this.logger.error(`Audit PG write error: ${(err as Error).message}`);
-              }
-            }
-            this.channel.ack(msg);
-          })();
-        } catch (err) {
-          this.channel.ack(msg); // ack bad messages to prevent redelivery loops
-          this.logger.error(`Audit consumer parse error: ${(err as Error).message}`);
-        }
-      },
-      { noAck: false },
-    );
-    this.consumerTag = consumerTag;
+    this.listenClient.on('error', (err) => {
+      this.logger.error(`Audit consumer listen client error: ${err.message}`);
+    });
 
     this.started = true;
     this.logger.info(`Audit consumer started (buffer=${this.maxSize})`);
@@ -114,9 +83,9 @@ export class AuditConsumer {
   async stop(): Promise<void> {
     if (!this.started) return;
 
-    if (this.consumerTag) {
-      try { await this.channel.cancel(this.consumerTag); } catch { /* already cancelled */ }
-      this.consumerTag = null;
+    if (this.listenClient) {
+      try { await this.listenClient.end(); } catch { /* already closed */ }
+      this.listenClient = null;
     }
 
     this.started = false;
@@ -124,7 +93,6 @@ export class AuditConsumer {
   }
 
   query(opts?: { type?: string; since?: string; limit?: number }): AuditEntry[] {
-    // Filter order: type → since → limit (most-recent N). Changing order alters results.
     let result = this.buffer;
 
     if (opts?.type) {
@@ -147,5 +115,49 @@ export class AuditConsumer {
 
   get size(): number {
     return this.buffer.length;
+  }
+
+  private async hydrate(): Promise<void> {
+    try {
+      const rows = await this.pool.query<{ id: number; type: string; payload: unknown; instance_id: string; created_at: Date }>(
+        'SELECT id, type, payload, instance_id, created_at FROM event_queue WHERE processed_at IS NOT NULL ORDER BY id DESC LIMIT $1',
+        [this.maxSize],
+      );
+      const reversed = rows.rows.reverse();
+      for (const row of reversed) {
+        const entry: AuditEntry = {
+          id: this.nextId++,
+          instanceId: row.instance_id,
+          type: row.type,
+          payload: row.payload,
+          timestamp: row.created_at.toISOString(),
+          receivedAt: row.created_at.toISOString(),
+        };
+        this.buffer.push(entry);
+      }
+      if (reversed.length > 0) {
+        this.logger.info(`Audit consumer hydrated ${reversed.length} events from event_queue`);
+      }
+    } catch (err) {
+      this.logger.error(`Audit consumer hydrate error: ${(err as Error).message}`);
+    }
+  }
+
+  private persistEntry(entry: AuditEntry): void {
+    const db = this.db;
+    if (!db) return;
+    void (async () => {
+      try {
+        await db.insert(auditEvents).values({
+          instanceId: entry.instanceId,
+          type: entry.type,
+          payload: entry.payload as Record<string, unknown>,
+          timestamp: new Date(entry.timestamp),
+          receivedAt: new Date(entry.receivedAt),
+        });
+      } catch (err) {
+        this.logger.error(`Audit PG write error: ${(err as Error).message}`);
+      }
+    })();
   }
 }

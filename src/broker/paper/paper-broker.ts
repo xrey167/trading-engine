@@ -1,7 +1,9 @@
 import type { TypedEventBus } from '../../shared/event-bus.js';
 import type { AppEventMap } from '../../shared/services/event-map.js';
-import type { IBrokerAdapter, ExecutionReport, Side } from '../../../trading-engine.js';
-import { Bars, type OHLC } from '../../../trading-engine.js';
+import type { IBrokerAdapter, ExecutionReport } from '../../engine/core/position.js';
+import type { Side } from '../../shared/domain/engine-enums.js';
+import { Bars } from '../../market-data/bars.js';
+import type { OHLC } from '../../market-data/ohlc.js';
 import type { PositionInfoVO, DealInfoVO, HistoryOrderInfoVO } from '../../shared/domain/position.js';
 import type { AccountInfoVO, SymbolInfoVO, Tick } from '../../shared/domain/account.js';
 import type {
@@ -47,6 +49,7 @@ export class PaperBroker implements IBrokerAdapter, IOrderGateway, IPositionGate
 
   // Gateway stores
   private positions: PositionInfoVO[] = [];
+  private positionMap = new Map<number, PositionInfoVO>();
   private deals: DealInfoVO[] = [];
   private historyOrders: HistoryOrderInfoVO[] = [];
   private symbols: Map<string, SymbolInfoVO> = new Map();
@@ -105,6 +108,7 @@ export class PaperBroker implements IBrokerAdapter, IOrderGateway, IPositionGate
 
   seedPosition(p: PositionInfoVO): void {
     this.positions.push(p);
+    this.positionMap.set(p.ticket, p);
   }
 
   seedAccount(a: AccountInfoVO): void {
@@ -125,25 +129,28 @@ export class PaperBroker implements IBrokerAdapter, IOrderGateway, IPositionGate
     return ok(this.positions.filter(p => p.userId === userId));
   }
 
-  // TODO: O(n) linear scan — replace with Map<ticket, PositionInfoVO> for production
   async getPositionByTicket(ticket: number, userId: string): Promise<Result<PositionInfoVO, DomainError>> {
-    const p = this.positions.find(pos => pos.ticket === ticket && pos.userId === userId);
-    if (!p) return err(notFound(`Position ${ticket} not found`, String(ticket)));
+    const p = this.positionMap.get(ticket);
+    if (!p || p.userId !== userId) return err(notFound(`Position ${ticket} not found`, String(ticket)));
     return ok(p);
   }
 
-  // TODO: O(n) linear scan — replace with Map<ticket, PositionInfoVO> for production
   async closePositionByTicket(ticket: number, _deviation: number, userId: string): Promise<Result<void, DomainError>> {
-    const idx = this.positions.findIndex(p => p.ticket === ticket && p.userId === userId);
-    if (idx === -1) return err(notFound(`Position ${ticket} not found`, String(ticket)));
-    this.positions.splice(idx, 1);
+    const p = this.positionMap.get(ticket);
+    if (!p || p.userId !== userId) return err(notFound(`Position ${ticket} not found`, String(ticket)));
+    this.positionMap.delete(ticket);
+    const idx = this.positions.findIndex(pos => pos.ticket === ticket);
+    if (idx !== -1) this.positions.splice(idx, 1);
     return ok(undefined);
   }
 
   async modifyPosition(ticket: number, sl: number, tp: number, userId: string): Promise<Result<void, DomainError>> {
-    const idx = this.positions.findIndex(pos => pos.ticket === ticket && pos.userId === userId);
-    if (idx === -1) return err(notFound(`Position ${ticket} not found`, String(ticket)));
-    this.positions[idx] = { ...this.positions[idx], stopLoss: sl, takeProfit: tp };
+    const p = this.positionMap.get(ticket);
+    if (!p || p.userId !== userId) return err(notFound(`Position ${ticket} not found`, String(ticket)));
+    const updated = { ...p, stopLoss: sl, takeProfit: tp };
+    this.positionMap.set(ticket, updated);
+    const idx = this.positions.findIndex(pos => pos.ticket === ticket);
+    if (idx !== -1) this.positions[idx] = updated;
     return ok(undefined);
   }
 

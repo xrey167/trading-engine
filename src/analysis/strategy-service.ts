@@ -7,6 +7,7 @@ import type { IBarCache } from '../market-data/data-provider-types.js';
 import type { ISignalStrategy, ISignalContext } from './strategies/types.js';
 import { SignalResult, RunMode } from './strategies/types.js';
 import { createStrategy } from './strategies/strategy-factory.js';
+import { Bars } from '../market-data/bars.js';
 
 export interface StrategyServiceConfig {
   readonly id: string;
@@ -53,8 +54,6 @@ export class StrategyService extends BaseService {
   private handleNormalizedBar = async (event: AppEventMap['normalized_bar']): Promise<void> => {
     if (event.symbol !== this.config.symbol || event.timeframe !== this.config.timeframe) return;
     try {
-      const { Bars } = await import('../../trading-engine.js');
-
       // Build Bars from cache history when available, otherwise single bar.
       // Bars expects index 0 = most recent, so reverse the cache (oldest→newest → newest→oldest).
       const singleBarOhlc = [{

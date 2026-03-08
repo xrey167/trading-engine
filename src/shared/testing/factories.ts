@@ -1,4 +1,5 @@
-import { Bars, type OHLC } from '../../../trading-engine.js';
+import { Bars } from '../../market-data/bars.js';
+import type { OHLC } from '../../market-data/ohlc.js';
 
 export interface TestBar {
   open: number;

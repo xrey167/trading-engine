@@ -1,12 +1,10 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import type { FastifyPluginAsync } from 'fastify';
 import { Type } from '@sinclair/typebox';
-import { Side } from '../../../trading-engine.js';
+import { Side } from '../../shared/domain/engine-enums.js';
 import { ErrorResponseSchema } from '../../shared/schemas/common.js';
 import { desc, count } from 'drizzle-orm';
-import { createDatabase } from '../../shared/db/client.js';
 import { orderEvents } from '../../shared/db/schema.js';
-import { toLogger } from '../../shared/lib/logger.js';
 import {
   OpenBBPositionRowSchema,
   OpenBBMetricSchema,
@@ -237,26 +235,8 @@ const SymbolQuerySchema = Type.Object({
 
 // ─── Plugin ──────────────────────────────────────────────────────────────────
 
-// Module-level DB singleton — resolved once at plugin registration time.
-// null when DATABASE_URL is not set; routes that need it return 503.
-let _dbConn: ReturnType<typeof createDatabase> | undefined;
-function getDb(fastify: Parameters<FastifyPluginAsync>[0]) {
-  if (_dbConn === undefined) {
-    _dbConn = createDatabase(toLogger(fastify.log));
-  }
-  return _dbConn;
-}
-
 // NOT fp()-wrapped — hooks and routes are scoped to this child only.
 const openbbRoute: FastifyPluginAsync = async (fastify) => {
-  // Close the module-level singleton pool when this plugin is torn down.
-  // Reset to undefined so repeated buildApp()/app.close() cycles reinitialize cleanly.
-  fastify.addHook('onClose', async () => {
-    if (_dbConn) {
-      await _dbConn.pool.end();
-    }
-    _dbConn = undefined;
-  });
 
   // Optional API-key guard — only activated when OPENBB_API_KEY env var is set.
   const API_KEY = process.env.OPENBB_API_KEY;
@@ -471,8 +451,8 @@ const openbbRoute: FastifyPluginAsync = async (fastify) => {
     },
   }, async (req, reply) => {
     reply.header('Cache-Control', 'private, max-age=5');
-    const conn = getDb(fastify);
-    if (!conn) {
+    const db = fastify.database;
+    if (!db) {
       return reply.status(503).send({
         error: 'Service Unavailable',
         message: 'Order history requires DATABASE_URL',
@@ -486,13 +466,13 @@ const openbbRoute: FastifyPluginAsync = async (fastify) => {
     const limit = Math.min(end - start, 1000);
 
     const [rows, totalResult] = await Promise.all([
-      conn.db
+      db
         .select()
         .from(orderEvents)
         .orderBy(desc(orderEvents.createdAt))
         .limit(limit)
         .offset(start),
-      conn.db
+      db
         .select({ total: count() })
         .from(orderEvents),
     ]);

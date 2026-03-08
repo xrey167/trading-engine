@@ -73,3 +73,12 @@ export const orderEvents = pgTable('order_events', {
 ]);
 
 export type OrderEventRow = typeof orderEvents.$inferInsert;
+
+export const eventQueue = pgTable('event_queue', {
+  id:          serial('id').primaryKey(),
+  type:        text('type').notNull(),
+  payload:     jsonb('payload').notNull(),
+  instanceId:  text('instance_id').notNull(),
+  createdAt:   timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  processedAt: timestamp('processed_at', { withTimezone: true }),
+});

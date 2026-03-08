@@ -4,6 +4,7 @@ export * from './position.js';
 export * from './account.js';
 export * from './enums.js';
 export * from './ea-enums.js';
+export * from './engine-enums.js';
 export * from './tick.js';
 export * from './trade-state.js';
 export * from './history.js';

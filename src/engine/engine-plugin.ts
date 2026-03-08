@@ -1,6 +1,7 @@
 import fp from 'fastify-plugin';
 import type { FastifyPluginAsync } from 'fastify';
-import { TradingEngine, type SymbolInfoBase } from '../../trading-engine.js';
+import { TradingEngine } from './core/trading-engine.js';
+import type { SymbolInfoBase } from './core/symbol.js';
 import type { IFullBrokerAdapter } from '../broker/types.js';
 import { Mutex } from '../shared/lib/mutex.js';
 import '../shared/types/index.js';

@@ -1,5 +1,6 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { OrderEntryType } from '../domain/enums.js';
+import { BarBase, OrderAttr, LimitConfirm } from '../domain/engine-enums.js';
 
 // ─────────────────────────────────────────────────────────────
 // Enum literal unions  (as const maps → TypeBox literals)
@@ -35,29 +36,29 @@ export const BarsAtrModeSchema = Type.Union([
 ]);
 
 export const BarBaseSchema = Type.Union([
-  Type.Literal('BASE_HILO'),
-  Type.Literal('BASE_OPENCLOSE'),
+  Type.Literal(BarBase.HiLo),
+  Type.Literal(BarBase.OpenClose),
 ]);
 
 // Named order attributes — combinable flags that modify fill behaviour.
 export const OrderAttrSchema = Type.Union([
-  Type.Literal('ORDER_ATTR_OCO'),   // One Cancels Other — fill cancels all other pending orders
-  Type.Literal('ORDER_ATTR_CO'),    // Cancel Others on fill — cancel same-side pending orders
-  Type.Literal('ORDER_ATTR_CS'),    // Cancel on Side — cancel all orders on same side when filled
-  Type.Literal('ORDER_ATTR_REV'),   // Reverse — close current position and open opposite of same size
-  Type.Literal('ORDER_ATTR_NET'),   // Net — reduce opposite position by the fill size
-  Type.Literal('ORDER_ATTR_SLTP'),  // Transfer SL/TP — copy SL/TP levels to the filled position
-  Type.Literal('ORDER_ATTR_ROL'),   // Reverse On Loss — reverse position if closed at a loss
-  Type.Literal('ORDER_ATTR_ROP'),   // Reverse On Profit — reverse position if closed at a profit
-  Type.Literal('ORDER_ATTR_MIT'),   // Market If Touched — convert to market order when price is touched
-  Type.Literal('ORDER_ATTR_FC'),    // Fill or Cancel — cancel order if not filled immediately
+  Type.Literal(OrderAttr.OCO),
+  Type.Literal(OrderAttr.CO),
+  Type.Literal(OrderAttr.CS),
+  Type.Literal(OrderAttr.REV),
+  Type.Literal(OrderAttr.NET),
+  Type.Literal(OrderAttr.SLTP),
+  Type.Literal(OrderAttr.ROL),
+  Type.Literal(OrderAttr.ROP),
+  Type.Literal(OrderAttr.MIT),
+  Type.Literal(OrderAttr.FC),
 ]);
 
 export const LimitConfirmSchema = Type.Union([
-  Type.Literal('LIMIT_CONFIRM_NONE'),
-  Type.Literal('LIMIT_CONFIRM_WICK'),
-  Type.Literal('LIMIT_CONFIRM_WICKBREAK'),
-  Type.Literal('LIMIT_CONFIRM_WICKCOLOR'),
+  Type.Literal(LimitConfirm.None),
+  Type.Literal(LimitConfirm.Wick),
+  Type.Literal(LimitConfirm.WickBreak),
+  Type.Literal(LimitConfirm.WickColor),
 ]);
 
 export const OrderEntryTypeSchema = Type.Union([

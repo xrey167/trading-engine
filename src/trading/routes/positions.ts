@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { Side } from '../../../trading-engine.js';
+import { Side } from '../../shared/domain/engine-enums.js';
 import { Type } from '@sinclair/typebox';
 import { ErrorResponseSchema, OkResponseSchema } from '../../shared/schemas/common.js';
 import {

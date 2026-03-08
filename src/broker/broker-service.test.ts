@@ -4,7 +4,10 @@ import type { AppEventMap } from '../shared/services/event-map.js';
 import { ServiceStatus, ServiceKind } from '../shared/services/types.js';
 import { BrokerService } from './broker-service.js';
 import { PaperBroker } from './paper/paper-broker.js';
-import { SymbolInfoForex, TradingEngine, Bar, Bars, } from '../../trading-engine.js';
+import { SymbolInfoForex } from '../engine/core/symbol.js';
+import { TradingEngine } from '../engine/core/trading-engine.js';
+import { Bar } from '../market-data/bar.js';
+import { Bars } from '../market-data/bars.js';
 import { nullLogger } from '../shared/lib/logger.js';
 
 function makeBrokerService(id = 'broker:paper:test') {

@@ -9,7 +9,7 @@ import { ExecutionSaga } from './execution-saga.js';
 import { OrderManagerService } from './order-manager.js';
 import { nullLogger } from '../shared/lib/logger.js';
 import { PaperBroker } from '../broker/paper/paper-broker.js';
-import { SymbolInfo } from '../../trading-engine.js';
+import { SymbolInfoForex as SymbolInfo } from '../engine/core/symbol.js';
 
 const testSymbol = new SymbolInfo('EURUSD', 5);
 

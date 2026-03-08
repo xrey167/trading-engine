@@ -13,6 +13,7 @@ import { ServiceKind } from '../shared/services/types.js';
 import { StrategyService } from '../analysis/strategy-service.js';
 import { ScreenerService } from '../analysis/screener-service.js';
 import { RiskManagerService } from '../managers/risk-manager.js';
+import { Bars } from '../market-data/bars.js';
 
 const serviceRoutes: FastifyPluginAsync = async (fastify) => {
   const { serviceRegistry } = fastify;
@@ -151,7 +152,6 @@ const serviceRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.status(400).send({ error: `Service '${request.params.id}' is not a strategy` });
     }
     // Minimal context for on-demand evaluation
-    const { Bars } = await import('../../trading-engine.js');
     const context = {
       isNewBar: true,
       runMode: 'LIVE' as const,

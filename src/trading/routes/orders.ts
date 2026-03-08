@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { Type } from '@sinclair/typebox';
-import type { TrailMode } from '../../../trading-engine.js';
+import type { TrailMode } from '../../shared/domain/engine-enums.js';
 import { ErrorResponseSchema, OkResponseSchema } from '../../shared/schemas/common.js';
 import {
   PendingOrderSchema,

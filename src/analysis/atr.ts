@@ -1,5 +1,5 @@
-import type { Bars } from '../../trading-engine.js';
-import { BarsAtrMode, BarBase } from '../../trading-engine.js';
+import type { Bars } from '../market-data/bars.js';
+import { BarsAtrMode, BarBase } from '../shared/domain/engine-enums.js';
 import type { Result } from '../shared/lib/result.js';
 import type { DomainError } from '../shared/lib/errors.js';
 import { ok, err } from '../shared/lib/result.js';

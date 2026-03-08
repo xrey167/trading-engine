@@ -4,7 +4,7 @@ import type { Result } from '../../shared/lib/result.js';
 import type { DomainError } from '../../shared/lib/errors.js';
 import { ok, err } from '../../shared/lib/result.js';
 import { insufficientData } from '../../shared/lib/errors.js';
-import type { Bars } from '../../../trading-engine.js';
+import type { Bars } from '../../market-data/bars.js';
 
 export interface IBarFetcher {
   getBars(symbol: string, timeframe: string): Promise<Result<Bars, DomainError>>;

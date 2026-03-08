@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { Type } from '@sinclair/typebox';
 import { OHLCSchema, ErrorResponseSchema } from '../../shared/schemas/common.js';
-import { Bars } from '../../../trading-engine.js';
+import { Bars } from '../../market-data/bars.js';
 import { RunSignalUseCase } from '../use-cases/run-signal.js';
 import { RunMode } from '../strategies/types.js';
 import { flatPositionState, parseBars } from '../helpers.js';
