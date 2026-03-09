@@ -24,7 +24,7 @@ import { PositionInfoVOSchema, Position, PositionVOFactory, PositionType } from 
 import { Deal, DealInfoVOFactory } from './deal/deal.js';
 import { DealType, DealEntry } from './history/history.js';
 import { AccountInfoVOSchema } from './account/account.js';
-import { SymbolInfoVOSchema, TickSchema } from './symbol/symbol.js';;
+import { SymbolInfoVOSchema, TickSchema, SymbolInfoVOFactory } from './symbol/symbol.js';
 import { MoneyManagementFactoryConfigSchema } from '../../trading/money-management/types.js';
 
 // ─────────────────────────────────────────────────────────────
@@ -484,6 +484,19 @@ describe('SymbolInfoVOSchema', () => {
       currencyMargin: '',
     };
     expect(Value.Check(SymbolInfoVOSchema, invalid)).toBe(false);
+  });
+
+  it('SymbolInfoVOFactory.make defaults to Forex assetType and passes schema', () => {
+    const vo = SymbolInfoVOFactory.make({ name: 'EURUSD' });
+    expect(vo.assetType).toBe('FOREX');
+    expect(vo.name).toBe('EURUSD');
+    expect(Value.Check(SymbolInfoVOSchema, vo)).toBe(true);
+  });
+
+  it('SymbolInfoVOFactory.make applies overrides', () => {
+    const vo = SymbolInfoVOFactory.make({ name: 'BTCUSD', assetType: 'CRYPTO' });
+    expect(vo.assetType).toBe('CRYPTO');
+    expect(vo.name).toBe('BTCUSD');
   });
 });
 
