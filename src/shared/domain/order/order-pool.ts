@@ -37,16 +37,18 @@ export const hasTpMatcher = <T extends OrderBase>(o: T): boolean => o.hasTakePro
  * Replaces scattered `.filter()` / `.find()` / `.some()` chains with
  * named, composable operations using `OrderMatcher` predicates.
  *
- * Equivalent to MQL4's `OrderPoolMatcher` + `OrderPoolIter`, collapsed
- * into a single class because TypeScript arrays don't require the global
- * `OrderSelect()` ceremony.
+ * Equivalent to MQL4's `OrderPoolMatcher` + `OrderPoolIter` + `OrderGroup`
+ * aggregates, collapsed into a single class because TypeScript arrays don't
+ * require the global `OrderSelect()` ceremony.
  *
  * @example
  * const pool = new OrderPool(engine.getOrders());
- * pool.count(buyMatcher);          // number of buy orders
- * pool.filter(hasSlMatcher);       // sub-pool with SL set
- * pool.find(o => o.id === id);     // lookup by id
- * for (const o of pool) { ... }   // foreachorder equivalent
+ * pool.count(buyMatcher);                            // number of buy orders
+ * pool.filter(hasSlMatcher);                         // sub-pool with SL set
+ * pool.find(o => o.id === id);                       // lookup by id
+ * for (const o of pool) { ... }                     // foreachorder equivalent
+ * pool.reduce((n, o) => n + o.size, 0);             // total lots (groupLots)
+ * pool.map(o => o.size * o.price);                  // lot-price products (for VWAP)
  */
 export class OrderPool<T extends OrderBase> {
   constructor(private readonly orders: readonly T[]) {}
@@ -105,11 +107,38 @@ export class OrderPool<T extends OrderBase> {
     return this.orders[Symbol.iterator]();
   }
 
-  // ── Escape hatch ──────────────────────────────────────────
+  // ── Aggregation ───────────────────────────────────────────
 
   /**
-   * Raw readonly array — for serialization, engine internals,
-   * or places that need `.map()` / `.reduce()`.
+   * Project each order to a value.
+   * Equivalent to MQL4's `OrderGroup` property accessors (groupLots, groupProfit…).
+   *
+   * @example
+   * pool.map(o => o.size)                 // lot sizes
+   * pool.map(o => o.size * o.price)       // lot-price products (VWAP numerator)
    */
+  map<R>(fn: (order: T) => R): R[] {
+    return this.orders.map(fn);
+  }
+
+  /**
+   * Fold the pool into a single value.
+   *
+   * @example
+   * // total lots (MQL4's groupLots)
+   * pool.reduce((n, o) => n + o.size, 0)
+   *
+   * // volume-weighted average price (MQL4's groupAvg)
+   * const lots  = pool.reduce((n, o) => n + o.size, 0);
+   * const value = pool.reduce((n, o) => n + o.size * o.price, 0);
+   * const vwap  = lots > 0 ? value / lots : 0;
+   */
+  reduce<R>(fn: (acc: R, order: T) => R, initial: R): R {
+    return this.orders.reduce(fn, initial);
+  }
+
+  // ── Escape hatch ──────────────────────────────────────────
+
+  /** Raw readonly array — for serialization or engine internals. */
   toArray(): readonly T[] { return this.orders; }
 }
