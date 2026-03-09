@@ -434,6 +434,60 @@ describe('Position', () => {
 });
 
 // ─────────────────────────────────────────────────────────────
+// SymbolInfoVOSchema validation
+// ─────────────────────────────────────────────────────────────
+
+describe('SymbolInfoVOSchema', () => {
+  it('validates a valid symbol object', () => {
+    const valid = {
+      name:           'EURUSD',
+      description:    'Euro vs US Dollar',
+      assetType:      'FOREX' as const,
+      digits:         5,
+      point:          0.00001,
+      tickSize:       0.00001,
+      tickValue:      1,
+      spread:         10,
+      spreadFloat:    true,
+      lotsMin:        0.01,
+      lotsMax:        100,
+      lotsStep:       0.01,
+      contractSize:   100_000,
+      bid:            1.10000,
+      ask:            1.10010,
+      currencyBase:   'EUR',
+      currencyProfit: 'USD',
+      currencyMargin: 'EUR',
+    };
+    expect(Value.Check(SymbolInfoVOSchema, valid)).toBe(true);
+  });
+
+  it('rejects invalid assetType', () => {
+    const invalid = {
+      name:           'EURUSD',
+      description:    '',
+      assetType:      'INVALID',
+      digits:         5,
+      point:          0.00001,
+      tickSize:       0.00001,
+      tickValue:      1,
+      spread:         0,
+      spreadFloat:    true,
+      lotsMin:        0.01,
+      lotsMax:        100,
+      lotsStep:       0.01,
+      contractSize:   100_000,
+      bid:            0,
+      ask:            0,
+      currencyBase:   '',
+      currencyProfit: '',
+      currencyMargin: '',
+    };
+    expect(Value.Check(SymbolInfoVOSchema, invalid)).toBe(false);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
 // TypeBox schema re-exports from schemas/index.ts
 // ─────────────────────────────────────────────────────────────
 
