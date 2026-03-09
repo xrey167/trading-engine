@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { Type } from '@sinclair/typebox';
-import type { TrailMode } from '../../shared/domain/engine-enums.js';
+import { buyMatcher, sellMatcher, type TrailMode } from '../../shared/domain/engine-enums.js';
 import { ErrorResponseSchema, OkResponseSchema } from '../../shared/schemas/common.js';
 import {
   PendingOrderSchema,
@@ -246,9 +246,9 @@ const ordersRoute: FastifyPluginAsync = async (fastify) => {
       const { side } = req.query as { side: string };
       const pool = fastify.engine.getOrderPool();
       const toCancel = side === 'buy'
-        ? pool.filter(o => o.isBuy()).toArray()
+        ? pool.filter(buyMatcher).toArray()
         : side === 'sell'
-          ? pool.filter(o => o.isSell()).toArray()
+          ? pool.filter(sellMatcher).toArray()
           : pool.toArray();
       switch (side) {
         case 'buy':  await fastify.engine.deleteBuyOrders();  break;

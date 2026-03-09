@@ -63,7 +63,10 @@ export class OrderPool<T extends OrderBase> {
    * Without a matcher, returns the total pool size.
    */
   count(matcher?: OrderMatcher<T>): number {
-    return matcher ? this.orders.filter(matcher).length : this.orders.length;
+    if (!matcher) return this.orders.length;
+    let n = 0;
+    for (const o of this.orders) if (matcher(o)) n++;
+    return n;
   }
 
   /** Return the first order satisfying `matcher`, or `undefined`. */
@@ -99,7 +102,7 @@ export class OrderPool<T extends OrderBase> {
    * for (const order of pool.filter(buyMatcher)) { ... }
    */
   [Symbol.iterator](): Iterator<T> {
-    return (this.orders as T[])[Symbol.iterator]();
+    return this.orders[Symbol.iterator]();
   }
 
   // ── Escape hatch ──────────────────────────────────────────
