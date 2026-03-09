@@ -226,6 +226,10 @@ export interface SymbolConfig {
   isin:           string;
   page:           string;
   path:           string;
+  /** Symbol used to convert margin currency to account currency (e.g. 'USDCHF'). */
+  marginConvert:  string;
+  /** Symbol used to convert profit currency to account currency (e.g. 'EURUSD'). */
+  profitConvert:  string;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -327,6 +331,8 @@ export abstract class SymbolInfoBase {
   readonly isin:           string;
   readonly page:           string;
   readonly path:           string;
+  readonly marginConvert:  string;
+  readonly profitConvert:  string;
 
   constructor(
     public readonly name:   string,
@@ -428,6 +434,8 @@ export abstract class SymbolInfoBase {
     this.isin           = config.isin           ?? '';
     this.page           = config.page           ?? '';
     this.path           = config.path           ?? '';
+    this.marginConvert  = config.marginConvert  ?? '';
+    this.profitConvert  = config.profitConvert  ?? '';
   }
 
   priceToPoints(price: number):  number { return price / this.pointSize; }
@@ -492,6 +500,15 @@ export abstract class SymbolInfoBase {
 
   /** Whether the broker allows close-by operations for this symbol. */
   isCloseByAllowed(): boolean { return this.closeByAllowed; }
+
+  /**
+   * Returns true when neither base nor profit currency equals the account currency,
+   * i.e. this is a cross pair that requires two conversion steps to reach account CCY.
+   * Example: EURGBP is a cross for a USD account; EURUSD and GBPUSD are not.
+   */
+  isCross(accountCurrency: string): boolean {
+    return this.currencyBase !== accountCurrency && this.currencyProfit !== accountCurrency;
+  }
 
   // ── Margin calculation (ENUM_SYMBOL_CALC_MODE) ───────────────────────────
 

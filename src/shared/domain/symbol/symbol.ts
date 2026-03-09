@@ -3,6 +3,7 @@ import { AssetType } from './symbol-info.js';
 
 // Re-export everything so all existing `symbol/symbol.js` importers keep working.
 export * from './symbol-info.js';
+export * from './symbol-service.js';
 
 // ─────────────────────────────────────────────────────────────
 // SymbolInfoVO — serialization / API boundary
