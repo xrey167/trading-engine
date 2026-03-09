@@ -1,4 +1,4 @@
-import { Side, TrailMode, LimitConfirm } from '../../shared/domain/engine-enums.js';
+import { Side, TrailMode, LimitConfirm, OrderPool, buyMatcher, sellMatcher } from '../../shared/domain/engine-enums.js';
 import { Bar } from '../../shared/domain/bar/bar.js';
 import type { Bars } from '../../shared/domain/bar/bars.js';
 import type { SymbolInfoBase } from './symbol.js';
@@ -492,10 +492,12 @@ export class TradingEngine {
   getCntPosBuy():     number  { return this.longPos.size  > 0 ? 1 : 0; }
   getCntPosSell():    number  { return this.shortPos.size > 0 ? 1 : 0; }
   getCntPos():        number  { return this.getCntPosBuy() + this.getCntPosSell(); }
-  getCntOrdersBuy():  number  { return this.orders.filter(o => o.side === Side.Long).length;  }
-  getCntOrdersSell(): number  { return this.orders.filter(o => o.side === Side.Short).length; }
+  getCntOrdersBuy():  number  { return this.orders.filter(buyMatcher).length;  }
+  getCntOrdersSell(): number  { return this.orders.filter(sellMatcher).length; }
   getCntOrders():     number  { return this.orders.length; }
   getOrders(): readonly Order[] { return this.orders; }
+  /** Composable query view over the pending order book. */
+  getOrderPool(): OrderPool<Order> { return new OrderPool(this.orders); }
   isLong():           boolean { return this.longPos.size  > 0; }
   isShort():          boolean { return this.shortPos.size > 0; }
   isFlat(inclOrders = false): boolean {

@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { Type } from '@sinclair/typebox';
-import type { TrailMode } from '../../shared/domain/engine-enums.js';
+import { buyMatcher, sellMatcher, type TrailMode } from '../../shared/domain/engine-enums.js';
 import { ErrorResponseSchema, OkResponseSchema } from '../../shared/schemas/common.js';
 import {
   PendingOrderSchema,
@@ -219,7 +219,7 @@ const ordersRoute: FastifyPluginAsync = async (fastify) => {
         source:    'http',
         brokerId:  'paper',
         symbol:    fastify.symbol.name,
-        direction: (existing?.side ?? 0) > 0 ? 'BUY' : 'SELL',
+        direction: existing?.isBuy() ? 'BUY' : 'SELL',
         lots:      existing?.size ?? 0,
         price:     req.body.price,
         metadata:  {},
@@ -244,12 +244,12 @@ const ordersRoute: FastifyPluginAsync = async (fastify) => {
     const release = await fastify.engineMutex.acquire();
     try {
       const { side } = req.query as { side: string };
-      const allOrders = fastify.engine.getOrders();
+      const pool = fastify.engine.getOrderPool();
       const toCancel = side === 'buy'
-        ? allOrders.filter(o => o.side > 0)
+        ? pool.filter(buyMatcher).toArray()
         : side === 'sell'
-          ? allOrders.filter(o => o.side < 0)
-          : allOrders;
+          ? pool.filter(sellMatcher).toArray()
+          : pool.toArray();
       switch (side) {
         case 'buy':  await fastify.engine.deleteBuyOrders();  break;
         case 'sell': await fastify.engine.deleteSellOrders(); break;
@@ -266,7 +266,7 @@ const ordersRoute: FastifyPluginAsync = async (fastify) => {
           source:    'http',
           brokerId:  'paper',
           symbol:    fastify.symbol.name,
-          direction: o.side > 0 ? 'BUY' : 'SELL',
+          direction: o.isBuy() ? 'BUY' : 'SELL',
           lots:      o.size,
           price:     o.price,
           metadata:  {},
@@ -302,7 +302,7 @@ const ordersRoute: FastifyPluginAsync = async (fastify) => {
         source:    'http',
         brokerId:  'paper',
         symbol:    fastify.symbol.name,
-        direction: (existing?.side ?? 0) > 0 ? 'BUY' : 'SELL',
+        direction: existing?.isBuy() ? 'BUY' : 'SELL',
         lots:      existing?.size ?? 0,
         price:     existing?.price ?? 0,
         metadata:  {},
