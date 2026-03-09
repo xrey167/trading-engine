@@ -146,7 +146,7 @@ export class Position {
       magic:          this.magic,
       identifier:     this.identifier,
       time:           this.time.toISOString(),
-      timeUpdate:     this.timeUpdate?.toISOString(),
+      ...(this.timeUpdate ? { timeUpdate: this.timeUpdate.toISOString() } : {}),
       priceOpen:      this.priceOpen,
       priceCurrent:   this.priceCurrent,
       stopLoss:       this.stopLoss,

@@ -128,6 +128,7 @@ describe('PositionInfoVOSchema', () => {
     const invalid = {
       ticket: 1,
       userId: 'u',
+      brokerId: '',
       symbol: 'X',
       type: 'INVALID',
       magic: 0,
@@ -397,8 +398,10 @@ describe('Position', () => {
   it('isBreakeven sell: open >= SL', () => {
     const be    = Position.fromVO({ ...base, type: 'SELL', priceOpen: 1.1, stopLoss: 1.1  });
     const notBe = Position.fromVO({ ...base, type: 'SELL', priceOpen: 1.1, stopLoss: 1.11 });
+    const noSl  = Position.fromVO({ ...base, type: 'SELL', priceOpen: 1.1, stopLoss: 0    });
     expect(be.isBreakeven()).toBe(true);
     expect(notBe.isBreakeven()).toBe(false);
+    expect(noSl.isBreakeven()).toBe(false);
   });
 
   it('netProfit sums signed fields', () => {
