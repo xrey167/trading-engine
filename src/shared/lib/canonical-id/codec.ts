@@ -14,15 +14,15 @@
  *               (symbolCode / strategyId are NOT encoded — sidecar only)
  */
 
-import { ok, err, type Result } from './result.js';
-import { invalidInput } from './errors.js';
-import type { CanonicalIdRegistry } from './canonical-id-registry.js';
+import { ok, err, type Result } from '../result.js';
+import { invalidInput } from '../errors.js';
+import type { CanonicalIdRegistry } from './registry.js';
 import { base62Encode, base62Decode } from './base62.js';
 
 // Branded opaque type — raw string is not assignable to CanonicalId
 export type CanonicalId = string & { readonly __brand: 'CanonicalId' };
 
-// Module-level Snowflake counter (hardened in Task 4)
+// Module-level Snowflake counter
 let _nodeId = (parseInt(process.env['INSTANCE_ID'] ?? '0', 10) || 0) & 0xff;
 let _seq    = 0;
 let _lastMs = 0;

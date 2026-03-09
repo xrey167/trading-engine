@@ -1,7 +1,7 @@
 import type { EngineEventMap } from '../event-bus.js';
 import type { OHLCBody } from '../schemas/common.js';
 import type { ServiceStatus } from './types.js';
-import type { CanonicalId } from '../lib/canonical-id.js';
+import type { CanonicalId } from '../lib/canonical-id/index.js';
 
 export interface SignalEvent {
   readonly serviceId: string;

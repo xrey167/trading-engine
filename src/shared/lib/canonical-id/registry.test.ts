@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { CanonicalIdRegistry, NO_STRATEGY } from './canonical-id-registry.js';
+import { CanonicalIdRegistry, NO_STRATEGY } from './registry.js';
 
 describe('CanonicalIdRegistry', () => {
   let reg: CanonicalIdRegistry;

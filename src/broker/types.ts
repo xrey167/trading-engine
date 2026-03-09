@@ -86,7 +86,7 @@ export interface IFullBrokerAdapter extends IBrokerAdapter, IOrderGateway, IPosi
   /** Native ticket width for this broker: 32-bit (MT5, paper) or 64-bit (IB, etc.). */
   readonly idWidth: 32 | 64;
   /** Broker slot identifier used in canonical ID encoding. */
-  readonly brokerSlot: import('../shared/lib/canonical-id.js').BrokerSlot;
+  readonly brokerSlot: import('../shared/lib/canonical-id/index.js').BrokerSlot;
   connect(): Promise<void>;
   disconnect(): Promise<void>;
   isConnected(): boolean;
