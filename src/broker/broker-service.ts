@@ -100,6 +100,14 @@ export class BrokerService extends BaseService {
     return ok(this._enrichPosition(r.value));
   }
 
+  async closePositionByTicket(ticket: number, deviation: number, userId: string) {
+    return this.broker.closePositionByTicket(ticket, deviation, userId);
+  }
+
+  async modifyPosition(ticket: number, sl: number, tp: number, userId: string) {
+    return this.broker.modifyPosition(ticket, sl, tp, userId);
+  }
+
   async getDeals(userId: string, from: Date, to: Date): Promise<Result<DealInfoVO[], DomainError>> {
     const r = await this.broker.getDeals(userId, from, to);
     if (!r.ok) return r;

@@ -12,7 +12,7 @@ const ModifyBodySchema = Type.Object({
 });
 
 const v1PositionsRoute: FastifyPluginAsync = async (fastify) => {
-  const useCases = createTradingUseCases(fastify.broker, fastify.log);
+  const useCases = createTradingUseCases(fastify.broker, fastify.brokerService, fastify.log);
 
   // GET /v1/positions — list all open positions
   fastify.get('/v1/positions', {

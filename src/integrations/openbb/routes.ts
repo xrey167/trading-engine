@@ -379,7 +379,7 @@ const openbbRoute: FastifyPluginAsync = async (fastify) => {
       return reply.status(400).send({ error: 'Invalid "to" date' });
     if (fromDate > toDate)
       return reply.status(400).send({ error: '"from" must be before "to"' });
-    const result = await fastify.broker.getDeals('default', fromDate, toDate);
+    const result = await fastify.brokerService.getDeals('default', fromDate, toDate);
     if (!result.ok) return reply.status(500).send({ error: result.error.message });
     const deals = result.value.map(d => ({
       ticket:     d.ticket,
