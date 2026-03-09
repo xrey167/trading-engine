@@ -1,4 +1,5 @@
 import { Type, type Static } from '@sinclair/typebox';
+import type { CanonicalId } from '../../lib/canonical-id/index.js';
 
 export const PositionType = { BUY: 'BUY', SELL: 'SELL' } as const;
 export type PositionType = (typeof PositionType)[keyof typeof PositionType];
@@ -86,6 +87,7 @@ export class Position {
     public readonly comment:        string,
     public readonly externalId:     string,
     public readonly reason:         number,
+    public readonly canonicalId?:   CanonicalId,
   ) {}
 
   // ── Direction ─────────────────────────────────────────────
@@ -134,6 +136,7 @@ export class Position {
       vo.comment,
       vo.externalId,
       vo.reason,
+      vo.canonicalId as CanonicalId | undefined,
     );
   }
 
@@ -160,6 +163,7 @@ export class Position {
       comment:        this.comment,
       externalId:     this.externalId,
       reason:         this.reason,
+      ...(this.canonicalId !== undefined ? { canonicalId: this.canonicalId } : {}),
     };
   }
 }

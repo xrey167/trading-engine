@@ -1,5 +1,6 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { DealType, DealEntry } from '../history/history.js';
+import type { CanonicalId } from '../../lib/canonical-id/index.js';
 
 // ─────────────────────────────────────────────────────────────
 // Schema + VO (serialization / API boundary)
@@ -72,6 +73,7 @@ export class Deal {
     public readonly profit:     number,
     public readonly time:       Date,
     public readonly comment:    string,
+    public readonly canonicalId?: CanonicalId,
   ) {}
 
   // ── Direction ─────────────────────────────────────────────
@@ -120,6 +122,7 @@ export class Deal {
       vo.profit,
       new Date(vo.time),
       vo.comment,
+      vo.canonicalId as CanonicalId | undefined,
     );
   }
 
@@ -141,6 +144,7 @@ export class Deal {
       profit:     this.profit,
       time:       this.time.toISOString(),
       comment:    this.comment,
+      ...(this.canonicalId !== undefined ? { canonicalId: this.canonicalId } : {}),
     };
   }
 }

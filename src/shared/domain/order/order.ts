@@ -1,5 +1,6 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { OrderState } from '../history/history.js';
+import type { CanonicalId } from '../../lib/canonical-id/index.js';
 
 export const Side = { None: 0, Long: 1, Short: -1 } as const;
 export type Side = (typeof Side)[keyof typeof Side];
@@ -162,6 +163,7 @@ export class Order extends OrderBase {
     public readonly timeSetup:     Date,
     public readonly timeDone:      Date,
     public readonly comment:       string,
+    public readonly canonicalId?:  CanonicalId,
   ) { super(); }
 
   // ── Direction (implements OrderBase) ──────────────────────
@@ -213,6 +215,7 @@ export class Order extends OrderBase {
       vo.priceOpen, vo.stopLoss, vo.takeProfit,
       new Date(vo.timeSetup), new Date(vo.timeDone),
       vo.comment,
+      vo.canonicalId as CanonicalId | undefined,
     );
   }
 
@@ -233,6 +236,7 @@ export class Order extends OrderBase {
       timeSetup:     this.timeSetup.toISOString(),
       timeDone:      this.timeDone.toISOString(),
       comment:       this.comment,
+      ...(this.canonicalId !== undefined ? { canonicalId: this.canonicalId } : {}),
     };
   }
 }
