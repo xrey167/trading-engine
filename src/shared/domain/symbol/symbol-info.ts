@@ -1,5 +1,5 @@
-export { DayOfWeek, type DayOfWeek as DayOfWeekType } from '../calendar/session.js';
 import { DayOfWeek } from '../calendar/session.js';
+export { DayOfWeek, type DayOfWeek as DayOfWeekType };
 
 // ─────────────────────────────────────────────────────────────
 // AssetType enum
@@ -133,103 +133,103 @@ export interface ProfitParams {
 
 export interface SymbolConfig {
   // --- Integer / boolean ---
-  custom:               boolean;
-  chartMode:            ChartMode;
-  select:               boolean;
-  visible:              boolean;
-  sessionDeals:         number;
-  sessionBuyOrders:     number;
-  sessionSellOrders:    number;
-  volume:               number;
-  volumeHigh:           number;
-  volumeLow:            number;
+  custom?:               boolean;
+  chartMode?:            ChartMode;
+  select?:               boolean;
+  visible?:              boolean;
+  sessionDeals?:         number;
+  sessionBuyOrders?:     number;
+  sessionSellOrders?:    number;
+  volume?:               number;
+  volumeHigh?:           number;
+  volumeLow?:            number;
   /** Unix timestamp (seconds) of the last tick. */
-  time:                 number;
-  digitsLot:            number;
-  spread:               number;
-  spreadFloat:          boolean;
-  ticksBookDepth:       number;
-  tradeCalcMode:        TradeCalcMode;
-  tradeMode:            TradeMode;
+  time?:                 number;
+  digitsLot?:            number;
+  spread?:               number;
+  spreadFloat?:          boolean;
+  ticksBookDepth?:       number;
+  tradeCalcMode?:        TradeCalcMode;
+  tradeMode?:            TradeMode;
   /** Unix timestamp (seconds); 0 = no restriction. */
-  startTime:            number;
+  startTime?:            number;
   /** Unix timestamp (seconds); 0 = no expiration. */
-  expirationTime:       number;
-  tradeStopLevel:       number;
-  tradeFreezeLevel:     number;
-  tradeExecutionMode:   TradeExecutionMode;
-  swapMode:             SwapMode;
-  swapRollover3Days:    DayOfWeek;
-  marginHedgedUseLeg:   boolean;
-  expirationModeFlags:  number;
-  fillingModeFlags:     number;
-  orderModeFlags:       number;
-  closeByAllowed:       boolean;
-  orderModeGTC:         OrderGTCMode;
-  optionMode:           OptionMode;
-  optionRight:          OptionRight;
+  expirationTime?:       number;
+  tradeStopLevel?:       number;
+  tradeFreezeLevel?:     number;
+  tradeExecutionMode?:   TradeExecutionMode;
+  swapMode?:             SwapMode;
+  swapRollover3Days?:    DayOfWeek;
+  marginHedgedUseLeg?:   boolean;
+  expirationModeFlags?:  number;
+  fillingModeFlags?:     number;
+  orderModeFlags?:       number;
+  closeByAllowed?:       boolean;
+  orderModeGTC?:         OrderGTCMode;
+  optionMode?:           OptionMode;
+  optionRight?:          OptionRight;
   // --- Real ---
-  bid:                  number;
-  bidHigh:              number;
-  bidLow:               number;
-  ask:                  number;
-  askHigh:              number;
-  askLow:               number;
-  last:                 number;
-  lastHigh:             number;
-  lastLow:              number;
-  volumeReal:           number;
-  volumeHighReal:       number;
-  volumeLowReal:        number;
-  optionStrike:         number;
-  tickValue:            number;
-  tickValueProfit:      number;
-  tickValueLoss:        number;
-  tickSize:             number;
-  contractSize:         number;
-  accruedInterest:      number;
-  faceValue:            number;
-  liquidityRate:        number;
-  lotsMin:              number;
-  lotsMax:              number;
-  lotsStep:             number;
-  volumeLimit:          number;
-  swapLong:             number;
-  swapShort:            number;
-  marginInitial:        number;
-  marginMaintenance:    number;
-  marginLong:           number;
-  marginShort:          number;
-  marginStop:           number;
-  marginLimit:          number;
-  marginStopLimit:      number;
-  marginHedged:         number;
-  sessionVolume:        number;
-  sessionTurnover:      number;
-  sessionInterest:      number;
-  sessionBuyOrdersVolume:  number;
-  sessionSellOrdersVolume: number;
-  sessionOpen:          number;
-  sessionClose:         number;
-  sessionAW:            number;
-  sessionPriceSettlement: number;
-  sessionPriceLimitMin: number;
-  sessionPriceLimitMax: number;
+  bid?:                  number;
+  bidHigh?:              number;
+  bidLow?:               number;
+  ask?:                  number;
+  askHigh?:              number;
+  askLow?:               number;
+  last?:                 number;
+  lastHigh?:             number;
+  lastLow?:              number;
+  volumeReal?:           number;
+  volumeHighReal?:       number;
+  volumeLowReal?:        number;
+  optionStrike?:         number;
+  tickValue?:            number;
+  tickValueProfit?:      number;
+  tickValueLoss?:        number;
+  tickSize?:             number;
+  contractSize?:         number;
+  accruedInterest?:      number;
+  faceValue?:            number;
+  liquidityRate?:        number;
+  lotsMin?:              number;
+  lotsMax?:              number;
+  lotsStep?:             number;
+  volumeLimit?:          number;
+  swapLong?:             number;
+  swapShort?:            number;
+  marginInitial?:        number;
+  marginMaintenance?:    number;
+  marginLong?:           number;
+  marginShort?:          number;
+  marginStop?:           number;
+  marginLimit?:          number;
+  marginStopLimit?:      number;
+  marginHedged?:         number;
+  sessionVolume?:        number;
+  sessionTurnover?:      number;
+  sessionInterest?:      number;
+  sessionBuyOrdersVolume?:  number;
+  sessionSellOrdersVolume?: number;
+  sessionOpen?:          number;
+  sessionClose?:         number;
+  sessionAW?:            number;
+  sessionPriceSettlement?: number;
+  sessionPriceLimitMin?: number;
+  sessionPriceLimitMax?: number;
   // --- String ---
-  basis:          string;
-  currencyBase:   string;
-  currencyProfit: string;
-  currencyMargin: string;
-  bank:           string;
-  description:    string;
-  formula:        string;
-  isin:           string;
-  page:           string;
-  path:           string;
+  basis?:          string;
+  currencyBase?:   string;
+  currencyProfit?: string;
+  currencyMargin?: string;
+  bank?:           string;
+  description?:    string;
+  formula?:        string;
+  isin?:           string;
+  page?:           string;
+  path?:           string;
   /** Symbol used to convert margin currency to account currency (e.g. 'USDCHF'). */
-  marginConvert:  string;
+  marginConvert?:  string;
   /** Symbol used to convert profit currency to account currency (e.g. 'EURUSD'). */
-  profitConvert:  string;
+  profitConvert?:  string;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -678,8 +678,8 @@ export class SymbolInfoForex extends SymbolInfoBase {
     const base  = name.slice(0, 3).toUpperCase();
     const quote = name.slice(3, 6).toUpperCase();
     super(name, digits, { currencyBase: base, currencyProfit: quote, ...config });
-    this.baseCurrency  = base;
-    this.quoteCurrency = quote;
+    this.baseCurrency  = this.currencyBase;
+    this.quoteCurrency = this.currencyProfit;
   }
 }
 
