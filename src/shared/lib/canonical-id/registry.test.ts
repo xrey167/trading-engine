@@ -88,4 +88,18 @@ describe('CanonicalIdRegistry', () => {
   it('throws on empty strategy id', () => {
     expect(() => reg.registerStrategy('')).toThrow();
   });
+
+  it('getCanonicalId returns the canonical id registered for a native ticket', () => {
+    reg.setNativeId('ord_abc', 12345);
+    expect(reg.getCanonicalId(12345)).toBe('ord_abc');
+  });
+
+  it('getCanonicalId returns undefined for an unknown native id', () => {
+    expect(reg.getCanonicalId(99999)).toBeUndefined();
+  });
+
+  it('getCanonicalId works with bigint native ids', () => {
+    reg.setNativeId('ord_ext', 999_999_999_999n);
+    expect(reg.getCanonicalId(999_999_999_999n)).toBe('ord_ext');
+  });
 });

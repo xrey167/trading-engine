@@ -1,5 +1,8 @@
 export const NO_STRATEGY = 0x00;
 
+// Local branded alias — mirrors CanonicalId from codec.ts without creating a circular import.
+type CanonicalId = string & { readonly __brand: 'CanonicalId' };
+
 export class CanonicalIdRegistry {
   private readonly symbols  = new Map<string, number>();
   private readonly symCodes = new Map<number, string>();
@@ -9,7 +12,8 @@ export class CanonicalIdRegistry {
   private readonly stratCodes  = new Map<number, string>();
   private stratNext = 1; // 0 = NO_STRATEGY
 
-  private readonly nativeIds = new Map<string, number | bigint>();
+  private readonly nativeIds    = new Map<string, number | bigint>();
+  private readonly canonicalIds = new Map<number | bigint, CanonicalId>();
 
   registerSymbol(pair: string): number {
     if (!pair) throw new Error('Symbol name must not be empty');
@@ -49,9 +53,18 @@ export class CanonicalIdRegistry {
 
   setNativeId(canonicalId: string, nativeId: number | bigint): void {
     this.nativeIds.set(canonicalId, nativeId);
+    this.canonicalIds.set(nativeId, canonicalId as CanonicalId);
   }
 
   getNativeId(canonicalId: string): number | bigint | undefined {
     return this.nativeIds.get(canonicalId);
+  }
+
+  /**
+   * Returns the canonical ID for a given native broker ticket, or `undefined` if
+   * this ticket was never registered (e.g. historical entities pre-dating this system).
+   */
+  getCanonicalId(nativeId: number | bigint): CanonicalId | undefined {
+    return this.canonicalIds.get(nativeId);
   }
 }
