@@ -10,6 +10,7 @@ import { Mutex } from '../shared/lib/mutex.js';
 import { CircuitBreaker, type CircuitBreakerOptions } from '../shared/lib/circuit-breaker.js';
 import { BaseService } from '../shared/services/base-service.js';
 import { ServiceKind } from '../shared/services/types.js';
+import { CanonicalIdRegistry } from '../shared/lib/canonical-id/index.js';
 
 export interface BrokerServiceOptions {
   readonly id: string;
@@ -20,6 +21,7 @@ export interface BrokerServiceOptions {
   readonly engine?: TradingEngine;
   readonly engineMutex?: Mutex;
   readonly circuitBreaker?: CircuitBreakerOptions;
+  readonly canonicalRegistry?: CanonicalIdRegistry;
 }
 
 export class BrokerService extends BaseService {
@@ -30,6 +32,7 @@ export class BrokerService extends BaseService {
   readonly engineMutex: Mutex;
   readonly broker: IFullBrokerAdapter;
   readonly circuitBreaker: CircuitBreaker;
+  readonly canonicalRegistry: CanonicalIdRegistry;
 
   constructor(
     opts: BrokerServiceOptions,
@@ -45,6 +48,7 @@ export class BrokerService extends BaseService {
     this.circuitBreaker = new CircuitBreaker(
       opts.circuitBreaker ?? { failureThreshold: 5, resetTimeoutMs: 30_000 },
     );
+    this.canonicalRegistry = opts.canonicalRegistry ?? new CanonicalIdRegistry();
   }
 
   async processBar(bar: Bar, bars: Bars): Promise<void> {

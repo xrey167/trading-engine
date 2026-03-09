@@ -11,6 +11,7 @@ import type { IBarCache } from '../../market-data/data-provider-types.js';
 import type { AuditConsumer } from '../../audit/audit-consumer.js';
 import type { SnapshotWriter } from '../db/snapshot-writer.js';
 import type { DrizzleDB } from '../db/client.js';
+import type { BrokerService } from '../../broker/broker-service.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -18,6 +19,7 @@ declare module 'fastify' {
     symbol:          SymbolInfoBase;
     emitter:         TypedEventBus<AppEventMap>;
     broker:          IFullBrokerAdapter;
+    brokerService:   BrokerService;
     atrModule:       AtrModule;
     atrConfig:       MutableAtrConfig;
     engineMutex:     Mutex;
