@@ -26,7 +26,7 @@ import { DealType, DealEntry } from './history/history.js';
 import { AccountInfoVOSchema } from './account/account.js';
 import {
   SymbolInfoVOSchema, TickSchema, SymbolInfoVOFactory,
-  Symbol as TradingSymbol, AssetType,
+  TradingSymbol, AssetType,
   SymbolInfoCrypto, SymbolInfoIndex,
 } from './symbol/symbol.js';
 import { MoneyManagementFactoryConfigSchema } from '../../trading/money-management/types.js';

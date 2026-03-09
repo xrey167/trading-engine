@@ -136,7 +136,7 @@ export class SymbolInfoIndex extends SymbolInfoBase {
 // Symbol — domain class with computed behaviour
 // ─────────────────────────────────────────────────────────────
 
-export class Symbol {
+export class TradingSymbol {
   constructor(
     public readonly name:           string,
     public readonly description:    string,
@@ -176,8 +176,8 @@ export class Symbol {
 
   // ── Conversion ───────────────────────────────────────────
 
-  static fromVO(vo: SymbolInfoVO): Symbol {
-    return new Symbol(
+  static fromVO(vo: SymbolInfoVO): TradingSymbol {
+    return new TradingSymbol(
       vo.name, vo.description, vo.assetType,
       vo.digits, vo.point,
       vo.tickSize, vo.tickValue,
