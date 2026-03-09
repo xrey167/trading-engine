@@ -9,9 +9,12 @@ export const AssetType = {
 } as const;
 export type AssetType = (typeof AssetType)[keyof typeof AssetType];
 
+const AssetTypeSchema = Type.Union(Object.values(AssetType).map(v => Type.Literal(v)));
+
 export const SymbolInfoVOSchema = Type.Object({
   name:             Type.String(),
   description:      Type.String(),
+  assetType:        AssetTypeSchema,
   digits:           Type.Integer(),
   point:            Type.Number(),
   tickSize:         Type.Number(),
@@ -29,6 +32,32 @@ export const SymbolInfoVOSchema = Type.Object({
   currencyMargin:   Type.String(),
 });
 export type SymbolInfoVO = Static<typeof SymbolInfoVOSchema>;
+
+export const SymbolInfoVOFactory = {
+  make(overrides: Partial<SymbolInfoVO> & Pick<SymbolInfoVO, 'name'>): SymbolInfoVO {
+    const defaults: SymbolInfoVO = {
+      name:           overrides.name,
+      description:    '',
+      assetType:      AssetType.Forex,
+      digits:         5,
+      point:          0.00001,
+      tickSize:       0.00001,
+      tickValue:      1,
+      spread:         0,
+      spreadFloat:    true,
+      lotsMin:        0.01,
+      lotsMax:        100,
+      lotsStep:       0.01,
+      contractSize:   100_000,
+      bid:            0,
+      ask:            0,
+      currencyBase:   '',
+      currencyProfit: '',
+      currencyMargin: '',
+    };
+    return { ...defaults, ...overrides };
+  },
+};
 
 export const TickSchema = Type.Object({
   time:   Type.String({ format: 'date-time' }),

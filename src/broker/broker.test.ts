@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { PaperBroker } from './paper/paper-broker.js';
+import { AssetType } from '../shared/domain/symbol/symbol.js';
 import { TypedEventBus } from '../shared/event-bus.js';
 import { isOk, isErr } from '../shared/lib/result.js';
 import type { PositionInfoVO } from '../shared/domain/position/position.js';
@@ -207,6 +208,7 @@ describe('PaperBroker — Gateway methods', () => {
       broker.seedSymbol({
         name: 'EURUSD',
         description: 'Euro vs US Dollar',
+        assetType: AssetType.Forex,
         digits: 5,
         point: 0.00001,
         tickSize: 0.00001,

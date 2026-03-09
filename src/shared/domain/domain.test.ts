@@ -459,6 +459,7 @@ describe('Schema re-exports', () => {
     expect(SymbolInfoVOSchema.properties.name).toBeDefined();
     expect(SymbolInfoVOSchema.properties.digits).toBeDefined();
     expect(SymbolInfoVOSchema.properties.tickSize).toBeDefined();
+    expect(SymbolInfoVOSchema.properties.assetType).toBeDefined();
   });
 
   it('TickSchema has expected properties', () => {
