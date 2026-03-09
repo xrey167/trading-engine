@@ -24,7 +24,11 @@ import { PositionInfoVOSchema, Position, PositionVOFactory, PositionType } from 
 import { Deal, DealInfoVOFactory } from './deal/deal.js';
 import { DealType, DealEntry } from './history/history.js';
 import { AccountInfoVOSchema } from './account/account.js';
-import { SymbolInfoVOSchema, TickSchema, SymbolInfoVOFactory } from './symbol/symbol.js';
+import {
+  SymbolInfoVOSchema, TickSchema, SymbolInfoVOFactory,
+  Symbol as TradingSymbol, AssetType,
+  SymbolInfoCrypto, SymbolInfoIndex,
+} from './symbol/symbol.js';
 import { MoneyManagementFactoryConfigSchema } from '../../trading/money-management/types.js';
 
 // ─────────────────────────────────────────────────────────────
@@ -497,6 +501,63 @@ describe('SymbolInfoVOSchema', () => {
     const vo = SymbolInfoVOFactory.make({ name: 'BTCUSD', assetType: 'CRYPTO' });
     expect(vo.assetType).toBe('CRYPTO');
     expect(vo.name).toBe('BTCUSD');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// SymbolInfoBase subclasses
+// ─────────────────────────────────────────────────────────────
+
+describe('SymbolInfoBase subclasses', () => {
+  it('SymbolInfoCrypto has assetType Crypto and correct pointSize', () => {
+    const s = new SymbolInfoCrypto('BTCUSD', 2);
+    expect(s.assetType).toBe(AssetType.Crypto);
+    expect(s.pointSize).toBeCloseTo(0.01);
+  });
+
+  it('SymbolInfoIndex has assetType Index and correct pointSize', () => {
+    const s = new SymbolInfoIndex('US500', 1);
+    expect(s.assetType).toBe(AssetType.Index);
+    expect(s.pointSize).toBeCloseTo(0.1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// Symbol domain class
+// ─────────────────────────────────────────────────────────────
+
+describe('Symbol', () => {
+  const base = SymbolInfoVOFactory.make({ name: 'EURUSD' });
+
+  it('isForex / isStock / isFuture / isCrypto / isIndex', () => {
+    const forex  = TradingSymbol.fromVO({ ...base, assetType: AssetType.Forex  });
+    const stock  = TradingSymbol.fromVO({ ...base, assetType: AssetType.Stock  });
+    const future = TradingSymbol.fromVO({ ...base, assetType: AssetType.Future });
+    const crypto = TradingSymbol.fromVO({ ...base, assetType: AssetType.Crypto });
+    const index  = TradingSymbol.fromVO({ ...base, assetType: AssetType.Index  });
+    expect(forex.isForex()).toBe(true);
+    expect(forex.isStock()).toBe(false);
+    expect(stock.isStock()).toBe(true);
+    expect(future.isFuture()).toBe(true);
+    expect(crypto.isCrypto()).toBe(true);
+    expect(index.isIndex()).toBe(true);
+  });
+
+  it('mid returns average of bid and ask', () => {
+    const s = TradingSymbol.fromVO({ ...base, bid: 1.10000, ask: 1.10010 });
+    expect(s.mid()).toBeCloseTo(1.10005);
+  });
+
+  it('spreadPts returns spread in points', () => {
+    const s = TradingSymbol.fromVO({ ...base, bid: 1.10000, ask: 1.10010, point: 0.00001 });
+    expect(s.spreadPts()).toBe(10);
+  });
+
+  it('fromVO / toVO round-trip', () => {
+    const vo = { ...base, name: 'GBPUSD', bid: 1.25000, ask: 1.25010 };
+    const s  = TradingSymbol.fromVO(vo);
+    expect(s.name).toBe('GBPUSD');
+    expect(s.toVO()).toMatchObject({ name: 'GBPUSD', bid: 1.25000 });
   });
 });
 
