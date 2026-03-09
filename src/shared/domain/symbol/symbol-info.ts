@@ -42,6 +42,9 @@ export class SymbolInfoForex extends SymbolInfoBase {
 
   constructor(name: string, digits: number) {
     super(name, digits);
+    if (name.length !== 6) {
+      throw new Error(`Forex symbol name "${name}" must be 6 characters long (e.g., "EURUSD").`);
+    }
     this.baseCurrency  = name.slice(0, 3).toUpperCase();
     this.quoteCurrency = name.slice(3, 6).toUpperCase();
   }
