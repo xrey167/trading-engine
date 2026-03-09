@@ -12,7 +12,7 @@ const DealEntrySchema = Type.Union(Object.values(DealEntry).map(v => Type.Litera
 export const DealInfoVOSchema = Type.Object({
   ticket:     Type.Number(),
   userId:     Type.String(),
-  brokerId:   Type.String(),
+  brokerId:   Type.Optional(Type.String()),
   order:      Type.Number(),
   positionId: Type.Number(),
   symbol:     Type.String(),
@@ -109,7 +109,7 @@ export class Deal {
     return new Deal(
       vo.ticket,
       vo.userId,
-      vo.brokerId,
+      vo.brokerId ?? '',
       vo.order,
       vo.positionId,
       vo.symbol,

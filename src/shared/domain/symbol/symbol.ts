@@ -35,8 +35,7 @@ export type SymbolInfoVO = Static<typeof SymbolInfoVOSchema>;
 
 export const SymbolInfoVOFactory = {
   make(overrides: Partial<SymbolInfoVO> & Pick<SymbolInfoVO, 'name'>): SymbolInfoVO {
-    const defaults: SymbolInfoVO = {
-      name:           overrides.name,
+    return {
       description:    '',
       assetType:      AssetType.Forex,
       digits:         5,
@@ -54,8 +53,8 @@ export const SymbolInfoVOFactory = {
       currencyBase:   '',
       currencyProfit: '',
       currencyMargin: '',
+      ...overrides,
     };
-    return { ...defaults, ...overrides };
   },
 };
 

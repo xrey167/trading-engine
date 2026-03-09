@@ -552,7 +552,7 @@ describe('SymbolInfoBase subclasses', () => {
 // Symbol domain class
 // ─────────────────────────────────────────────────────────────
 
-describe('Symbol', () => {
+describe('TradingSymbol', () => {
   const base = SymbolInfoVOFactory.make({ name: 'EURUSD' });
 
   it('isForex / isStock / isFuture / isCrypto / isIndex', () => {
