@@ -1114,7 +1114,7 @@ type SeedPosition = Parameters<PaperBroker['seedPosition']>[0];
 
 function makeSeedPosition(ticket: number): SeedPosition {
   return {
-    ticket, userId: 'default', symbol: 'EURUSD', type: 'BUY',
+    ticket, userId: 'default', brokerId: '', symbol: 'EURUSD', type: 'BUY',
     magic: 0, identifier: 0,
     time: new Date().toISOString(),
     priceOpen: 1.1000, priceCurrent: 1.1010,
