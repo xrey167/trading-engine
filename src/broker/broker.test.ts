@@ -13,6 +13,7 @@ function makePosition(overrides: Partial<PositionInfoVO> = {}): PositionInfoVO {
   return {
     ticket: 1,
     userId: 'user1',
+    brokerId: '',
     symbol: 'EURUSD',
     type: 'BUY',
     magic: 0,

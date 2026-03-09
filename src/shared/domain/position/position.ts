@@ -12,7 +12,7 @@ const PositionTypeSchema = Type.Union(Object.values(PositionType).map(v => Type.
 export const PositionInfoVOSchema = Type.Object({
   ticket:         Type.Number(),
   userId:         Type.String(),
-  brokerId:       Type.Optional(Type.String()),
+  brokerId:       Type.String(),
   symbol:         Type.String(),
   type:           PositionTypeSchema,
   magic:          Type.Number(),

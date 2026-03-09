@@ -100,6 +100,7 @@ describe('PositionInfoVOSchema', () => {
     const valid = {
       ticket: 12345,
       userId: 'user-1',
+      brokerId: '',
       symbol: 'EURUSD',
       type: 'BUY' as const,
       magic: 100,
