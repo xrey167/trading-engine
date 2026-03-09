@@ -71,10 +71,13 @@ export abstract class Order extends OrderBase {
 
   direction(): Side { return this.side; }
 
-  /** SL level set via bracket — 0 when no bracket is configured. */
-  get stopLoss():   number { return this.bracketSL ?? 0; }
-  /** TP level set via bracket — 0 when no bracket is configured. */
-  get takeProfit(): number { return this.bracketTP ?? 0; }
+  // bracketSL / bracketTP are point distances set before fill, not absolute price levels.
+  // Return 0 for the level getters; override hasStopLoss/hasTakeProfit to check presence.
+  get stopLoss():   number { return 0; }
+  get takeProfit(): number { return 0; }
+
+  override hasStopLoss():   boolean { return this.bracketSL != null; }
+  override hasTakeProfit(): boolean { return this.bracketTP != null; }
 
   // ── Execution ────────────────────────────────────────────
 
