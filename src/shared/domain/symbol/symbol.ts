@@ -131,3 +131,84 @@ export class SymbolInfoCrypto extends SymbolInfoBase {
 export class SymbolInfoIndex extends SymbolInfoBase {
   readonly assetType = AssetType.Index;
 }
+
+// ─────────────────────────────────────────────────────────────
+// Symbol — domain class with computed behaviour
+// ─────────────────────────────────────────────────────────────
+
+export class Symbol {
+  constructor(
+    public readonly name:           string,
+    public readonly description:    string,
+    public readonly assetType:      AssetType,
+    public readonly digits:         number,
+    public readonly point:          number,
+    public readonly tickSize:       number,
+    public readonly tickValue:      number,
+    public readonly spread:         number,
+    public readonly spreadFloat:    boolean,
+    public readonly lotsMin:        number,
+    public readonly lotsMax:        number,
+    public readonly lotsStep:       number,
+    public readonly contractSize:   number,
+    public readonly bid:            number,
+    public readonly ask:            number,
+    public readonly currencyBase:   string,
+    public readonly currencyProfit: string,
+    public readonly currencyMargin: string,
+  ) {}
+
+  // ── Asset type predicates ─────────────────────────────────
+
+  isForex():  boolean { return this.assetType === AssetType.Forex;  }
+  isStock():  boolean { return this.assetType === AssetType.Stock;  }
+  isFuture(): boolean { return this.assetType === AssetType.Future; }
+  isCrypto(): boolean { return this.assetType === AssetType.Crypto; }
+  isIndex():  boolean { return this.assetType === AssetType.Index;  }
+
+  // ── Market data ───────────────────────────────────────────
+
+  /** Midpoint of bid/ask. */
+  mid(): number { return (this.bid + this.ask) / 2; }
+
+  /** Current bid/ask spread expressed in points (integer). */
+  spreadPts(): number { return Math.round((this.ask - this.bid) / this.point); }
+
+  // ── Conversion ───────────────────────────────────────────
+
+  static fromVO(vo: SymbolInfoVO): Symbol {
+    return new Symbol(
+      vo.name, vo.description, vo.assetType,
+      vo.digits, vo.point,
+      vo.tickSize, vo.tickValue,
+      vo.spread, vo.spreadFloat,
+      vo.lotsMin, vo.lotsMax, vo.lotsStep,
+      vo.contractSize,
+      vo.bid, vo.ask,
+      vo.currencyBase, vo.currencyProfit, vo.currencyMargin,
+    );
+  }
+
+  toVO(): SymbolInfoVO {
+    return {
+      name:           this.name,
+      description:    this.description,
+      assetType:      this.assetType,
+      digits:         this.digits,
+      point:          this.point,
+      tickSize:       this.tickSize,
+      tickValue:      this.tickValue,
+      spread:         this.spread,
+      spreadFloat:    this.spreadFloat,
+      lotsMin:        this.lotsMin,
+      lotsMax:        this.lotsMax,
+      lotsStep:       this.lotsStep,
+      contractSize:   this.contractSize,
+      bid:            this.bid,
+      ask:            this.ask,
+      currencyBase:   this.currencyBase,
+      currencyProfit: this.currencyProfit,
+      currencyMargin: this.currencyMargin,
+    };
+  }
+}
