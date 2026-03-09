@@ -216,32 +216,51 @@ export class SymbolService {
   // ── Position sizing ──────────────────────────────────────────────────────
 
   /**
-   * Maximum lots openable given `freeMargin` of available margin.
+   * Maximum lots openable without breaching the margin call level.
    *
-   * `predictedLossPoints` optionally reduces effective free margin by the
-   * expected worst-case loss of the position (conservative sizing).
+   * Solves the margin-call boundary equation for `x` (lots):
+   *
+   *   (free - x*lossPerLot - x*required) / (used + x*required) = level
+   *
+   * Which rearranges to:
+   *
+   *   x = (free - used * level) / (required + required * level - lossPerLot)
+   *
+   * @param freeMargin        - current free margin (account currency)
+   * @param usedMargin        - current margin already in use (account currency)
+   * @param symbol            - symbol to size
+   * @param side              - trade direction
+   * @param predictedLossPoints - expected adverse move in points (stop distance); default 0
+   * @param marginCallLevel   - broker margin call level in percent (e.g. 20 for 20%); default 0
    */
   getMaxLots(
-    freeMargin:           number,
-    symbol:               SymbolInfoBase,
-    side:                 'long' | 'short',
+    freeMargin:          number,
+    usedMargin:          number,
+    symbol:              SymbolInfoBase,
+    side:                'long' | 'short',
     predictedLossPoints = 0,
+    marginCallLevel    = 0,
   ): number {
-    const openPrice    = symbol.priceForOpen(side);
-    const marginPerLot = symbol.calcMargin({ lots: 1, marketPrice: openPrice });
-    if (marginPerLot <= 0) return 0;
+    const required = this.getRequiredMargin(symbol, side, 1);
+    if (required <= 0) return 0;
 
-    let effectiveFree = freeMargin;
-    if (predictedLossPoints > 0) {
-      const worstClose   = side === 'long'
-        ? symbol.subPoints(openPrice, predictedLossPoints)
-        : symbol.addPoints(openPrice, predictedLossPoints);
-      const lossPerLot   = Math.abs(symbol.calcProfit({ lots: 1, openPrice, closePrice: worstClose }));
-      effectiveFree      = Math.max(0, freeMargin - lossPerLot);
-    }
+    const level     = marginCallLevel / 100;
+    const openPrice = symbol.priceForOpen(side);
 
-    const rawLots = effectiveFree / marginPerLot;
-    return symbol.normalizeLots(Math.max(0, rawLots));
+    // Worst-case close price after predicted loss (spread + stop distance)
+    const lossPrice  = symbol.pointSize * predictedLossPoints;
+    const closePrice = side === 'long'
+      ? symbol.priceForClose(side) - lossPrice
+      : symbol.priceForClose(side) + lossPrice;
+
+    // Profit per 1 lot — negative when a loss (spread + predicted adverse move)
+    const profitPerLot = this.getProfit(symbol, side, openPrice, 1, closePrice);
+
+    // Core formula — see header comment
+    const lots = (freeMargin - usedMargin * level)
+               / (required + required * level - profitPerLot);
+
+    return symbol.normalizeLots(Math.max(0, lots));
   }
 
   // ── Profit estimation ────────────────────────────────────────────────────
