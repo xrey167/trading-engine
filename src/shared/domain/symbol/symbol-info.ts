@@ -26,12 +26,19 @@ export const ChartMode = {
 export type ChartMode = (typeof ChartMode)[keyof typeof ChartMode];
 
 export const TradeCalcMode = {
-  Forex:        0,
-  Futures:      1,
-  CFD:          2,
-  CFDIndex:     3,
-  CFDLeverage:  4,
-  Exchange:     5,
+  Forex:             0,
+  ForexNoLeverage:   1,
+  Futures:           2,
+  CFD:               3,
+  CFDIndex:          4,
+  CFDLeverage:       5,
+  ExchStocks:        6,
+  ExchFutures:       7,
+  ExchFuturesFORTS:  8,
+  ExchBonds:         9,
+  ExchStocksMOEX:   10,
+  ExchBondsMOEX:    11,
+  ServCollateral:   12,
 } as const;
 export type TradeCalcMode = (typeof TradeCalcMode)[keyof typeof TradeCalcMode];
 
@@ -83,6 +90,42 @@ export const OptionRight = {
   Put:  1,
 } as const;
 export type OptionRight = (typeof OptionRight)[keyof typeof OptionRight];
+
+// ─────────────────────────────────────────────────────────────
+// Margin / Profit calculation parameter types
+// ─────────────────────────────────────────────────────────────
+
+export interface MarginParams {
+  /** Position size in lots. */
+  lots:          number;
+  /** Current market price at position open (bid for shorts, ask for longs). */
+  marketPrice:   number;
+  /** Account leverage, e.g. 100 for 1:100. Default: 1 (no leverage). */
+  leverage?:     number;
+  /** Broker-side margin rate coefficient. Default: 1. */
+  marginRate?:   number;
+  /**
+   * FORTS only: average weighted price of the position or order open price.
+   * Used to compute MarginDiscount when the price is more favourable than
+   * the clearing price (priceSettle).
+   */
+  openPrice?:    number;
+  /** FORTS only: estimated clearing price of the previous session. */
+  priceSettle?:  number;
+  /** FORTS / ExchFutures: use maintenance margin instead of initial. Default: false. */
+  useMaintenance?: boolean;
+  /** FORTS only: 'long' or 'short' — required for discount direction. */
+  side?:         'long' | 'short';
+}
+
+export interface ProfitParams {
+  /** Position size in lots. */
+  lots:        number;
+  /** Price at which the position was opened. */
+  openPrice:   number;
+  /** Price at which the position is closed (or current mark-to-market price). */
+  closePrice:  number;
+}
 
 // ─────────────────────────────────────────────────────────────
 // SymbolConfig — full MT5 symbol property set (all optional)
@@ -387,6 +430,157 @@ export abstract class SymbolInfoBase {
   priceToPoints(price: number):  number { return price / this.pointSize; }
   pointsToPrice(points: number): number { return points * this.pointSize; }
   normalize(price: number):      number { return parseFloat(price.toFixed(this.digits)); }
+
+  // ── Margin calculation (ENUM_SYMBOL_CALC_MODE) ───────────────────────────
+
+  /**
+   * Required margin to open a position, in account deposit currency.
+   *
+   * Implements all 13 SYMBOL_CALC_MODE_* formulas from the MT5 specification.
+   * Symbol-level constants (contractSize, tickValue, tickSize, faceValue,
+   * marginInitial, marginMaintenance, liquidityRate) are read from `this`.
+   * Only dynamic per-trade values (lots, marketPrice, leverage, marginRate)
+   * must be supplied via {@link MarginParams}.
+   */
+  calcMargin(p: MarginParams): number {
+    const lots        = p.lots;
+    const price       = p.marketPrice;
+    const leverage    = p.leverage    ?? 1;
+    const marginRate  = p.marginRate  ?? 1;
+    const C           = this.contractSize;
+    const tv          = this.tickValue;
+    const ts          = this.tickSize;
+    const initMargin  = this.marginInitial;
+    const maintMargin = this.marginMaintenance;
+    const useMaint    = p.useMaintenance ?? false;
+
+    switch (this.tradeCalcMode) {
+      // Lots * ContractSize / Leverage * MarginRate
+      case TradeCalcMode.Forex:
+        return lots * C / leverage * marginRate;
+
+      // Lots * ContractSize * MarginRate  (no leverage)
+      case TradeCalcMode.ForexNoLeverage:
+        return lots * C * marginRate;
+
+      // Lots * InitialMargin * MarginRate
+      case TradeCalcMode.Futures:
+        return lots * initMargin * marginRate;
+
+      // Lots * ContractSize * MarketPrice * MarginRate
+      case TradeCalcMode.CFD:
+        return lots * C * price * marginRate;
+
+      // (Lots * ContractSize * MarketPrice) * TickValue / TickSize * MarginRate
+      case TradeCalcMode.CFDIndex:
+        return lots * C * price * (tv / ts) * marginRate;
+
+      // (Lots * ContractSize * MarketPrice) / Leverage * MarginRate
+      case TradeCalcMode.CFDLeverage:
+        return lots * C * price / leverage * marginRate;
+
+      // Lots * ContractSize * LastPrice * MarginRate
+      case TradeCalcMode.ExchStocks:
+      case TradeCalcMode.ExchStocksMOEX:
+        return lots * C * price * marginRate;
+
+      // Lots * (InitialMargin | MaintenanceMargin) * MarginRate
+      case TradeCalcMode.ExchFutures: {
+        const base = useMaint ? maintMargin : initMargin;
+        return lots * base * marginRate;
+      }
+
+      // Same base formula as ExchFutures; MarginDiscount applied when
+      // the order price is more favourable than the clearing price.
+      // Discount (long):  Lots * (PriceSettle - PriceOrder) * TickValue / TickSize
+      // Discount (short): Lots * (PriceOrder  - PriceSettle) * TickValue / TickSize
+      case TradeCalcMode.ExchFuturesFORTS: {
+        const base        = useMaint ? maintMargin : initMargin;
+        const rawMargin   = lots * base * marginRate;
+        const openPrice   = p.openPrice   ?? price;
+        const priceSettle = p.priceSettle ?? 0;
+        let discount      = 0;
+        if (priceSettle > 0) {
+          if (p.side === 'long'  && openPrice  < priceSettle) {
+            discount = lots * (priceSettle - openPrice)  * tv / ts;
+          } else if (p.side === 'short' && openPrice > priceSettle) {
+            discount = lots * (openPrice   - priceSettle) * tv / ts;
+          }
+        }
+        return Math.max(0, rawMargin - discount);
+      }
+
+      // Lots * ContractSize * FaceValue * OpenPrice / 100
+      case TradeCalcMode.ExchBonds:
+      case TradeCalcMode.ExchBondsMOEX:
+        return lots * C * this.faceValue * (p.openPrice ?? price) / 100;
+
+      // Non-tradable collateral — no required margin
+      case TradeCalcMode.ServCollateral:
+        return 0;
+
+      default:
+        return 0;
+    }
+  }
+
+  // ── Profit calculation (ENUM_SYMBOL_CALC_MODE) ────────────────────────────
+
+  /**
+   * Realised profit/loss for a closed position, in account deposit currency.
+   *
+   * Implements all 13 SYMBOL_CALC_MODE_* profit formulas. Returns 0 for
+   * {@link TradeCalcMode.ServCollateral} — use {@link calcMarketValue} instead.
+   */
+  calcProfit(p: ProfitParams): number {
+    const { lots, openPrice, closePrice } = p;
+    const C  = this.contractSize;
+    const tv = this.tickValue;
+    const ts = this.tickSize;
+    const priceDiff = closePrice - openPrice;
+
+    switch (this.tradeCalcMode) {
+      // (close - open) * ContractSize * Lots
+      case TradeCalcMode.Forex:
+      case TradeCalcMode.ForexNoLeverage:
+      case TradeCalcMode.CFD:
+      case TradeCalcMode.CFDIndex:
+      case TradeCalcMode.CFDLeverage:
+      case TradeCalcMode.ExchStocks:
+      case TradeCalcMode.ExchStocksMOEX:
+        return priceDiff * C * lots;
+
+      // (close - open) * Lots * TickValue / TickSize
+      case TradeCalcMode.Futures:
+      case TradeCalcMode.ExchFutures:
+      case TradeCalcMode.ExchFuturesFORTS:
+        return priceDiff * lots * tv / ts;
+
+      // Lots * ClosePrice * FaceValue * ContractSize + AccruedInterest * Lots * ContractSize
+      case TradeCalcMode.ExchBonds:
+      case TradeCalcMode.ExchBondsMOEX:
+        return lots * closePrice * this.faceValue * C
+             + this.accruedInterest * lots * C;
+
+      case TradeCalcMode.ServCollateral:
+        return 0;
+
+      default:
+        return 0;
+    }
+  }
+
+  // ── Collateral market value ───────────────────────────────────────────────
+
+  /**
+   * Market value of a collateral position (ServCollateral mode only).
+   * Contributes to account equity and free margin but is not a realised P&L.
+   *
+   * Formula: Lots * ContractSize * MarketPrice * LiquidityRate
+   */
+  calcMarketValue(lots: number, marketPrice: number): number {
+    return lots * this.contractSize * marketPrice * this.liquidityRate;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
