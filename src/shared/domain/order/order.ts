@@ -166,7 +166,10 @@ export class Order extends OrderBase {
 
   // ── Direction (implements OrderBase) ──────────────────────
 
-  direction(): Side { return this.type.startsWith('BUY') ? Side.Long : Side.Short; }
+  direction(): Side {
+    if (this.type === OrderType.CloseBy) return Side.None;
+    return this.type.startsWith('BUY') ? Side.Long : Side.Short;
+  }
 
   // ── Type predicates ───────────────────────────────────────
 
@@ -197,7 +200,7 @@ export class Order extends OrderBase {
 
   // ── Volume ────────────────────────────────────────────────
 
-  volumeRemaining(): number { return this.volumeInitial - this.volumeCurrent; }
+  volumeRemaining(): number { return this.volumeCurrent; }
 
   // ── Conversion ────────────────────────────────────────────
 
@@ -205,7 +208,7 @@ export class Order extends OrderBase {
   static fromVO(vo: HistoryOrderInfoVO): Order {
     return new Order(
       vo.ticket, vo.userId, vo.brokerId, vo.symbol,
-      vo.type as OrderType, vo.state as OrderState,
+      vo.type, vo.state,
       vo.volumeInitial, vo.volumeCurrent,
       vo.priceOpen, vo.stopLoss, vo.takeProfit,
       new Date(vo.timeSetup), new Date(vo.timeDone),

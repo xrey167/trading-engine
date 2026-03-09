@@ -91,8 +91,8 @@ export class Deal {
 
   // ── P&L ──────────────────────────────────────────────────
 
-  /** Gross profit minus commission and swap charges. */
-  netProfit(): number { return this.profit - this.commission - this.swap; }
+  /** Gross profit plus commission and swap (both are signed — commissions and swaps are stored as negative costs). */
+  netProfit(): number { return this.profit + this.commission + this.swap; }
 
   isProfitable(): boolean { return this.netProfit() > 0; }
 
@@ -106,8 +106,8 @@ export class Deal {
       vo.order,
       vo.positionId,
       vo.symbol,
-      vo.type as DealType,
-      vo.entry as DealEntry,
+      vo.type,
+      vo.entry,
       vo.volume,
       vo.price,
       vo.commission,
