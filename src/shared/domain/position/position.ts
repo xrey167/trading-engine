@@ -3,11 +3,18 @@ import { Type, type Static } from '@sinclair/typebox';
 export const PositionType = { BUY: 'BUY', SELL: 'SELL' } as const;
 export type PositionType = (typeof PositionType)[keyof typeof PositionType];
 
+// ─────────────────────────────────────────────────────────────
+// Schema + VO (serialization / API boundary)
+// ─────────────────────────────────────────────────────────────
+
+const PositionTypeSchema = Type.Union(Object.values(PositionType).map(v => Type.Literal(v)));
+
 export const PositionInfoVOSchema = Type.Object({
   ticket:         Type.Number(),
   userId:         Type.String(),
+  brokerId:       Type.Optional(Type.String()),
   symbol:         Type.String(),
-  type:           Type.Union([Type.Literal('BUY'), Type.Literal('SELL')]),
+  type:           PositionTypeSchema,
   magic:          Type.Number(),
   identifier:     Type.Number(),
   time:           Type.String({ format: 'date-time' }),
@@ -32,8 +39,9 @@ export const PositionVOFactory = {
     const defaults: PositionInfoVO = {
       ticket:         0,
       userId:         overrides.userId,
+      brokerId:       '',
       symbol:         overrides.symbol,
-      type:           'BUY',
+      type:           PositionType.BUY,
       magic:          0,
       identifier:     0,
       time:           new Date().toISOString(),
