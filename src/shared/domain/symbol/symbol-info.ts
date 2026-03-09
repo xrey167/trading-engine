@@ -164,6 +164,7 @@ export interface SymbolConfig {
   expirationModeFlags:  number;
   fillingModeFlags:     number;
   orderModeFlags:       number;
+  closeByAllowed:       boolean;
   orderModeGTC:         OrderGTCMode;
   optionMode:           OptionMode;
   optionRight:          OptionRight;
@@ -264,6 +265,7 @@ export abstract class SymbolInfoBase {
   readonly expirationModeFlags: number;
   readonly fillingModeFlags:    number;
   readonly orderModeFlags:      number;
+  readonly closeByAllowed:      boolean;
   readonly orderModeGTC:        OrderGTCMode;
   readonly optionMode:          OptionMode;
   readonly optionRight:         OptionRight;
@@ -362,6 +364,7 @@ export abstract class SymbolInfoBase {
     this.expirationModeFlags = config.expirationModeFlags ?? 0;
     this.fillingModeFlags    = config.fillingModeFlags    ?? 0;
     this.orderModeFlags      = config.orderModeFlags      ?? 0;
+    this.closeByAllowed      = config.closeByAllowed      ?? false;
     this.orderModeGTC        = config.orderModeGTC        ?? OrderGTCMode.GTC;
     this.optionMode          = config.optionMode          ?? OptionMode.European;
     this.optionRight         = config.optionRight         ?? OptionRight.Call;
@@ -430,6 +433,65 @@ export abstract class SymbolInfoBase {
   priceToPoints(price: number):  number { return price / this.pointSize; }
   pointsToPrice(points: number): number { return points * this.pointSize; }
   normalize(price: number):      number { return parseFloat(price.toFixed(this.digits)); }
+
+  // ── Lot normalisation ────────────────────────────────────────────────────
+
+  /** Round lots up to the nearest lotsStep multiple (matches MT5 normalizeLots). */
+  normalizeLots(lots: number): number {
+    return Math.ceil(lots / this.lotsStep) * this.lotsStep;
+  }
+
+  // ── Price arithmetic ─────────────────────────────────────────────────────
+
+  /** Add `points` price points to `price`, result normalised to symbol digits. */
+  addPoints(price: number, points: number): number {
+    return this.normalize(price + points * this.pointSize);
+  }
+
+  /** Subtract `points` price points from `price`, result normalised to symbol digits. */
+  subPoints(price: number, points: number): number {
+    return this.normalize(price - points * this.pointSize);
+  }
+
+  // ── Market data helpers ──────────────────────────────────────────────────
+
+  /** Midpoint of current bid and ask. */
+  mid(): number { return (this.bid + this.ask) / 2; }
+
+  /** Current spread in price points (integer). */
+  spreadPts(): number { return Math.round((this.ask - this.bid) / this.pointSize); }
+
+  /**
+   * Price at which an order of the given side would be filled.
+   * Long orders execute at ask; short orders execute at bid.
+   */
+  priceForOpen(side: 'long' | 'short'):  number { return side === 'long' ? this.ask : this.bid; }
+
+  /**
+   * Price at which a position of the given side would be closed.
+   * Long positions close at bid; short positions close at ask.
+   */
+  priceForClose(side: 'long' | 'short'): number { return side === 'long' ? this.bid : this.ask; }
+
+  // ── TradeMode predicates ─────────────────────────────────────────────────
+
+  isTradeDisabled():  boolean { return this.tradeMode === TradeMode.Disabled;  }
+  isTradeFully():     boolean { return this.tradeMode === TradeMode.Full;       }
+  isTradeLongOnly():  boolean { return this.tradeMode === TradeMode.LongOnly;  }
+  isTradeShortOnly(): boolean { return this.tradeMode === TradeMode.ShortOnly; }
+  isTradeCloseOnly(): boolean { return this.tradeMode === TradeMode.CloseOnly; }
+
+  // ── TradeExecutionMode predicates ────────────────────────────────────────
+
+  isTradeExeMarket():   boolean { return this.tradeExecutionMode === TradeExecutionMode.Market;   }
+  isTradeExeInstant():  boolean { return this.tradeExecutionMode === TradeExecutionMode.Instant;  }
+  isTradeExeRequest():  boolean { return this.tradeExecutionMode === TradeExecutionMode.Request;  }
+  isTradeExeExchange(): boolean { return this.tradeExecutionMode === TradeExecutionMode.Exchange; }
+
+  // ── Misc trading rules ───────────────────────────────────────────────────
+
+  /** Whether the broker allows close-by operations for this symbol. */
+  isCloseByAllowed(): boolean { return this.closeByAllowed; }
 
   // ── Margin calculation (ENUM_SYMBOL_CALC_MODE) ───────────────────────────
 
