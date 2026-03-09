@@ -116,6 +116,23 @@ export class DealPool {
   }
 
   /**
+   * Volume-weighted average of `deal.price` (execution price).
+   * Returns 0 when the pool is empty.
+   *
+   * Primary use: compute the true average fill price when a position is
+   * built across multiple partial executions (scaled-in entries).
+   *
+   * @example
+   * const avgEntry = pool.filter(entryMatcher).vwap();
+   */
+  vwap(): number {
+    const vol = this.totalVolume();
+    if (vol === 0) return 0;
+    const value = this.reduce((n, d) => n + d.volume * d.price, 0);
+    return value / vol;
+  }
+
+  /**
    * Partition this pool by `deal.symbol`.
    * Each entry in the returned map is a sub-pool of deals for that symbol.
    */

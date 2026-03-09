@@ -800,4 +800,33 @@ describe('DealPool', () => {
     const gbpPool = pool.groupBySymbol().get('GBPUSD')!;
     expect(gbpPool.filter(exitMatcher).size).toBe(1);
   });
+
+  it('vwap() volume-weighted average of deal.price', () => {
+    // d1: vol=0.1, price=0; d2: vol=0.1, price=0; d3: vol=0.2, price=0; d4: vol=0.2, price=0
+    // all prices are 0 in base fixtures — use a dedicated pool for this test
+    const base2 = DealInfoVOFactory.make({ userId: 'u1', symbol: 'EURUSD' });
+    const e1 = Deal.fromVO({ ...base2, ticket: 10, entry: DealEntry.In,  volume: 0.1, price: 1.10 });
+    const e2 = Deal.fromVO({ ...base2, ticket: 11, entry: DealEntry.In,  volume: 0.2, price: 1.12 });
+    const e3 = Deal.fromVO({ ...base2, ticket: 12, entry: DealEntry.In,  volume: 0.3, price: 1.15 });
+    const entryPool = new DealPool([e1, e2, e3]);
+    // (0.1*1.10 + 0.2*1.12 + 0.3*1.15) / 0.6 = 0.679 / 0.6 = 1.13166̄ ≈ 1.1317 (4 dp)
+    expect(entryPool.vwap()).toBeCloseTo(1.1317, 4);
+  });
+
+  it('vwap() returns 0 for empty pool', () => {
+    expect(new DealPool([]).vwap()).toBe(0);
+  });
+
+  it('InOut deal satisfies both entryMatcher and exitMatcher', () => {
+    const base2 = DealInfoVOFactory.make({ userId: 'u1', symbol: 'EURUSD' });
+    const inOut = Deal.fromVO({ ...base2, ticket: 20, entry: DealEntry.InOut, volume: 0.1, price: 1.10 });
+    const mixed = new DealPool([inOut]);
+    expect(mixed.has(entryMatcher)).toBe(true);
+    expect(mixed.has(exitMatcher)).toBe(true);
+    // filter by entry keeps the deal; filter by exit also keeps it
+    expect(mixed.filter(entryMatcher).size).toBe(1);
+    expect(mixed.filter(exitMatcher).size).toBe(1);
+    // composed filter: entryMatcher AND exitMatcher still keeps it (InOut satisfies both)
+    expect(mixed.filter(entryMatcher).filter(exitMatcher).size).toBe(1);
+  });
 });
