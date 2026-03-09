@@ -7,3 +7,5 @@ export { AtrMethod } from './indicator/indicator.js';
 export { AssetType } from './symbol/symbol.js';
 
 export { TrailMode, TrailConfig, TrailState, HitResult } from './trail/trail.js';
+export { PositionPool, type PositionMatcher } from './position/position-pool.js';
+export { DealPool, type DealMatcher } from './deal/deal-pool.js';

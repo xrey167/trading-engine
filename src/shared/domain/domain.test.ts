@@ -30,6 +30,8 @@ import {
   SymbolInfoCrypto, SymbolInfoIndex,
 } from './symbol/symbol.js';
 import { MoneyManagementFactoryConfigSchema } from '../../trading/money-management/types.js';
+import { PositionPool, buyMatcher as posBuyMatcher, sellMatcher as posSellMatcher, hasSlMatcher as posHasSlMatcher, hasTpMatcher as posHasTpMatcher, breakevenMatcher, profitableMatcher as posProfitableMatcher } from './position/position-pool.js';
+import { DealPool, buyMatcher as dealBuyMatcher, entryMatcher, exitMatcher } from './deal/deal-pool.js';
 
 // ─────────────────────────────────────────────────────────────
 // Unit 4 — TradeSignalFlag constants
@@ -594,5 +596,208 @@ describe('Schema re-exports', () => {
     expect(TickSchema.properties.bid).toBeDefined();
     expect(TickSchema.properties.ask).toBeDefined();
     expect(TickSchema.properties.time).toBeDefined();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// PositionPool
+// ─────────────────────────────────────────────────────────────
+
+describe('PositionPool', () => {
+  const base = PositionVOFactory.make({ userId: 'u1', symbol: 'EURUSD' });
+
+  const buy1  = Position.fromVO({ ...base, ticket: 1, type: PositionType.BUY,  volume: 0.1, priceOpen: 1.10, stopLoss: 1.08, takeProfit: 0,    profit: 20,  commission: -1, swap: 0 });
+  const buy2  = Position.fromVO({ ...base, ticket: 2, type: PositionType.BUY,  volume: 0.2, priceOpen: 1.12, stopLoss: 1.12, takeProfit: 1.20, profit: 50,  commission: -2, swap: 0 });
+  const sell1 = Position.fromVO({ ...base, ticket: 3, type: PositionType.SELL, volume: 0.3, priceOpen: 1.15, stopLoss: 0,    takeProfit: 0,    profit: -30, commission: -1, swap: 0 });
+
+  const pool = new PositionPool([buy1, buy2, sell1]);
+
+  it('size / isEmpty on empty pool', () => {
+    const empty = new PositionPool([]);
+    expect(empty.size).toBe(0);
+    expect(empty.isEmpty).toBe(true);
+  });
+
+  it('size / isEmpty on populated pool', () => {
+    expect(pool.size).toBe(3);
+    expect(pool.isEmpty).toBe(false);
+  });
+
+  it('count() total', () => {
+    expect(pool.count()).toBe(3);
+  });
+
+  it('count(buyMatcher)', () => {
+    expect(pool.count(posBuyMatcher)).toBe(2);
+  });
+
+  it('find() by ticket', () => {
+    expect(pool.find(p => p.ticket === 2)).toBe(buy2);
+    expect(pool.find(p => p.ticket === 99)).toBeUndefined();
+  });
+
+  it('has() true and false cases', () => {
+    expect(pool.has(posSellMatcher)).toBe(true);
+    expect(pool.has(p => p.ticket === 99)).toBe(false);
+  });
+
+  it('filter(buyMatcher) returns only buys', () => {
+    const buys = pool.filter(posBuyMatcher);
+    expect(buys.size).toBe(2);
+    expect(buys.has(posSellMatcher)).toBe(false);
+  });
+
+  it('filter(buyMatcher).filter(hasSlMatcher) composed filters', () => {
+    // both buy1 (SL=1.08) and buy2 (SL=1.12) have SL set
+    const buysWithSl = pool.filter(posBuyMatcher).filter(posHasSlMatcher);
+    expect(buysWithSl.size).toBe(2);
+    expect(buysWithSl.find(p => p.ticket === 1)).toBe(buy1);
+    expect(buysWithSl.find(p => p.ticket === 2)).toBe(buy2);
+  });
+
+  it('filter(hasTpMatcher) returns positions with TP', () => {
+    expect(pool.filter(posHasTpMatcher).size).toBe(1);
+  });
+
+  it('filter(breakevenMatcher) returns breakeven positions', () => {
+    // buy2 has SL == priceOpen (1.12 == 1.12) → breakeven
+    expect(pool.filter(breakevenMatcher).size).toBe(1);
+  });
+
+  it('filter(profitableMatcher) returns profitable positions', () => {
+    // buy1: 20 + -1 + 0 = 19 ✓   buy2: 50 + -2 + 0 = 48 ✓   sell1: -30 + -1 + 0 = -31 ✗
+    expect(pool.filter(posProfitableMatcher).size).toBe(2);
+  });
+
+  it('for...of iteration', () => {
+    const tickets: number[] = [];
+    for (const p of pool) tickets.push(p.ticket);
+    expect(tickets).toEqual([1, 2, 3]);
+  });
+
+  it('map() extracts volumes', () => {
+    expect(pool.map(p => p.volume)).toEqual([0.1, 0.2, 0.3]);
+  });
+
+  it('reduce() sums volumes', () => {
+    expect(pool.reduce((n, p) => n + p.volume, 0)).toBeCloseTo(0.6);
+  });
+
+  it('totalVolume()', () => {
+    expect(pool.totalVolume()).toBeCloseTo(0.6);
+  });
+
+  it('totalNetProfit()', () => {
+    // buy1: 19, buy2: 48, sell1: -31 → 36
+    expect(pool.totalNetProfit()).toBeCloseTo(36);
+  });
+
+  it('vwap() weighted average of priceOpen', () => {
+    // (0.1*1.10 + 0.2*1.12 + 0.3*1.15) / 0.6 = (0.110 + 0.224 + 0.345) / 0.6 = 0.679 / 0.6 ≈ 1.1317
+    expect(pool.vwap()).toBeCloseTo(1.1317, 4);
+  });
+
+  it('vwap() returns 0 for empty pool', () => {
+    expect(new PositionPool([]).vwap()).toBe(0);
+  });
+
+  it('toArray() returns raw array', () => {
+    expect(pool.toArray()).toEqual([buy1, buy2, sell1]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// DealPool
+// ─────────────────────────────────────────────────────────────
+
+describe('DealPool', () => {
+  const base = DealInfoVOFactory.make({ userId: 'u1', symbol: 'EURUSD' });
+
+  const d1 = Deal.fromVO({ ...base, ticket: 1, symbol: 'EURUSD', positionId: 10, type: DealType.Buy,  entry: DealEntry.In,  volume: 0.1, profit: 0,   commission: -1, swap: 0 });
+  const d2 = Deal.fromVO({ ...base, ticket: 2, symbol: 'EURUSD', positionId: 10, type: DealType.Sell, entry: DealEntry.Out, volume: 0.1, profit: 50,  commission: -1, swap: 0 });
+  const d3 = Deal.fromVO({ ...base, ticket: 3, symbol: 'GBPUSD', positionId: 20, type: DealType.Buy,  entry: DealEntry.In,  volume: 0.2, profit: 0,   commission: -2, swap: 0 });
+  const d4 = Deal.fromVO({ ...base, ticket: 4, symbol: 'GBPUSD', positionId: 20, type: DealType.Sell, entry: DealEntry.Out, volume: 0.2, profit: -30, commission: -2, swap: 0 });
+
+  const pool = new DealPool([d1, d2, d3, d4]);
+
+  it('size / isEmpty', () => {
+    expect(new DealPool([]).isEmpty).toBe(true);
+    expect(pool.size).toBe(4);
+    expect(pool.isEmpty).toBe(false);
+  });
+
+  it('count() total and with matcher', () => {
+    expect(pool.count()).toBe(4);
+    expect(pool.count(dealBuyMatcher)).toBe(2);
+  });
+
+  it('find() by ticket', () => {
+    expect(pool.find(d => d.ticket === 3)).toBe(d3);
+    expect(pool.find(d => d.ticket === 99)).toBeUndefined();
+  });
+
+  it('has() true / false', () => {
+    expect(pool.has(entryMatcher)).toBe(true);
+    expect(pool.has(d => d.ticket === 99)).toBe(false);
+  });
+
+  it('filter(entryMatcher)', () => {
+    const entries = pool.filter(entryMatcher);
+    expect(entries.size).toBe(2);
+    expect(entries.has(exitMatcher)).toBe(false);
+  });
+
+  it('filter(exitMatcher)', () => {
+    const exits = pool.filter(exitMatcher);
+    expect(exits.size).toBe(2);
+    expect(exits.has(entryMatcher)).toBe(false);
+  });
+
+  it('for...of iteration', () => {
+    const tickets: number[] = [];
+    for (const d of pool) tickets.push(d.ticket);
+    expect(tickets).toEqual([1, 2, 3, 4]);
+  });
+
+  it('map() extracts volumes', () => {
+    expect(pool.map(d => d.volume)).toEqual([0.1, 0.1, 0.2, 0.2]);
+  });
+
+  it('reduce() sums volumes', () => {
+    expect(pool.reduce((n, d) => n + d.volume, 0)).toBeCloseTo(0.6);
+  });
+
+  it('totalVolume()', () => {
+    expect(pool.totalVolume()).toBeCloseTo(0.6);
+  });
+
+  it('totalNetProfit()', () => {
+    // d1: -1, d2: 49, d3: -2, d4: -32 → 14
+    expect(pool.totalNetProfit()).toBeCloseTo(14);
+  });
+
+  it('toArray() returns raw array', () => {
+    expect(pool.toArray()).toEqual([d1, d2, d3, d4]);
+  });
+
+  it('groupBySymbol() partitions correctly', () => {
+    const bySymbol = pool.groupBySymbol();
+    expect(bySymbol.size).toBe(2);
+    expect(bySymbol.get('EURUSD')?.size).toBe(2);
+    expect(bySymbol.get('GBPUSD')?.size).toBe(2);
+    expect(bySymbol.get('EURUSD')?.find(d => d.ticket === 1)).toBe(d1);
+  });
+
+  it('groupByPosition() partitions correctly', () => {
+    const byPos = pool.groupByPosition();
+    expect(byPos.size).toBe(2);
+    expect(byPos.get(10)?.size).toBe(2);
+    expect(byPos.get(20)?.size).toBe(2);
+    expect(byPos.get(10)?.find(d => d.ticket === 2)).toBe(d2);
+  });
+
+  it('groupBySymbol() sub-pools support further filter', () => {
+    const gbpPool = pool.groupBySymbol().get('GBPUSD')!;
+    expect(gbpPool.filter(exitMatcher).size).toBe(1);
   });
 });
