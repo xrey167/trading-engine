@@ -1,4 +1,4 @@
-import { Side, type TrailMode, type LimitConfirm } from '../../shared/domain/engine-enums.js';
+import { Side, OrderBase, type TrailMode, type LimitConfirm } from '../../shared/domain/engine-enums.js';
 import type { Bar } from '../../shared/domain/bar/bar.js';
 import type { Bars } from '../../shared/domain/bar/bars.js';
 import type { SymbolInfoBase } from '../../engine/core/symbol.js';
@@ -32,7 +32,7 @@ export interface OrderParams {
   pullbackPts?:  number;
 }
 
-export abstract class Order {
+export abstract class Order extends OrderBase {
   readonly id:            string;
   readonly type:          OrderEntryType;
   readonly side:          Side;
@@ -50,6 +50,7 @@ export abstract class Order {
   protected _trailRef?: number;
 
   constructor(p: OrderParams) {
+    super();
     this.id           = p.id;
     this.type         = p.type;
     this.side         = p.side;
@@ -65,6 +66,20 @@ export abstract class Order {
     this.limitConfirm = p.limitConfirm;
     this.pullbackPts  = p.pullbackPts;
   }
+
+  // ── OrderBase implementation ─────────────────────────────
+
+  direction(): Side { return this.side; }
+
+  // bracketSL / bracketTP are point distances set before fill, not absolute price levels.
+  // Return 0 for the level getters; override hasStopLoss/hasTakeProfit to check presence.
+  get stopLoss():   number { return 0; }
+  get takeProfit(): number { return 0; }
+
+  override hasStopLoss():   boolean { return this.bracketSL != null; }
+  override hasTakeProfit(): boolean { return this.bracketTP != null; }
+
+  // ── Execution ────────────────────────────────────────────
 
   abstract isFilled(bar: Bar): boolean;
   abstract computeFillPrice(bar: Bar): number;

@@ -128,7 +128,6 @@ export const OrderVOFactory = {
 
 /** Abstract base for all order representations (history VO, engine active orders). */
 export abstract class OrderBase {
-  abstract readonly symbol:     string;
   abstract readonly stopLoss:   number;
   abstract readonly takeProfit: number;
 
