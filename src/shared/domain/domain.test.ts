@@ -20,7 +20,7 @@ import {
   TradeStatsSchema,
   TradeParamsSchema,
 } from './metrics/trade-params.js';
-import { PositionInfoVOSchema, Position, PositionVOFactory } from './position/position.js';
+import { PositionInfoVOSchema, Position, PositionVOFactory, PositionType } from './position/position.js';
 import { Deal, DealInfoVOFactory } from './deal/deal.js';
 import { DealType, DealEntry } from './history/history.js';
 import { AccountInfoVOSchema } from './account/account.js';
@@ -369,8 +369,8 @@ describe('Position', () => {
   const base = PositionVOFactory.make({ userId: 'u1', symbol: 'EURUSD' });
 
   it('isBuy / isSell', () => {
-    const buy  = Position.fromVO({ ...base, type: 'BUY'  });
-    const sell = Position.fromVO({ ...base, type: 'SELL' });
+    const buy  = Position.fromVO({ ...base, type: PositionType.BUY  });
+    const sell = Position.fromVO({ ...base, type: PositionType.SELL });
     expect(buy.isBuy()).toBe(true);
     expect(buy.isSell()).toBe(false);
     expect(sell.isBuy()).toBe(false);
@@ -387,18 +387,18 @@ describe('Position', () => {
   });
 
   it('isBreakeven buy: SL >= open', () => {
-    const be    = Position.fromVO({ ...base, type: 'BUY',  priceOpen: 1.1, stopLoss: 1.1  });
-    const notBe = Position.fromVO({ ...base, type: 'BUY',  priceOpen: 1.1, stopLoss: 1.09 });
-    const noSl  = Position.fromVO({ ...base, type: 'BUY',  priceOpen: 1.1, stopLoss: 0    });
+    const be    = Position.fromVO({ ...base, type: PositionType.BUY, priceOpen: 1.1, stopLoss: 1.1  });
+    const notBe = Position.fromVO({ ...base, type: PositionType.BUY, priceOpen: 1.1, stopLoss: 1.09 });
+    const noSl  = Position.fromVO({ ...base, type: PositionType.BUY, priceOpen: 1.1, stopLoss: 0    });
     expect(be.isBreakeven()).toBe(true);
     expect(notBe.isBreakeven()).toBe(false);
     expect(noSl.isBreakeven()).toBe(false);
   });
 
   it('isBreakeven sell: open >= SL', () => {
-    const be    = Position.fromVO({ ...base, type: 'SELL', priceOpen: 1.1, stopLoss: 1.1  });
-    const notBe = Position.fromVO({ ...base, type: 'SELL', priceOpen: 1.1, stopLoss: 1.11 });
-    const noSl  = Position.fromVO({ ...base, type: 'SELL', priceOpen: 1.1, stopLoss: 0    });
+    const be    = Position.fromVO({ ...base, type: PositionType.SELL, priceOpen: 1.1, stopLoss: 1.1  });
+    const notBe = Position.fromVO({ ...base, type: PositionType.SELL, priceOpen: 1.1, stopLoss: 1.11 });
+    const noSl  = Position.fromVO({ ...base, type: PositionType.SELL, priceOpen: 1.1, stopLoss: 0    });
     expect(be.isBreakeven()).toBe(true);
     expect(notBe.isBreakeven()).toBe(false);
     expect(noSl.isBreakeven()).toBe(false);
