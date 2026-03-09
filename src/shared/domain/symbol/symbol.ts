@@ -1,12 +1,8 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { AssetType } from './symbol-info.js';
 
-// Re-export so all existing `symbol/symbol.js` importers keep working.
-export { AssetType } from './symbol-info.js';
-export {
-  SymbolInfoBase, SymbolInfoForex, SymbolInfoStock,
-  SymbolInfoFuture, SymbolInfoCrypto, SymbolInfoIndex,
-} from './symbol-info.js';
+// Re-export everything so all existing `symbol/symbol.js` importers keep working.
+export * from './symbol-info.js';
 
 // ─────────────────────────────────────────────────────────────
 // SymbolInfoVO — serialization / API boundary
