@@ -96,7 +96,8 @@ export const HistoryOrderInfoVOSchema = Type.Object({
   takeProfit:    Type.Number(),
   timeSetup:     Type.String({ format: 'date-time' }),
   timeDone:      Type.String({ format: 'date-time' }),
-  comment:       Type.String(),
+  comment:      Type.String(),
+  canonicalId:  Type.Optional(Type.String()),
 });
 export type HistoryOrderInfoVO = Static<typeof HistoryOrderInfoVOSchema>;
 

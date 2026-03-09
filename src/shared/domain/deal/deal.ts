@@ -23,7 +23,8 @@ export const DealInfoVOSchema = Type.Object({
   swap:       Type.Number(),
   profit:     Type.Number(),
   time:       Type.String({ format: 'date-time' }),
-  comment:    Type.String(),
+  comment:     Type.String(),
+  canonicalId: Type.Optional(Type.String()),
 });
 export type DealInfoVO = Static<typeof DealInfoVOSchema>;
 

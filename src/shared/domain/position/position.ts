@@ -30,7 +30,8 @@ export const PositionInfoVOSchema = Type.Object({
   profit:         Type.Number(),
   comment:        Type.String(),
   externalId:     Type.String(),
-  reason:         Type.Number(),
+  reason:      Type.Number(),
+  canonicalId: Type.Optional(Type.String()),
 });
 export type PositionInfoVO = Static<typeof PositionInfoVOSchema>;
 
