@@ -20,7 +20,9 @@ import {
   TradeStatsSchema,
   TradeParamsSchema,
 } from './metrics/trade-params.js';
-import { PositionInfoVOSchema } from './position/position.js';
+import { PositionInfoVOSchema, Position, PositionVOFactory } from './position/position.js';
+import { Deal, DealInfoVOFactory } from './deal/deal.js';
+import { DealType, DealEntry } from './history/history.js';
 import { AccountInfoVOSchema } from './account/account.js';
 import { SymbolInfoVOSchema, TickSchema } from './symbol/symbol.js';;
 import { MoneyManagementFactoryConfigSchema } from '../../trading/money-management/types.js';
@@ -303,6 +305,128 @@ describe('MoneyManagementFactoryConfigSchema', () => {
       lotsValue: 0.1,
     };
     expect(Value.Check(MoneyManagementFactoryConfigSchema, invalid)).toBe(false);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// Deal domain class
+// ─────────────────────────────────────────────────────────────
+
+describe('Deal', () => {
+  const base = DealInfoVOFactory.make({ userId: 'u1', symbol: 'EURUSD' });
+
+  it('isBuy / isSell', () => {
+    const buy  = Deal.fromVO({ ...base, type: DealType.Buy  });
+    const sell = Deal.fromVO({ ...base, type: DealType.Sell });
+    expect(buy.isBuy()).toBe(true);
+    expect(buy.isSell()).toBe(false);
+    expect(sell.isBuy()).toBe(false);
+    expect(sell.isSell()).toBe(true);
+  });
+
+  it('isEntry / isExit', () => {
+    const inDeal    = Deal.fromVO({ ...base, entry: DealEntry.In    });
+    const outDeal   = Deal.fromVO({ ...base, entry: DealEntry.Out   });
+    const inOutDeal = Deal.fromVO({ ...base, entry: DealEntry.InOut });
+    const outByDeal = Deal.fromVO({ ...base, entry: DealEntry.OutBy });
+    expect(inDeal.isEntry()).toBe(true);
+    expect(inDeal.isExit()).toBe(false);
+    expect(outDeal.isEntry()).toBe(false);
+    expect(outDeal.isExit()).toBe(true);
+    expect(inOutDeal.isEntry()).toBe(true);
+    expect(inOutDeal.isExit()).toBe(true);
+    expect(outByDeal.isExit()).toBe(true);
+  });
+
+  it('netProfit sums signed fields', () => {
+    const d = Deal.fromVO({ ...base, profit: 100, commission: -2, swap: -1 });
+    expect(d.netProfit()).toBe(97);
+  });
+
+  it('isProfitable', () => {
+    const win  = Deal.fromVO({ ...base, profit: 100, commission: -2, swap: 0 });
+    const loss = Deal.fromVO({ ...base, profit: -50, commission: -2, swap: 0 });
+    expect(win.isProfitable()).toBe(true);
+    expect(loss.isProfitable()).toBe(false);
+  });
+
+  it('fromVO / toVO round-trip', () => {
+    const vo = { ...base, ticket: 42, profit: 10, commission: -1, swap: 0 };
+    const d  = Deal.fromVO(vo);
+    expect(d.ticket).toBe(42);
+    expect(d.time).toBeInstanceOf(Date);
+    expect(d.toVO().time).toBe(new Date(vo.time).toISOString());
+    expect(d.toVO()).toMatchObject({ ticket: 42, profit: 10 });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// Position domain class
+// ─────────────────────────────────────────────────────────────
+
+describe('Position', () => {
+  const base = PositionVOFactory.make({ userId: 'u1', symbol: 'EURUSD' });
+
+  it('isBuy / isSell', () => {
+    const buy  = Position.fromVO({ ...base, type: 'BUY'  });
+    const sell = Position.fromVO({ ...base, type: 'SELL' });
+    expect(buy.isBuy()).toBe(true);
+    expect(buy.isSell()).toBe(false);
+    expect(sell.isBuy()).toBe(false);
+    expect(sell.isSell()).toBe(true);
+  });
+
+  it('hasStopLoss / hasTakeProfit', () => {
+    const noLevels = Position.fromVO({ ...base, stopLoss: 0, takeProfit: 0 });
+    const levels   = Position.fromVO({ ...base, stopLoss: 1.08, takeProfit: 1.15 });
+    expect(noLevels.hasStopLoss()).toBe(false);
+    expect(noLevels.hasTakeProfit()).toBe(false);
+    expect(levels.hasStopLoss()).toBe(true);
+    expect(levels.hasTakeProfit()).toBe(true);
+  });
+
+  it('isBreakeven buy: SL >= open', () => {
+    const be    = Position.fromVO({ ...base, type: 'BUY',  priceOpen: 1.1, stopLoss: 1.1  });
+    const notBe = Position.fromVO({ ...base, type: 'BUY',  priceOpen: 1.1, stopLoss: 1.09 });
+    const noSl  = Position.fromVO({ ...base, type: 'BUY',  priceOpen: 1.1, stopLoss: 0    });
+    expect(be.isBreakeven()).toBe(true);
+    expect(notBe.isBreakeven()).toBe(false);
+    expect(noSl.isBreakeven()).toBe(false);
+  });
+
+  it('isBreakeven sell: open >= SL', () => {
+    const be    = Position.fromVO({ ...base, type: 'SELL', priceOpen: 1.1, stopLoss: 1.1  });
+    const notBe = Position.fromVO({ ...base, type: 'SELL', priceOpen: 1.1, stopLoss: 1.11 });
+    expect(be.isBreakeven()).toBe(true);
+    expect(notBe.isBreakeven()).toBe(false);
+  });
+
+  it('netProfit sums signed fields', () => {
+    const p = Position.fromVO({ ...base, profit: 50, commission: -3, swap: -2 });
+    expect(p.netProfit()).toBe(45);
+  });
+
+  it('isProfitable', () => {
+    const win  = Position.fromVO({ ...base, profit: 50, commission: -3, swap: 0 });
+    const loss = Position.fromVO({ ...base, profit: -10, commission: 0, swap: 0 });
+    expect(win.isProfitable()).toBe(true);
+    expect(loss.isProfitable()).toBe(false);
+  });
+
+  it('fromVO / toVO round-trip', () => {
+    const vo = { ...base, ticket: 99, priceOpen: 1.2, priceStopLimit: 0 };
+    const p  = Position.fromVO(vo);
+    expect(p.ticket).toBe(99);
+    expect(p.time).toBeInstanceOf(Date);
+    expect(p.timeUpdate).toBeUndefined();
+    expect(p.toVO()).toMatchObject({ ticket: 99, priceOpen: 1.2 });
+  });
+
+  it('fromVO preserves timeUpdate', () => {
+    const t  = '2025-06-01T12:00:00Z';
+    const p  = Position.fromVO({ ...base, timeUpdate: t });
+    expect(p.timeUpdate).toBeInstanceOf(Date);
+    expect(p.toVO().timeUpdate).toBe(new Date(t).toISOString());
   });
 });
 
