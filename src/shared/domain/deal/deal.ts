@@ -11,6 +11,7 @@ const DealEntrySchema = Type.Union(Object.values(DealEntry).map(v => Type.Litera
 export const DealInfoVOSchema = Type.Object({
   ticket:     Type.Number(),
   userId:     Type.String(),
+  brokerId:   Type.String(),
   order:      Type.Number(),
   positionId: Type.Number(),
   symbol:     Type.String(),
@@ -31,6 +32,7 @@ export const DealInfoVOFactory = {
     const defaults: DealInfoVO = {
       ticket:     0,
       userId:     overrides.userId,
+      brokerId:   '',
       symbol:     overrides.symbol,
       type:       DealType.Buy,
       entry:      DealEntry.In,
@@ -56,6 +58,7 @@ export class Deal {
   constructor(
     public readonly ticket:     number,
     public readonly userId:     string,
+    public readonly brokerId:   string,
     public readonly order:      number,
     public readonly positionId: number,
     public readonly symbol:     string,
@@ -103,6 +106,7 @@ export class Deal {
     return new Deal(
       vo.ticket,
       vo.userId,
+      vo.brokerId,
       vo.order,
       vo.positionId,
       vo.symbol,
@@ -123,6 +127,7 @@ export class Deal {
     return {
       ticket:     this.ticket,
       userId:     this.userId,
+      brokerId:   this.brokerId,
       order:      this.order,
       positionId: this.positionId,
       symbol:     this.symbol,
