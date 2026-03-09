@@ -365,6 +365,18 @@ describe('Deal', () => {
     expect(d.toVO().time).toBe(new Date(vo.time).toISOString());
     expect(d.toVO()).toMatchObject({ ticket: 42, profit: 10 });
   });
+
+  it('fromVO / toVO preserves canonicalId when present', () => {
+    const d = Deal.fromVO({ ...base, canonicalId: 'ord_AAAAAAAAAAAAAAAAAAAAAA' });
+    expect(d.canonicalId).toBe('ord_AAAAAAAAAAAAAAAAAAAAAA');
+    expect(d.toVO().canonicalId).toBe('ord_AAAAAAAAAAAAAAAAAAAAAA');
+  });
+
+  it('fromVO / toVO omits canonicalId when absent', () => {
+    const d = Deal.fromVO(base);
+    expect(d.canonicalId).toBeUndefined();
+    expect(d.toVO().canonicalId).toBeUndefined();
+  });
 });
 
 // ─────────────────────────────────────────────────────────────
@@ -436,6 +448,18 @@ describe('Position', () => {
     const p  = Position.fromVO({ ...base, timeUpdate: t });
     expect(p.timeUpdate).toBeInstanceOf(Date);
     expect(p.toVO().timeUpdate).toBe(new Date(t).toISOString());
+  });
+
+  it('fromVO / toVO preserves canonicalId when present', () => {
+    const p = Position.fromVO({ ...base, canonicalId: 'pos_AAAAAAAAAAAAAAAAAAAAAA' });
+    expect(p.canonicalId).toBe('pos_AAAAAAAAAAAAAAAAAAAAAA');
+    expect(p.toVO().canonicalId).toBe('pos_AAAAAAAAAAAAAAAAAAAAAA');
+  });
+
+  it('fromVO / toVO omits canonicalId when absent', () => {
+    const p = Position.fromVO(base);
+    expect(p.canonicalId).toBeUndefined();
+    expect(p.toVO().canonicalId).toBeUndefined();
   });
 });
 
