@@ -61,3 +61,104 @@ export const PositionVOFactory = {
     return { ...defaults, ...overrides };
   },
 };
+
+export class Position {
+  constructor(
+    public readonly ticket:         number,
+    public readonly userId:         string,
+    public readonly brokerId:       string,
+    public readonly symbol:         string,
+    public readonly type:           PositionType,
+    public readonly magic:          number,
+    public readonly identifier:     number,
+    public readonly time:           Date,
+    public readonly timeUpdate:     Date | undefined,
+    public readonly priceOpen:      number,
+    public readonly priceCurrent:   number,
+    public readonly stopLoss:       number,
+    public readonly takeProfit:     number,
+    public readonly priceStopLimit: number,
+    public readonly volume:         number,
+    public readonly commission:     number,
+    public readonly swap:           number,
+    public readonly profit:         number,
+    public readonly comment:        string,
+    public readonly externalId:     string,
+    public readonly reason:         number,
+  ) {}
+
+  // ── Direction ─────────────────────────────────────────────
+  isBuy():  boolean { return this.type === PositionType.BUY;  }
+  isSell(): boolean { return this.type === PositionType.SELL; }
+
+  // ── SL / TP ────────────────────────────────────────────────
+  hasStopLoss():   boolean { return this.stopLoss   > 0; }
+  hasTakeProfit(): boolean { return this.takeProfit > 0; }
+
+  /** SL at or past open price in the profitable direction → position cannot lose. */
+  isBreakeven(): boolean {
+    if (!this.hasStopLoss()) return false;
+    const delta = this.isBuy()
+      ? this.stopLoss  - this.priceOpen   // buy:  SL >= open → breakeven
+      : this.priceOpen - this.stopLoss;   // sell: open >= SL → breakeven
+    return delta >= 0;
+  }
+
+  // ── P&L ───────────────────────────────────────────────────
+  /** Gross profit plus commission and swap (both stored as signed negative costs). */
+  netProfit(): number { return this.profit + this.commission + this.swap; }
+  isProfitable(): boolean { return this.netProfit() > 0; }
+
+  // ── Conversion ───────────────────────────────────────────
+  static fromVO(vo: PositionInfoVO): Position {
+    return new Position(
+      vo.ticket,
+      vo.userId,
+      vo.brokerId,
+      vo.symbol,
+      vo.type,
+      vo.magic,
+      vo.identifier,
+      new Date(vo.time),
+      vo.timeUpdate !== undefined ? new Date(vo.timeUpdate) : undefined,
+      vo.priceOpen,
+      vo.priceCurrent,
+      vo.stopLoss,
+      vo.takeProfit,
+      vo.priceStopLimit,
+      vo.volume,
+      vo.commission,
+      vo.swap,
+      vo.profit,
+      vo.comment,
+      vo.externalId,
+      vo.reason,
+    );
+  }
+
+  toVO(): PositionInfoVO {
+    return {
+      ticket:         this.ticket,
+      userId:         this.userId,
+      brokerId:       this.brokerId,
+      symbol:         this.symbol,
+      type:           this.type,
+      magic:          this.magic,
+      identifier:     this.identifier,
+      time:           this.time.toISOString(),
+      timeUpdate:     this.timeUpdate?.toISOString(),
+      priceOpen:      this.priceOpen,
+      priceCurrent:   this.priceCurrent,
+      stopLoss:       this.stopLoss,
+      takeProfit:     this.takeProfit,
+      priceStopLimit: this.priceStopLimit,
+      volume:         this.volume,
+      commission:     this.commission,
+      swap:           this.swap,
+      profit:         this.profit,
+      comment:        this.comment,
+      externalId:     this.externalId,
+      reason:         this.reason,
+    };
+  }
+}
