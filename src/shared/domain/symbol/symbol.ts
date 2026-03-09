@@ -190,25 +190,6 @@ export class TradingSymbol {
   }
 
   toVO(): SymbolInfoVO {
-    return {
-      name:           this.name,
-      description:    this.description,
-      assetType:      this.assetType,
-      digits:         this.digits,
-      point:          this.point,
-      tickSize:       this.tickSize,
-      tickValue:      this.tickValue,
-      spread:         this.spread,
-      spreadFloat:    this.spreadFloat,
-      lotsMin:        this.lotsMin,
-      lotsMax:        this.lotsMax,
-      lotsStep:       this.lotsStep,
-      contractSize:   this.contractSize,
-      bid:            this.bid,
-      ask:            this.ask,
-      currencyBase:   this.currencyBase,
-      currencyProfit: this.currencyProfit,
-      currencyMargin: this.currencyMargin,
-    };
+    return { ...this };
   }
 }
