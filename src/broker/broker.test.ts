@@ -31,7 +31,6 @@ function makePosition(overrides: Partial<PositionInfoVO> = {}): PositionInfoVO {
     profit: 0,
     comment: '',
     externalId: '',
-    reason: 0,
     ...overrides,
   };
 }

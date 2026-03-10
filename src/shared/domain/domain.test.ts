@@ -22,7 +22,10 @@ import {
 } from './metrics/trade-params.js';
 import { PositionInfoVOSchema, Position, PositionVOFactory, PositionType } from './position/position.js';
 import { Deal, DealInfoVOFactory } from './deal/deal.js';
-import { DealType, DealEntry } from './history/history.js';
+import { DealType, DealEntry, PositionReason, OrderReason } from './history/history.js';
+import { Order, OrderVOFactory } from './order/order.js';
+import { OrderType } from './order/order.js';
+import { OrderState } from './history/history.js';
 import { AccountInfoVOSchema } from './account/account.js';
 import {
   SymbolInfoVOSchema, TickSchema, SymbolInfoVOFactory,
@@ -125,7 +128,6 @@ describe('PositionInfoVOSchema', () => {
       profit: 20,
       comment: 'test',
       externalId: 'ext-1',
-      reason: 0,
     };
     expect(Value.Check(PositionInfoVOSchema, valid)).toBe(true);
   });
@@ -852,5 +854,83 @@ describe('DealPool', () => {
     expect(mixed.filter(exitMatcher).size).toBe(1);
     // composed filter: entryMatcher AND exitMatcher still keeps it (InOut satisfies both)
     expect(mixed.filter(entryMatcher).filter(exitMatcher).size).toBe(1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// PositionReason / OrderReason enums
+// ─────────────────────────────────────────────────────────────
+
+describe('PositionReason / OrderReason enums', () => {
+  it('PositionReason has 4 values', () => {
+    expect(Object.keys(PositionReason)).toHaveLength(4);
+    expect(PositionReason.Expert).toBe('EXPERT');
+  });
+
+  it('OrderReason has 7 values including SL/TP/SO', () => {
+    expect(Object.keys(OrderReason)).toHaveLength(7);
+    expect(OrderReason.SL).toBe('SL');
+    expect(OrderReason.SO).toBe('SO');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// Position reason predicates
+// ─────────────────────────────────────────────────────────────
+
+describe('Position reason predicates', () => {
+  const base = PositionVOFactory.make({ userId: 'u1', symbol: 'EURUSD' });
+
+  it('isExpert / isManual', () => {
+    const ea  = Position.fromVO({ ...base, reason: PositionReason.Expert });
+    const cli = Position.fromVO({ ...base, reason: PositionReason.Client });
+    expect(ea.isExpert()).toBe(true);
+    expect(cli.isExpert()).toBe(false);
+    expect(cli.isManual()).toBe(true);
+  });
+
+  it('reason is optional — undefined when omitted', () => {
+    const p = Position.fromVO(base);
+    expect(p.reason).toBeUndefined();
+    expect(p.toVO().reason).toBeUndefined();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// Order domain class
+// ─────────────────────────────────────────────────────────────
+
+describe('Order', () => {
+  const base = OrderVOFactory.make({ userId: 'u1', symbol: 'EURUSD' });
+
+  it('isFilled / isCanceled / isPending / isMarket', () => {
+    const filled  = Order.fromVO({ ...base, state: OrderState.Filled,  type: OrderType.Buy      });
+    const expired = Order.fromVO({ ...base, state: OrderState.Expired, type: OrderType.Buy      });
+    const pend    = Order.fromVO({ ...base, state: OrderState.Placed,  type: OrderType.BuyLimit });
+    expect(filled.isFilled()).toBe(true);
+    expect(expired.isCanceled()).toBe(true);
+    expect(pend.isPending()).toBe(true);
+    expect(filled.isMarket()).toBe(true);
+  });
+
+  it('reason predicates', () => {
+    const sl = Order.fromVO({ ...base, reason: OrderReason.SL });
+    const ea = Order.fromVO({ ...base, reason: OrderReason.Expert });
+    expect(sl.isTriggeredBySL()).toBe(true);
+    expect(sl.isTriggeredByTP()).toBe(false);
+    expect(ea.isExpert()).toBe(true);
+  });
+
+  it('reason is optional', () => {
+    const o = Order.fromVO(base);
+    expect(o.reason).toBeUndefined();
+    expect(o.toVO().reason).toBeUndefined();
+  });
+
+  it('fromVO / toVO round-trip', () => {
+    const vo = { ...base, ticket: 77, reason: OrderReason.TP };
+    const o  = Order.fromVO(vo);
+    expect(o.ticket).toBe(77);
+    expect(o.toVO().reason).toBe(OrderReason.TP);
   });
 });

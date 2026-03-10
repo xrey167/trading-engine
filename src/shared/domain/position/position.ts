@@ -1,4 +1,5 @@
 import { Type, type Static } from '@sinclair/typebox';
+import { PositionReason } from '../history/history.js';
 import type { CanonicalId } from '../../lib/canonical-id/index.js';
 
 export const PositionType = { BUY: 'BUY', SELL: 'SELL' } as const;
@@ -31,7 +32,7 @@ export const PositionInfoVOSchema = Type.Object({
   profit:         Type.Number(),
   comment:        Type.String(),
   externalId:     Type.String(),
-  reason:      Type.Number(),
+  reason:      Type.Optional(Type.Union(Object.values(PositionReason).map(v => Type.Literal(v)))),
   canonicalId: Type.Optional(Type.String()),
 });
 export type PositionInfoVO = Static<typeof PositionInfoVOSchema>;
@@ -58,7 +59,6 @@ export const PositionVOFactory = {
       profit:         0,
       comment:        '',
       externalId:     '',
-      reason:         0,
     };
     return { ...defaults, ...overrides };
   },
@@ -86,7 +86,7 @@ export class Position {
     public readonly profit:         number,
     public readonly comment:        string,
     public readonly externalId:     string,
-    public readonly reason:         number,
+    public readonly reason?:        PositionReason,
     public readonly canonicalId?:   CanonicalId,
   ) {}
 
@@ -112,6 +112,16 @@ export class Position {
   netProfit(): number { return this.profit + this.commission + this.swap; }
   isProfitable(): boolean { return this.netProfit() > 0; }
 
+  // ── Reason predicates ─────────────────────────────────────
+  /** True when this position was opened by an EA/script. */
+  isExpert(): boolean { return this.reason === PositionReason.Expert; }
+  /** True when this position was opened by a human (client/mobile/web). */
+  isManual(): boolean {
+    return this.reason === PositionReason.Client
+        || this.reason === PositionReason.Mobile
+        || this.reason === PositionReason.Web;
+  }
+
   // ── Conversion ───────────────────────────────────────────
   static fromVO(vo: PositionInfoVO): Position {
     return new Position(
@@ -135,7 +145,7 @@ export class Position {
       vo.profit,
       vo.comment,
       vo.externalId,
-      vo.reason,
+      vo.reason as PositionReason | undefined,
       vo.canonicalId as CanonicalId | undefined,
     );
   }
@@ -162,7 +172,7 @@ export class Position {
       profit:         this.profit,
       comment:        this.comment,
       externalId:     this.externalId,
-      reason:         this.reason,
+      ...(this.reason !== undefined ? { reason: this.reason } : {}),
       ...(this.canonicalId !== undefined ? { canonicalId: this.canonicalId } : {}),
     };
   }

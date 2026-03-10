@@ -1,5 +1,5 @@
 import { Type, type Static } from '@sinclair/typebox';
-import { OrderState } from '../history/history.js';
+import { OrderState, OrderReason } from '../history/history.js';
 import type { CanonicalId } from '../../lib/canonical-id/index.js';
 
 export const Side = { None: 0, Long: 1, Short: -1 } as const;
@@ -97,8 +97,9 @@ export const HistoryOrderInfoVOSchema = Type.Object({
   takeProfit:    Type.Number(),
   timeSetup:     Type.String({ format: 'date-time' }),
   timeDone:      Type.String({ format: 'date-time' }),
-  comment:      Type.String(),
-  canonicalId:  Type.Optional(Type.String()),
+  comment:     Type.String(),
+  reason:      Type.Optional(Type.Union(Object.values(OrderReason).map(v => Type.Literal(v)))),
+  canonicalId: Type.Optional(Type.String()),
 });
 export type HistoryOrderInfoVO = Static<typeof HistoryOrderInfoVOSchema>;
 
@@ -163,6 +164,7 @@ export class Order extends OrderBase {
     public readonly timeSetup:     Date,
     public readonly timeDone:      Date,
     public readonly comment:       string,
+    public readonly reason?:       OrderReason,
     public readonly canonicalId?:  CanonicalId,
   ) { super(); }
 
@@ -204,6 +206,16 @@ export class Order extends OrderBase {
 
   volumeRemaining(): number { return this.volumeCurrent; }
 
+  // ── Reason predicates ─────────────────────────────────────
+  /** True when this order was placed by an EA/script. */
+  isExpert():        boolean { return this.reason === OrderReason.Expert; }
+  /** True when this order was triggered by a stop-loss. */
+  isTriggeredBySL(): boolean { return this.reason === OrderReason.SL; }
+  /** True when this order was triggered by a take-profit. */
+  isTriggeredByTP(): boolean { return this.reason === OrderReason.TP; }
+  /** True when this order was triggered by a stop-out. */
+  isTriggeredBySO(): boolean { return this.reason === OrderReason.SO; }
+
   // ── Conversion ────────────────────────────────────────────
 
   /** Construct an Order from a serialized VO. */
@@ -215,6 +227,7 @@ export class Order extends OrderBase {
       vo.priceOpen, vo.stopLoss, vo.takeProfit,
       new Date(vo.timeSetup), new Date(vo.timeDone),
       vo.comment,
+      vo.reason as OrderReason | undefined,
       vo.canonicalId as CanonicalId | undefined,
     );
   }
@@ -236,6 +249,7 @@ export class Order extends OrderBase {
       timeSetup:     this.timeSetup.toISOString(),
       timeDone:      this.timeDone.toISOString(),
       comment:       this.comment,
+      ...(this.reason    !== undefined ? { reason:      this.reason      } : {}),
       ...(this.canonicalId !== undefined ? { canonicalId: this.canonicalId } : {}),
     };
   }

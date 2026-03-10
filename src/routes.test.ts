@@ -1120,7 +1120,7 @@ function makeSeedPosition(ticket: number): SeedPosition {
     priceOpen: 1.1000, priceCurrent: 1.1010,
     stopLoss: 0, takeProfit: 0, priceStopLimit: 0,
     volume: 0.1, commission: 0, swap: 0, profit: 0,
-    comment: '', externalId: '', reason: 0,
+    comment: '', externalId: '',
   } as SeedPosition;
 }
 
