@@ -1,17 +1,19 @@
 import { Type, type Static } from '@sinclair/typebox';
-import { DealType, DealEntry } from '../history/history.js';
+import { enumSchema } from '../../schemas/common.js';
+import { DealType, DealEntry, DealReason } from '../history/history.js';
+import type { CanonicalId } from '../../lib/canonical-id/index.js';
 
 // ─────────────────────────────────────────────────────────────
 // Schema + VO (serialization / API boundary)
 // ─────────────────────────────────────────────────────────────
 
-const DealTypeSchema  = Type.Union(Object.values(DealType).map(v  => Type.Literal(v)));
-const DealEntrySchema = Type.Union(Object.values(DealEntry).map(v => Type.Literal(v)));
+const DealTypeSchema  = enumSchema(DealType);
+const DealEntrySchema = enumSchema(DealEntry);
 
 export const DealInfoVOSchema = Type.Object({
   ticket:     Type.Number(),
   userId:     Type.String(),
-  brokerId:   Type.String(),
+  brokerId:   Type.Optional(Type.String()),
   order:      Type.Number(),
   positionId: Type.Number(),
   symbol:     Type.String(),
@@ -23,7 +25,9 @@ export const DealInfoVOSchema = Type.Object({
   swap:       Type.Number(),
   profit:     Type.Number(),
   time:       Type.String({ format: 'date-time' }),
-  comment:    Type.String(),
+  comment:     Type.String(),
+  reason:      Type.Optional(enumSchema(DealReason)),
+  canonicalId: Type.Optional(Type.String()),
 });
 export type DealInfoVO = Static<typeof DealInfoVOSchema>;
 
@@ -71,6 +75,8 @@ export class Deal {
     public readonly profit:     number,
     public readonly time:       Date,
     public readonly comment:    string,
+    public readonly reason?:    DealReason,
+    public readonly canonicalId?: CanonicalId,
   ) {}
 
   // ── Direction ─────────────────────────────────────────────
@@ -99,6 +105,16 @@ export class Deal {
 
   isProfitable(): boolean { return this.netProfit() > 0; }
 
+  // ── Reason predicates ─────────────────────────────────────
+  /** True when this deal was closed by a stop-loss trigger. */
+  isClosedBySL(): boolean { return this.reason === DealReason.SL; }
+  /** True when this deal was closed by a take-profit trigger. */
+  isClosedByTP(): boolean { return this.reason === DealReason.TP; }
+  /** True when this deal was triggered by a stop-out. */
+  isStopOut():    boolean { return this.reason === DealReason.SO; }
+  /** True when this deal was placed by an EA/script. */
+  isExpert():     boolean { return this.reason === DealReason.Expert; }
+
   // ── Conversion ───────────────────────────────────────────
 
   /** Construct a Deal from a serialized VO. */
@@ -106,7 +122,7 @@ export class Deal {
     return new Deal(
       vo.ticket,
       vo.userId,
-      vo.brokerId,
+      vo.brokerId ?? '',
       vo.order,
       vo.positionId,
       vo.symbol,
@@ -119,6 +135,8 @@ export class Deal {
       vo.profit,
       new Date(vo.time),
       vo.comment,
+      vo.reason,
+      vo.canonicalId as CanonicalId | undefined,
     );
   }
 
@@ -140,6 +158,8 @@ export class Deal {
       profit:     this.profit,
       time:       this.time.toISOString(),
       comment:    this.comment,
+      ...(this.reason    !== undefined ? { reason:      this.reason      } : {}),
+      ...(this.canonicalId !== undefined ? { canonicalId: this.canonicalId } : {}),
     };
   }
 }

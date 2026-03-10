@@ -7,10 +7,7 @@ import { ServiceKind } from '../shared/services/types.js';
 import { BaseService } from '../shared/services/base-service.js';
 import { BrokerService } from '../broker/broker-service.js';
 import type { RiskManagerService } from './risk-manager.js';
-import { createCanonicalId, EntityType, type CanonicalId } from '../shared/lib/canonical-id.js';
-import { CanonicalIdRegistry } from '../shared/lib/canonical-id-registry.js';
-
-const _canonicalRegistry = new CanonicalIdRegistry();
+import { createCanonicalId, EntityType, type CanonicalId, CanonicalIdRegistry } from '../shared/lib/canonical-id/index.js';
 
 export class ExecutionSaga extends BaseService {
   readonly id: string;
@@ -26,6 +23,7 @@ export class ExecutionSaga extends BaseService {
     name: string,
     private readonly riskManager: RiskManagerService,
     private readonly registry: ServiceRegistry,
+    private readonly canonicalRegistry: CanonicalIdRegistry,
     eventBus: TypedEventBus<AppEventMap>,
     logger: Logger,
   ) {
@@ -134,7 +132,7 @@ export class ExecutionSaga extends BaseService {
             symbol: signal.symbol,
             strategyId: 0,
           },
-          _canonicalRegistry,
+          this.canonicalRegistry,
           svc.broker,
         );
         if (cidResult.ok) {

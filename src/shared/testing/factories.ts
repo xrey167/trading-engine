@@ -38,7 +38,7 @@ export interface TestPosition {
   profit: number;
   comment: string;
   externalId: string;
-  reason: number;
+  reason?: string;
 }
 
 export interface TestSymbol {
@@ -114,7 +114,6 @@ export function makePosition(overrides: Partial<TestPosition> = {}): TestPositio
     profit: 20,
     comment: '',
     externalId: '',
-    reason: 0,
     ...overrides,
   };
 }

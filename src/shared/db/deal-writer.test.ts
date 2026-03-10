@@ -3,7 +3,7 @@ import { nullLogger } from '../lib/logger.js';
 import { TypedEventBus } from '../event-bus.js';
 import type { AppEventMap, OrderEvent } from '../services/event-map.js';
 import { DealWriter } from './deal-writer.js';
-import type { CanonicalId } from '../lib/canonical-id.js';
+import type { CanonicalId } from '../lib/canonical-id/index.js';
 
 function makeOrderEvent(overrides: Partial<OrderEvent> = {}): OrderEvent {
   return {

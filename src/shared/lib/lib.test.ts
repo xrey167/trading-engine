@@ -13,6 +13,12 @@ import {
   gatewayError, notImplemented, insufficientData,
 } from './errors.js';
 
+// Unit 13 — TradeRetcode
+import {
+  TradeRetcode, RetcodeCategory,
+  retcodeDescription, retcodeCategory, isRetcodeSuccess, isRetcodeTransient, retcodeToError,
+} from './retcode.js';
+
 // Unit 2 — Domain enums
 import { DayOfWeek } from '../domain/calendar/session.js';
 import { MAType, PriceType } from '../domain/indicator/indicator.js';
@@ -432,5 +438,118 @@ describe('MockIndicatorAdapter', () => {
     const ind = new MockIndicatorAdapter();
     ind.setDefaultATR(0.003);
     expect(ind.getATR('GBPUSD', 'M15', 20, 5)).toBe(0.003);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// Unit 13 — TradeRetcode
+// ─────────────────────────────────────────────────────────────
+
+describe('TradeRetcode', () => {
+  it('retcodeDescription returns known description', () => {
+    expect(retcodeDescription(TradeRetcode.Done)).toBe('Request completed');
+    expect(retcodeDescription(TradeRetcode.NoMoney)).toBe('There is not enough money to complete the request');
+    expect(retcodeDescription(TradeRetcode.Connection)).toBe('No connection with the trade server');
+  });
+
+  it('retcodeDescription returns fallback for unknown code', () => {
+    expect(retcodeDescription(99999)).toBe('Unknown retcode (99999)');
+  });
+
+  it('retcodeCategory classifies success codes', () => {
+    expect(retcodeCategory(TradeRetcode.Done)).toBe(RetcodeCategory.Success);
+    expect(retcodeCategory(TradeRetcode.Placed)).toBe(RetcodeCategory.Success);
+    expect(retcodeCategory(TradeRetcode.DonePartial)).toBe(RetcodeCategory.Success);
+  });
+
+  it('retcodeCategory classifies transient codes', () => {
+    expect(retcodeCategory(TradeRetcode.Requote)).toBe(RetcodeCategory.Transient);
+    expect(retcodeCategory(TradeRetcode.PriceChanged)).toBe(RetcodeCategory.Transient);
+    expect(retcodeCategory(TradeRetcode.TooManyRequests)).toBe(RetcodeCategory.Transient);
+    expect(retcodeCategory(TradeRetcode.Locked)).toBe(RetcodeCategory.Transient);
+  });
+
+  it('retcodeCategory classifies invalid-input codes', () => {
+    expect(retcodeCategory(TradeRetcode.InvalidVolume)).toBe(RetcodeCategory.InvalidInput);
+    expect(retcodeCategory(TradeRetcode.InvalidPrice)).toBe(RetcodeCategory.InvalidInput);
+    expect(retcodeCategory(TradeRetcode.InvalidStops)).toBe(RetcodeCategory.InvalidInput);
+    expect(retcodeCategory(TradeRetcode.InvalidFill)).toBe(RetcodeCategory.InvalidInput);
+  });
+
+  it('retcodeCategory classifies market-condition codes', () => {
+    expect(retcodeCategory(TradeRetcode.MarketClosed)).toBe(RetcodeCategory.MarketCondition);
+    expect(retcodeCategory(TradeRetcode.TradeDisabled)).toBe(RetcodeCategory.MarketCondition);
+    expect(retcodeCategory(TradeRetcode.LongOnly)).toBe(RetcodeCategory.MarketCondition);
+    expect(retcodeCategory(TradeRetcode.CloseOnly)).toBe(RetcodeCategory.MarketCondition);
+  });
+
+  it('retcodeCategory classifies account-constraint codes', () => {
+    expect(retcodeCategory(TradeRetcode.NoMoney)).toBe(RetcodeCategory.AccountConstraint);
+    expect(retcodeCategory(TradeRetcode.LimitOrders)).toBe(RetcodeCategory.AccountConstraint);
+    expect(retcodeCategory(TradeRetcode.LimitVolume)).toBe(RetcodeCategory.AccountConstraint);
+    expect(retcodeCategory(TradeRetcode.LimitPositions)).toBe(RetcodeCategory.AccountConstraint);
+  });
+
+  it('retcodeCategory classifies connection codes', () => {
+    expect(retcodeCategory(TradeRetcode.Connection)).toBe(RetcodeCategory.Connection);
+    expect(retcodeCategory(TradeRetcode.Timeout)).toBe(RetcodeCategory.Connection);
+  });
+
+  it('isRetcodeSuccess is true only for success codes', () => {
+    expect(isRetcodeSuccess(TradeRetcode.Done)).toBe(true);
+    expect(isRetcodeSuccess(TradeRetcode.Placed)).toBe(true);
+    expect(isRetcodeSuccess(TradeRetcode.DonePartial)).toBe(true);
+    expect(isRetcodeSuccess(TradeRetcode.NoMoney)).toBe(false);
+    expect(isRetcodeSuccess(TradeRetcode.Requote)).toBe(false);
+  });
+
+  it('isRetcodeTransient is true only for transient codes', () => {
+    expect(isRetcodeTransient(TradeRetcode.Requote)).toBe(true);
+    expect(isRetcodeTransient(TradeRetcode.PriceOff)).toBe(true);
+    expect(isRetcodeTransient(TradeRetcode.Done)).toBe(false);
+    expect(isRetcodeTransient(TradeRetcode.NoMoney)).toBe(false);
+  });
+
+  it('retcodeToError maps invalid-input codes to invalidInput DomainError', () => {
+    const e = retcodeToError(TradeRetcode.InvalidVolume);
+    expect(e.type).toBe('INVALID_INPUT');
+  });
+
+  it('retcodeToError maps market-condition codes to businessRule DomainError', () => {
+    const e = retcodeToError(TradeRetcode.MarketClosed);
+    expect(e.type).toBe('BUSINESS_RULE');
+    if (e.type === 'BUSINESS_RULE') expect(e.rule).toBe(`RETCODE_${TradeRetcode.MarketClosed}`);
+  });
+
+  it('retcodeToError maps account-constraint codes to businessRule DomainError', () => {
+    const e = retcodeToError(TradeRetcode.NoMoney, 'placeOrder');
+    expect(e.type).toBe('BUSINESS_RULE');
+    if (e.type === 'BUSINESS_RULE') {
+      expect(e.message).toMatch(/placeOrder/);
+      expect(e.message).toMatch(/not enough money/i);
+    }
+  });
+
+  it('retcodeToError maps connection codes to gatewayError DomainError', () => {
+    expect(retcodeToError(TradeRetcode.Connection).type).toBe('GATEWAY_ERROR');
+    expect(retcodeToError(TradeRetcode.Timeout).type).toBe('GATEWAY_ERROR');
+  });
+
+  it('retcodeToError maps transient codes to gatewayError after exhaustion', () => {
+    expect(retcodeToError(TradeRetcode.Requote).type).toBe('GATEWAY_ERROR');
+  });
+
+  it('retcodeToError uses fallback for unknown code', () => {
+    const e = retcodeToError(99999);
+    expect(e.type).toBe('GATEWAY_ERROR');
+    if (e.type === 'GATEWAY_ERROR') expect(e.message).toMatch(/99999/);
+  });
+
+  it('TradeRetcode values cover the expected range with no 10005/10037 gaps', () => {
+    const codes = Object.values(TradeRetcode) as number[];
+    expect(codes).not.toContain(10005);
+    expect(codes).not.toContain(10037);
+    expect(codes).toContain(10004);
+    expect(codes).toContain(10044);
   });
 });

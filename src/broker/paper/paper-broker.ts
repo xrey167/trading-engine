@@ -22,7 +22,7 @@ import type {
 import { ok, err, type Result } from '../../shared/lib/result.js';
 import { notFound, gatewayError, type DomainError } from '../../shared/lib/errors.js';
 import { consoleLogger, type Logger } from '../../shared/lib/logger.js';
-import { BrokerSlot } from '../../shared/lib/canonical-id.js';
+import { BrokerSlot } from '../../shared/lib/canonical-id/index.js';
 
 /**
  * Paper broker — simulates fills in memory.

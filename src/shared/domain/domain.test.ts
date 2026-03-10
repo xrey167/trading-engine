@@ -22,14 +22,19 @@ import {
 } from './metrics/trade-params.js';
 import { PositionInfoVOSchema, Position, PositionVOFactory, PositionType } from './position/position.js';
 import { Deal, DealInfoVOFactory } from './deal/deal.js';
-import { DealType, DealEntry } from './history/history.js';
-import { AccountInfoVOSchema } from './account/account.js';
+import { DealType, DealEntry, DealReason, PositionReason, OrderReason, TradeEventFlag, tradeEventFlags, hasTradeEventFlag, OrderStatus } from './history/history.js';
+import { Order, OrderVOFactory } from './order/order.js';
+import { OrderType } from './order/order.js';
+import { OrderState } from './history/history.js';
+import { AccountInfoVOSchema, Account, AccountVOFactory, AccountType, AccountTradeMode, AccountStopoutMode } from './account/account.js';
 import {
   SymbolInfoVOSchema, TickSchema, SymbolInfoVOFactory,
   TradingSymbol, AssetType,
   SymbolInfoCrypto, SymbolInfoIndex,
 } from './symbol/symbol.js';
 import { MoneyManagementFactoryConfigSchema } from '../../trading/money-management/types.js';
+import { PositionPool, buyMatcher as posBuyMatcher, sellMatcher as posSellMatcher, hasSlMatcher as posHasSlMatcher, hasTpMatcher as posHasTpMatcher, breakevenMatcher, profitableMatcher as posProfitableMatcher } from './position/position-pool.js';
+import { DealPool, buyMatcher as dealBuyMatcher, entryMatcher, exitMatcher } from './deal/deal-pool.js';
 
 // ─────────────────────────────────────────────────────────────
 // Unit 4 — TradeSignalFlag constants
@@ -123,7 +128,6 @@ describe('PositionInfoVOSchema', () => {
       profit: 20,
       comment: 'test',
       externalId: 'ext-1',
-      reason: 0,
     };
     expect(Value.Check(PositionInfoVOSchema, valid)).toBe(true);
   });
@@ -163,6 +167,7 @@ describe('AccountInfoVOSchema', () => {
   it('validates a valid account object', () => {
     const valid = {
       login: 123,
+      accountType: 2,
       tradeMode: 'HEDGE',
       leverage: 100,
       marginMode: 0,
@@ -363,6 +368,18 @@ describe('Deal', () => {
     expect(d.toVO().time).toBe(new Date(vo.time).toISOString());
     expect(d.toVO()).toMatchObject({ ticket: 42, profit: 10 });
   });
+
+  it('fromVO / toVO preserves canonicalId when present', () => {
+    const d = Deal.fromVO({ ...base, canonicalId: 'ord_AAAAAAAAAAAAAAAAAAAAAA' });
+    expect(d.canonicalId).toBe('ord_AAAAAAAAAAAAAAAAAAAAAA');
+    expect(d.toVO().canonicalId).toBe('ord_AAAAAAAAAAAAAAAAAAAAAA');
+  });
+
+  it('fromVO / toVO omits canonicalId when absent', () => {
+    const d = Deal.fromVO(base);
+    expect(d.canonicalId).toBeUndefined();
+    expect(d.toVO().canonicalId).toBeUndefined();
+  });
 });
 
 // ─────────────────────────────────────────────────────────────
@@ -434,6 +451,18 @@ describe('Position', () => {
     const p  = Position.fromVO({ ...base, timeUpdate: t });
     expect(p.timeUpdate).toBeInstanceOf(Date);
     expect(p.toVO().timeUpdate).toBe(new Date(t).toISOString());
+  });
+
+  it('fromVO / toVO preserves canonicalId when present', () => {
+    const p = Position.fromVO({ ...base, canonicalId: 'pos_AAAAAAAAAAAAAAAAAAAAAA' });
+    expect(p.canonicalId).toBe('pos_AAAAAAAAAAAAAAAAAAAAAA');
+    expect(p.toVO().canonicalId).toBe('pos_AAAAAAAAAAAAAAAAAAAAAA');
+  });
+
+  it('fromVO / toVO omits canonicalId when absent', () => {
+    const p = Position.fromVO(base);
+    expect(p.canonicalId).toBeUndefined();
+    expect(p.toVO().canonicalId).toBeUndefined();
   });
 });
 
@@ -526,7 +555,7 @@ describe('SymbolInfoBase subclasses', () => {
 // Symbol domain class
 // ─────────────────────────────────────────────────────────────
 
-describe('Symbol', () => {
+describe('TradingSymbol', () => {
   const base = SymbolInfoVOFactory.make({ name: 'EURUSD' });
 
   it('isForex / isStock / isFuture / isCrypto / isIndex', () => {
@@ -594,5 +623,450 @@ describe('Schema re-exports', () => {
     expect(TickSchema.properties.bid).toBeDefined();
     expect(TickSchema.properties.ask).toBeDefined();
     expect(TickSchema.properties.time).toBeDefined();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// PositionPool
+// ─────────────────────────────────────────────────────────────
+
+describe('PositionPool', () => {
+  const base = PositionVOFactory.make({ userId: 'u1', symbol: 'EURUSD' });
+
+  const buy1  = Position.fromVO({ ...base, ticket: 1, type: PositionType.BUY,  volume: 0.1, priceOpen: 1.10, stopLoss: 1.08, takeProfit: 0,    profit: 20,  commission: -1, swap: 0 });
+  const buy2  = Position.fromVO({ ...base, ticket: 2, type: PositionType.BUY,  volume: 0.2, priceOpen: 1.12, stopLoss: 1.12, takeProfit: 1.20, profit: 50,  commission: -2, swap: 0 });
+  const sell1 = Position.fromVO({ ...base, ticket: 3, type: PositionType.SELL, volume: 0.3, priceOpen: 1.15, stopLoss: 0,    takeProfit: 0,    profit: -30, commission: -1, swap: 0 });
+
+  const pool = new PositionPool([buy1, buy2, sell1]);
+
+  it('size / isEmpty on empty pool', () => {
+    const empty = new PositionPool([]);
+    expect(empty.size).toBe(0);
+    expect(empty.isEmpty).toBe(true);
+  });
+
+  it('size / isEmpty on populated pool', () => {
+    expect(pool.size).toBe(3);
+    expect(pool.isEmpty).toBe(false);
+  });
+
+  it('count() total', () => {
+    expect(pool.count()).toBe(3);
+  });
+
+  it('count(buyMatcher)', () => {
+    expect(pool.count(posBuyMatcher)).toBe(2);
+  });
+
+  it('find() by ticket', () => {
+    expect(pool.find(p => p.ticket === 2)).toBe(buy2);
+    expect(pool.find(p => p.ticket === 99)).toBeUndefined();
+  });
+
+  it('has() true and false cases', () => {
+    expect(pool.has(posSellMatcher)).toBe(true);
+    expect(pool.has(p => p.ticket === 99)).toBe(false);
+  });
+
+  it('filter(buyMatcher) returns only buys', () => {
+    const buys = pool.filter(posBuyMatcher);
+    expect(buys.size).toBe(2);
+    expect(buys.has(posSellMatcher)).toBe(false);
+  });
+
+  it('filter(buyMatcher).filter(hasSlMatcher) composed filters', () => {
+    // both buy1 (SL=1.08) and buy2 (SL=1.12) have SL set
+    const buysWithSl = pool.filter(posBuyMatcher).filter(posHasSlMatcher);
+    expect(buysWithSl.size).toBe(2);
+    expect(buysWithSl.find(p => p.ticket === 1)).toBe(buy1);
+    expect(buysWithSl.find(p => p.ticket === 2)).toBe(buy2);
+  });
+
+  it('filter(hasTpMatcher) returns positions with TP', () => {
+    expect(pool.filter(posHasTpMatcher).size).toBe(1);
+  });
+
+  it('filter(breakevenMatcher) returns breakeven positions', () => {
+    // buy2 has SL == priceOpen (1.12 == 1.12) → breakeven
+    expect(pool.filter(breakevenMatcher).size).toBe(1);
+  });
+
+  it('filter(profitableMatcher) returns profitable positions', () => {
+    // buy1: 20 + -1 + 0 = 19 ✓   buy2: 50 + -2 + 0 = 48 ✓   sell1: -30 + -1 + 0 = -31 ✗
+    expect(pool.filter(posProfitableMatcher).size).toBe(2);
+  });
+
+  it('for...of iteration', () => {
+    const tickets: number[] = [];
+    for (const p of pool) tickets.push(p.ticket);
+    expect(tickets).toEqual([1, 2, 3]);
+  });
+
+  it('map() extracts volumes', () => {
+    expect(pool.map(p => p.volume)).toEqual([0.1, 0.2, 0.3]);
+  });
+
+  it('reduce() sums volumes', () => {
+    expect(pool.reduce((n, p) => n + p.volume, 0)).toBeCloseTo(0.6);
+  });
+
+  it('totalVolume()', () => {
+    expect(pool.totalVolume()).toBeCloseTo(0.6);
+  });
+
+  it('totalNetProfit()', () => {
+    // buy1: 19, buy2: 48, sell1: -31 → 36
+    expect(pool.totalNetProfit()).toBeCloseTo(36);
+  });
+
+  it('vwap() weighted average of priceOpen', () => {
+    // (0.1*1.10 + 0.2*1.12 + 0.3*1.15) / 0.6 = 0.679 / 0.6 = 1.13166̄ ≈ 1.1317 (4 dp)
+    expect(pool.vwap()).toBeCloseTo(1.1317, 4);
+  });
+
+  it('vwap() returns 0 for empty pool', () => {
+    expect(new PositionPool([]).vwap()).toBe(0);
+  });
+
+  it('toArray() returns raw array', () => {
+    expect(pool.toArray()).toEqual([buy1, buy2, sell1]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// DealPool
+// ─────────────────────────────────────────────────────────────
+
+describe('DealPool', () => {
+  const base = DealInfoVOFactory.make({ userId: 'u1', symbol: 'EURUSD' });
+
+  const d1 = Deal.fromVO({ ...base, ticket: 1, symbol: 'EURUSD', positionId: 10, type: DealType.Buy,  entry: DealEntry.In,  volume: 0.1, profit: 0,   commission: -1, swap: 0 });
+  const d2 = Deal.fromVO({ ...base, ticket: 2, symbol: 'EURUSD', positionId: 10, type: DealType.Sell, entry: DealEntry.Out, volume: 0.1, profit: 50,  commission: -1, swap: 0 });
+  const d3 = Deal.fromVO({ ...base, ticket: 3, symbol: 'GBPUSD', positionId: 20, type: DealType.Buy,  entry: DealEntry.In,  volume: 0.2, profit: 0,   commission: -2, swap: 0 });
+  const d4 = Deal.fromVO({ ...base, ticket: 4, symbol: 'GBPUSD', positionId: 20, type: DealType.Sell, entry: DealEntry.Out, volume: 0.2, profit: -30, commission: -2, swap: 0 });
+
+  const pool = new DealPool([d1, d2, d3, d4]);
+
+  it('size / isEmpty', () => {
+    expect(new DealPool([]).isEmpty).toBe(true);
+    expect(pool.size).toBe(4);
+    expect(pool.isEmpty).toBe(false);
+  });
+
+  it('count() total and with matcher', () => {
+    expect(pool.count()).toBe(4);
+    expect(pool.count(dealBuyMatcher)).toBe(2);
+  });
+
+  it('find() by ticket', () => {
+    expect(pool.find(d => d.ticket === 3)).toBe(d3);
+    expect(pool.find(d => d.ticket === 99)).toBeUndefined();
+  });
+
+  it('has() true / false', () => {
+    expect(pool.has(entryMatcher)).toBe(true);
+    expect(pool.has(d => d.ticket === 99)).toBe(false);
+  });
+
+  it('filter(entryMatcher)', () => {
+    const entries = pool.filter(entryMatcher);
+    expect(entries.size).toBe(2);
+    expect(entries.has(exitMatcher)).toBe(false);
+  });
+
+  it('filter(exitMatcher)', () => {
+    const exits = pool.filter(exitMatcher);
+    expect(exits.size).toBe(2);
+    expect(exits.has(entryMatcher)).toBe(false);
+  });
+
+  it('for...of iteration', () => {
+    const tickets: number[] = [];
+    for (const d of pool) tickets.push(d.ticket);
+    expect(tickets).toEqual([1, 2, 3, 4]);
+  });
+
+  it('map() extracts volumes', () => {
+    expect(pool.map(d => d.volume)).toEqual([0.1, 0.1, 0.2, 0.2]);
+  });
+
+  it('reduce() sums volumes', () => {
+    expect(pool.reduce((n, d) => n + d.volume, 0)).toBeCloseTo(0.6);
+  });
+
+  it('totalVolume()', () => {
+    expect(pool.totalVolume()).toBeCloseTo(0.6);
+  });
+
+  it('totalNetProfit()', () => {
+    // d1: -1, d2: 49, d3: -2, d4: -32 → 14
+    expect(pool.totalNetProfit()).toBeCloseTo(14);
+  });
+
+  it('toArray() returns raw array', () => {
+    expect(pool.toArray()).toEqual([d1, d2, d3, d4]);
+  });
+
+  it('groupBySymbol() partitions correctly', () => {
+    const bySymbol = pool.groupBySymbol();
+    expect(bySymbol.size).toBe(2);
+    expect(bySymbol.get('EURUSD')?.size).toBe(2);
+    expect(bySymbol.get('GBPUSD')?.size).toBe(2);
+    expect(bySymbol.get('EURUSD')?.find(d => d.ticket === 1)).toBe(d1);
+  });
+
+  it('groupByPosition() partitions correctly', () => {
+    const byPos = pool.groupByPosition();
+    expect(byPos.size).toBe(2);
+    expect(byPos.get(10)?.size).toBe(2);
+    expect(byPos.get(20)?.size).toBe(2);
+    expect(byPos.get(10)?.find(d => d.ticket === 2)).toBe(d2);
+  });
+
+  it('groupBySymbol() sub-pools support further filter', () => {
+    const gbpPool = pool.groupBySymbol().get('GBPUSD')!;
+    expect(gbpPool.filter(exitMatcher).size).toBe(1);
+  });
+
+  it('vwap() volume-weighted average of deal.price', () => {
+    // d1: vol=0.1, price=0; d2: vol=0.1, price=0; d3: vol=0.2, price=0; d4: vol=0.2, price=0
+    // all prices are 0 in base fixtures — use a dedicated pool for this test
+    const base2 = DealInfoVOFactory.make({ userId: 'u1', symbol: 'EURUSD' });
+    const e1 = Deal.fromVO({ ...base2, ticket: 10, entry: DealEntry.In,  volume: 0.1, price: 1.10 });
+    const e2 = Deal.fromVO({ ...base2, ticket: 11, entry: DealEntry.In,  volume: 0.2, price: 1.12 });
+    const e3 = Deal.fromVO({ ...base2, ticket: 12, entry: DealEntry.In,  volume: 0.3, price: 1.15 });
+    const entryPool = new DealPool([e1, e2, e3]);
+    // (0.1*1.10 + 0.2*1.12 + 0.3*1.15) / 0.6 = 0.679 / 0.6 = 1.13166̄ ≈ 1.1317 (4 dp)
+    expect(entryPool.vwap()).toBeCloseTo(1.1317, 4);
+  });
+
+  it('vwap() returns 0 for empty pool', () => {
+    expect(new DealPool([]).vwap()).toBe(0);
+  });
+
+  it('InOut deal satisfies both entryMatcher and exitMatcher', () => {
+    const base2 = DealInfoVOFactory.make({ userId: 'u1', symbol: 'EURUSD' });
+    const inOut = Deal.fromVO({ ...base2, ticket: 20, entry: DealEntry.InOut, volume: 0.1, price: 1.10 });
+    const mixed = new DealPool([inOut]);
+    expect(mixed.has(entryMatcher)).toBe(true);
+    expect(mixed.has(exitMatcher)).toBe(true);
+    // filter by entry keeps the deal; filter by exit also keeps it
+    expect(mixed.filter(entryMatcher).size).toBe(1);
+    expect(mixed.filter(exitMatcher).size).toBe(1);
+    // composed filter: entryMatcher AND exitMatcher still keeps it (InOut satisfies both)
+    expect(mixed.filter(entryMatcher).filter(exitMatcher).size).toBe(1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// Account domain class
+// ─────────────────────────────────────────────────────────────
+
+describe('Account', () => {
+  const base = AccountVOFactory.make();
+
+  it('fromVO / toVO round-trip', () => {
+    const a = Account.fromVO(base);
+    expect(a.toVO()).toMatchObject(base);
+  });
+
+  it('allowsTrade / allowsExpertTrade', () => {
+    const allowed    = Account.fromVO(base);
+    const disallowed = Account.fromVO(AccountVOFactory.make({ tradeAllowed: false, tradeExpertAllowed: false }));
+    expect(allowed.allowsTrade()).toBe(true);
+    expect(allowed.allowsExpertTrade()).toBe(true);
+    expect(disallowed.allowsTrade()).toBe(false);
+    expect(disallowed.allowsExpertTrade()).toBe(false);
+  });
+
+  it('floatingProfit = equity - balance', () => {
+    const a = Account.fromVO(AccountVOFactory.make({ balance: 10_000, equity: 10_500 }));
+    expect(a.floatingProfit()).toBeCloseTo(500);
+  });
+
+  it('floatingProfit negative when in drawdown', () => {
+    const a = Account.fromVO(AccountVOFactory.make({ balance: 10_000, equity: 9_000 }));
+    expect(a.floatingProfit()).toBeCloseTo(-1000);
+  });
+
+  it('isPercentStopout / isCurrencyStopout', () => {
+    const pct  = Account.fromVO(AccountVOFactory.make({ stopOutMode: AccountStopoutMode.Percent }));
+    const cash = Account.fromVO(AccountVOFactory.make({ stopOutMode: AccountStopoutMode.Money  }));
+    expect(pct.isPercentStopout()).toBe(true);
+    expect(pct.isCurrencyStopout()).toBe(false);
+    expect(cash.isCurrencyStopout()).toBe(true);
+  });
+
+  it('isUnderMarginCall when marginLevel <= callLevel', () => {
+    const a = Account.fromVO(AccountVOFactory.make({ margin: 500, marginLevel: 80 }));
+    expect(a.isUnderMarginCall(100)).toBe(true);
+    expect(a.isUnderMarginCall(50)).toBe(false);
+  });
+
+  it('isHedging for hedge trade modes', () => {
+    const hedge   = Account.fromVO(AccountVOFactory.make({ tradeMode: AccountTradeMode.Hedge }));
+    const netting = Account.fromVO(AccountVOFactory.make({ tradeMode: AccountTradeMode.SingleNoHedge }));
+    expect(hedge.isHedging()).toBe(true);
+    expect(netting.isHedging()).toBe(false);
+  });
+
+  it('isReal / isDemo / isContest from AccountType', () => {
+    const real    = Account.fromVO(AccountVOFactory.make({ accountType: AccountType.Real }));
+    const demo    = Account.fromVO(AccountVOFactory.make({ accountType: AccountType.Demo }));
+    const contest = Account.fromVO(AccountVOFactory.make({ accountType: AccountType.Contest }));
+    expect(real.isReal()).toBe(true);
+    expect(real.isDemo()).toBe(false);
+    expect(demo.isDemo()).toBe(true);
+    expect(demo.isReal()).toBe(false);
+    expect(contest.isContest()).toBe(true);
+    expect(contest.isReal()).toBe(false);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// Deal reason predicates
+// ─────────────────────────────────────────────────────────────
+
+describe('Deal reason predicates', () => {
+  const base = DealInfoVOFactory.make({ userId: 'u1', symbol: 'EURUSD' });
+
+  it('isClosedBySL / isClosedByTP / isStopOut', () => {
+    const sl = Deal.fromVO({ ...base, reason: DealReason.SL });
+    const tp = Deal.fromVO({ ...base, reason: DealReason.TP });
+    const so = Deal.fromVO({ ...base, reason: DealReason.SO });
+    expect(sl.isClosedBySL()).toBe(true);
+    expect(sl.isClosedByTP()).toBe(false);
+    expect(tp.isClosedByTP()).toBe(true);
+    expect(so.isStopOut()).toBe(true);
+  });
+
+  it('reason is optional', () => {
+    const d = Deal.fromVO(base);
+    expect(d.reason).toBeUndefined();
+    expect(d.toVO().reason).toBeUndefined();
+  });
+
+  it('fromVO / toVO round-trip preserves reason', () => {
+    const d = Deal.fromVO({ ...base, reason: DealReason.TP });
+    expect(d.toVO().reason).toBe(DealReason.TP);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// PositionReason / OrderReason enums
+// ─────────────────────────────────────────────────────────────
+
+describe('PositionReason / OrderReason enums', () => {
+  it('PositionReason has 4 values', () => {
+    expect(Object.keys(PositionReason)).toHaveLength(4);
+    expect(PositionReason.Expert).toBe('EXPERT');
+  });
+
+  it('OrderReason has 7 values including SL/TP/SO', () => {
+    expect(Object.keys(OrderReason)).toHaveLength(7);
+    expect(OrderReason.SL).toBe('SL');
+    expect(OrderReason.SO).toBe('SO');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// Position reason predicates
+// ─────────────────────────────────────────────────────────────
+
+describe('Position reason predicates', () => {
+  const base = PositionVOFactory.make({ userId: 'u1', symbol: 'EURUSD' });
+
+  it('isExpert / isManual', () => {
+    const ea  = Position.fromVO({ ...base, reason: PositionReason.Expert });
+    const cli = Position.fromVO({ ...base, reason: PositionReason.Client });
+    expect(ea.isExpert()).toBe(true);
+    expect(cli.isExpert()).toBe(false);
+    expect(cli.isManual()).toBe(true);
+  });
+
+  it('reason is optional — undefined when omitted', () => {
+    const p = Position.fromVO(base);
+    expect(p.reason).toBeUndefined();
+    expect(p.toVO().reason).toBeUndefined();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// Order domain class
+// ─────────────────────────────────────────────────────────────
+
+describe('Order', () => {
+  const base = OrderVOFactory.make({ userId: 'u1', symbol: 'EURUSD' });
+
+  it('isFilled / isCanceled / isPending / isMarket', () => {
+    const filled  = Order.fromVO({ ...base, state: OrderState.Filled,  type: OrderType.Buy      });
+    const expired = Order.fromVO({ ...base, state: OrderState.Expired, type: OrderType.Buy      });
+    const pend    = Order.fromVO({ ...base, state: OrderState.Placed,  type: OrderType.BuyLimit });
+    expect(filled.isFilled()).toBe(true);
+    expect(expired.isCanceled()).toBe(true);
+    expect(pend.isPending()).toBe(true);
+    expect(filled.isMarket()).toBe(true);
+  });
+
+  it('reason predicates', () => {
+    const sl = Order.fromVO({ ...base, reason: OrderReason.SL });
+    const ea = Order.fromVO({ ...base, reason: OrderReason.Expert });
+    expect(sl.isTriggeredBySL()).toBe(true);
+    expect(sl.isTriggeredByTP()).toBe(false);
+    expect(ea.isExpert()).toBe(true);
+  });
+
+  it('reason is optional', () => {
+    const o = Order.fromVO(base);
+    expect(o.reason).toBeUndefined();
+    expect(o.toVO().reason).toBeUndefined();
+  });
+
+  it('fromVO / toVO round-trip', () => {
+    const vo = { ...base, ticket: 77, reason: OrderReason.TP };
+    const o  = Order.fromVO(vo);
+    expect(o.ticket).toBe(77);
+    expect(o.toVO().reason).toBe(OrderReason.TP);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// TradeEventFlag
+// ─────────────────────────────────────────────────────────────
+
+describe('TradeEventFlag', () => {
+  it('individual flags are unique powers of 2', () => {
+    const values = Object.values(TradeEventFlag).filter(v => v !== 0) as number[];
+    const unique = new Set(values);
+    expect(unique.size).toBe(values.length);
+    for (const v of values) expect(v & (v - 1)).toBe(0); // power-of-2 check
+  });
+
+  it('tradeEventFlags combines bits', () => {
+    const mask = tradeEventFlags(TradeEventFlag.PositionOpened, TradeEventFlag.ClosedBySL);
+    expect(hasTradeEventFlag(mask, TradeEventFlag.PositionOpened)).toBe(true);
+    expect(hasTradeEventFlag(mask, TradeEventFlag.ClosedBySL)).toBe(true);
+    expect(hasTradeEventFlag(mask, TradeEventFlag.ClosedByTP)).toBe(false);
+  });
+
+  it('None flag matches nothing', () => {
+    const mask = tradeEventFlags(TradeEventFlag.OrderPlaced);
+    expect(hasTradeEventFlag(mask, TradeEventFlag.None)).toBe(false);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// OrderStatus
+// ─────────────────────────────────────────────────────────────
+
+describe('OrderStatus enum', () => {
+  it('has 9 distinct values', () => {
+    expect(Object.keys(OrderStatus)).toHaveLength(9);
+  });
+
+  it('values are stable strings', () => {
+    expect(OrderStatus.MarketPosition).toBe('MARKET_POSITION');
+    expect(OrderStatus.Deal).toBe('DEAL');
+    expect(OrderStatus.Unknown).toBe('UNKNOWN');
   });
 });

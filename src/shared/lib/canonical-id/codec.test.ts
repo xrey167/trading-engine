@@ -5,9 +5,9 @@ import {
   type CompactPayload, type ExtendedPayload,
   createCanonicalId, configureNode, type CanonicalId,
   matchId, toBase62, fromBase62,
-} from './canonical-id.js';
-import { isOk, isErr } from './result.js';
-import { CanonicalIdRegistry } from './canonical-id-registry.js';
+} from './codec.js';
+import { isOk, isErr } from '../result.js';
+import { CanonicalIdRegistry } from './registry.js';
 
 describe('canonical-id codec', () => {
   const base: CompactPayload = {
@@ -305,3 +305,7 @@ describe('base62 wire format', () => {
     expect(toBase62(r.value)).toMatch(/^deal_/);
   });
 });
+
+// suppress unused import warning — configureNode is tested implicitly via env var wiring
+void (configureNode as unknown);
+void (0 as unknown as CanonicalId);

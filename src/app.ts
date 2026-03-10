@@ -26,6 +26,7 @@ import { TypedEventBus } from './shared/event-bus.js';
 import type { AppEventMap } from './shared/services/event-map.js';
 import { ServiceRegistry } from './shared/services/service-registry.js';
 import { BrokerService } from './broker/broker-service.js';
+import { CanonicalIdRegistry } from './shared/lib/canonical-id/index.js';
 import { RiskManagerService } from './managers/risk-manager.js';
 import { ExecutionSaga } from './managers/execution-saga.js';
 import { OrderManagerService } from './managers/order-manager.js';
@@ -151,11 +152,13 @@ export async function buildApp(
   await app.register(engineModule, { symbol, broker, hedging: cfg.hedging ?? true });
 
   // 3b. Wrap primary broker+engine as a BrokerService (reuses engine-plugin instances)
+  const canonicalRegistry = new CanonicalIdRegistry();
   const primaryBrokerService = new BrokerService(
-    { id: 'broker:paper:primary', name: 'paper-primary', broker, symbol, hedging: cfg.hedging ?? true, engine: app.engine, engineMutex: app.engineMutex },
+    { id: 'broker:paper:primary', name: 'paper-primary', broker, symbol, hedging: cfg.hedging ?? true, engine: app.engine, engineMutex: app.engineMutex, canonicalRegistry },
     emitter,
     toLogger(app.log),
   );
+  app.decorate('brokerService', primaryBrokerService);
   // Start the broker service — PaperBroker.connect() is idempotent
   await primaryBrokerService.start();
   serviceRegistry.register(primaryBrokerService);
@@ -245,7 +248,7 @@ export async function buildApp(
     emitter,
     logger,
   );
-  const executionSaga = new ExecutionSaga('saga:primary', 'execution-saga-primary', riskManager, serviceRegistry, emitter, logger);
+  const executionSaga = new ExecutionSaga('saga:primary', 'execution-saga-primary', riskManager, serviceRegistry, canonicalRegistry, emitter, logger);
   const orderManager = new OrderManagerService({ id: 'order-mgr:primary', name: 'order-manager-primary' }, executionSaga, emitter, logger);
   await riskManager.start();
   await executionSaga.start();

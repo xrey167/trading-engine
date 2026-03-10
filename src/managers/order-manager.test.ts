@@ -8,6 +8,7 @@ import { RiskManagerService } from './risk-manager.js';
 import { ExecutionSaga } from './execution-saga.js';
 import { OrderManagerService } from './order-manager.js';
 import { nullLogger } from '../shared/lib/logger.js';
+import { CanonicalIdRegistry } from '../shared/lib/canonical-id/index.js';
 import { PaperBroker } from '../broker/paper/paper-broker.js';
 import { SymbolInfoForex as SymbolInfo } from '../engine/core/symbol.js';
 
@@ -20,7 +21,7 @@ describe('OrderManagerService', () => {
       { id: 'risk:test', name: 'test-risk', maxOpenPositions: 10, maxPositionsPerSymbol: 5, maxDailyLoss: 1000 },
       bus, nullLogger,
     );
-    const saga = new ExecutionSaga('saga:test', 'Test Saga', riskManager, new ServiceRegistry(), bus, nullLogger);
+    const saga = new ExecutionSaga('saga:test', 'Test Saga', riskManager, new ServiceRegistry(), new CanonicalIdRegistry(), bus, nullLogger);
     const svc = new OrderManagerService({ id: 'order-mgr:test', name: 'test-order-mgr' }, saga, bus, nullLogger);
 
     expect(svc.id).toBe('order-mgr:test');
@@ -45,7 +46,7 @@ describe('OrderManagerService', () => {
     );
     await riskManager.start();
 
-    const saga = new ExecutionSaga('saga:test', 'Test Saga', riskManager, registry, bus, nullLogger);
+    const saga = new ExecutionSaga('saga:test', 'Test Saga', riskManager, registry, new CanonicalIdRegistry(), bus, nullLogger);
     const orderMgr = new OrderManagerService({ id: 'order-mgr:test', name: 'test-order-mgr' }, saga, bus, nullLogger);
     await orderMgr.start();
 
@@ -91,7 +92,7 @@ describe('OrderManagerService', () => {
     );
     await riskManager.start();
 
-    const saga = new ExecutionSaga('saga:test', 'Test Saga', riskManager, registry, bus, nullLogger);
+    const saga = new ExecutionSaga('saga:test', 'Test Saga', riskManager, registry, new CanonicalIdRegistry(), bus, nullLogger);
     const orderMgr = new OrderManagerService({ id: 'order-mgr:test', name: 'test-order-mgr' }, saga, bus, nullLogger);
     await orderMgr.start();
     await orderMgr.stop();

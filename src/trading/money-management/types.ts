@@ -1,4 +1,5 @@
 import { Type, type Static } from '@sinclair/typebox';
+import { enumSchema } from '../../shared/schemas/common.js';
 import type { Result } from '../../shared/lib/result.js';
 import type { DomainError } from '../../shared/lib/errors.js';
 import { StopLossType, TakeProfitType, PositionSizeType } from '../../shared/domain/risk/risk.js';
@@ -56,19 +57,19 @@ export const MoneyManagementFactoryConfigSchema = Type.Object({
   direction: Type.Union([Type.Literal('BUY'), Type.Literal('SELL')]),
 
   // Stop loss
-  stopLossType:           Type.Union(Object.values(StopLossType).map(v => Type.Literal(v))),
+  stopLossType:           enumSchema(StopLossType),
   stopLossValue:          Type.Number(),
   stopLossAtrMultiplier:  Type.Optional(Type.Number({ minimum: 0 })),
   stopLossPipBuffer:      Type.Optional(Type.Number({ minimum: 0 })),
 
   // Take profit
-  takeProfitType:          Type.Union(Object.values(TakeProfitType).map(v => Type.Literal(v))),
+  takeProfitType:          enumSchema(TakeProfitType),
   takeProfitValue:         Type.Number(),
   takeProfitAtrMultiplier: Type.Optional(Type.Number({ minimum: 0 })),
   riskRewardRatio:         Type.Optional(Type.Number({ minimum: 0 })),
 
   // Lots
-  lotsType:  Type.Union(Object.values(PositionSizeType).map(v => Type.Literal(v))),
+  lotsType:  enumSchema(PositionSizeType),
   lotsValue: Type.Number({ minimum: 0 }),
 });
 export type MoneyManagementFactoryConfig = Static<typeof MoneyManagementFactoryConfigSchema>;

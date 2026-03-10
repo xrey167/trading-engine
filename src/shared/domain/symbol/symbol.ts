@@ -1,19 +1,19 @@
 import { Type, type Static } from '@sinclair/typebox';
+import { enumSchema } from '../../schemas/common.js';
 import { AssetType } from './symbol-info.js';
 
 // Re-export everything so all existing `symbol/symbol.js` importers keep working.
 export * from './symbol-info.js';
+export * from './symbol-service.js';
 
 // ─────────────────────────────────────────────────────────────
 // SymbolInfoVO — serialization / API boundary
 // ─────────────────────────────────────────────────────────────
 
-const AssetTypeSchema = Type.Union(Object.values(AssetType).map(v => Type.Literal(v)));
-
 export const SymbolInfoVOSchema = Type.Object({
   name:             Type.String(),
   description:      Type.String(),
-  assetType:        AssetTypeSchema,
+  assetType:        enumSchema(AssetType),
   digits:           Type.Integer(),
   point:            Type.Number(),
   tickSize:         Type.Number(),
@@ -34,8 +34,7 @@ export type SymbolInfoVO = Static<typeof SymbolInfoVOSchema>;
 
 export const SymbolInfoVOFactory = {
   make(overrides: Partial<SymbolInfoVO> & Pick<SymbolInfoVO, 'name'>): SymbolInfoVO {
-    const defaults: SymbolInfoVO = {
-      name:           overrides.name,
+    return {
       description:    '',
       assetType:      AssetType.Forex,
       digits:         5,
@@ -53,8 +52,8 @@ export const SymbolInfoVOFactory = {
       currencyBase:   '',
       currencyProfit: '',
       currencyMargin: '',
+      ...overrides,
     };
-    return { ...defaults, ...overrides };
   },
 };
 

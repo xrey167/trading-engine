@@ -6,6 +6,12 @@ import { BarBase, OrderAttr, LimitConfirm } from '../domain/engine-enums.js';
 // Enum literal unions  (as const maps → TypeBox literals)
 // ─────────────────────────────────────────────────────────────
 
+/** Build a TypeBox union from an `as const` enum map. Replaces the verbose
+ *  `Type.Union(Object.values(Enum).map(v => Type.Literal(v)))` pattern. */
+export function enumSchema<V extends string | number>(enumObj: Record<string, V>) {
+  return Type.Union(Object.values(enumObj).map(v => Type.Literal(v)));
+}
+
 export const SideSchema = Type.Union([
   Type.Literal(0),
   Type.Literal(1),
@@ -35,50 +41,10 @@ export const BarsAtrModeSchema = Type.Union([
   Type.Literal(-1),  // Bearish
 ]);
 
-export const BarBaseSchema = Type.Union([
-  Type.Literal(BarBase.HiLo),
-  Type.Literal(BarBase.OpenClose),
-]);
-
-// Named order attributes — combinable flags that modify fill behaviour.
-export const OrderAttrSchema = Type.Union([
-  Type.Literal(OrderAttr.OCO),
-  Type.Literal(OrderAttr.CO),
-  Type.Literal(OrderAttr.CS),
-  Type.Literal(OrderAttr.REV),
-  Type.Literal(OrderAttr.NET),
-  Type.Literal(OrderAttr.SLTP),
-  Type.Literal(OrderAttr.ROL),
-  Type.Literal(OrderAttr.ROP),
-  Type.Literal(OrderAttr.MIT),
-  Type.Literal(OrderAttr.FC),
-]);
-
-export const LimitConfirmSchema = Type.Union([
-  Type.Literal(LimitConfirm.None),
-  Type.Literal(LimitConfirm.Wick),
-  Type.Literal(LimitConfirm.WickBreak),
-  Type.Literal(LimitConfirm.WickColor),
-]);
-
-export const OrderEntryTypeSchema = Type.Union([
-  Type.Literal(OrderEntryType.BuyMarket),
-  Type.Literal(OrderEntryType.SellMarket),
-  Type.Literal(OrderEntryType.BuyLimit),
-  Type.Literal(OrderEntryType.BuyStop),
-  Type.Literal(OrderEntryType.SellLimit),
-  Type.Literal(OrderEntryType.SellStop),
-  Type.Literal(OrderEntryType.BuyMIT),
-  Type.Literal(OrderEntryType.SellMIT),
-  Type.Literal(OrderEntryType.BuyStopLimit),
-  Type.Literal(OrderEntryType.SellStopLimit),
-  Type.Literal(OrderEntryType.BuyMTO),
-  Type.Literal(OrderEntryType.SellMTO),
-  Type.Literal(OrderEntryType.BuyLimitTrail),
-  Type.Literal(OrderEntryType.BuyStopTrail),
-  Type.Literal(OrderEntryType.SellLimitTrail),
-  Type.Literal(OrderEntryType.SellStopTrail),
-]);
+export const BarBaseSchema       = enumSchema(BarBase);
+export const OrderAttrSchema     = enumSchema(OrderAttr);
+export const LimitConfirmSchema  = enumSchema(LimitConfirm);
+export const OrderEntryTypeSchema = enumSchema(OrderEntryType);
 
 // ─────────────────────────────────────────────────────────────
 // OHLC / bar body

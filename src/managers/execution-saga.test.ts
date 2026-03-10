@@ -7,6 +7,7 @@ import { BrokerService } from '../broker/broker-service.js';
 import { RiskManagerService } from './risk-manager.js';
 import { ExecutionSaga } from './execution-saga.js';
 import { nullLogger } from '../shared/lib/logger.js';
+import { CanonicalIdRegistry } from '../shared/lib/canonical-id/index.js';
 import { PaperBroker } from '../broker/paper/paper-broker.js';
 import { SymbolInfoForex as SymbolInfo } from '../engine/core/symbol.js';
 
@@ -48,7 +49,7 @@ function setupSaga(riskOverrides: Partial<{ maxOpenPositions: number; maxPositio
     bus, nullLogger,
   );
 
-  const saga = new ExecutionSaga('saga:test', 'Test Saga', riskManager, registry, bus, nullLogger);
+  const saga = new ExecutionSaga('saga:test', 'Test Saga', riskManager, registry, new CanonicalIdRegistry(), bus, nullLogger);
 
   return { bus, registry, broker, paperBroker, riskManager, saga };
 }

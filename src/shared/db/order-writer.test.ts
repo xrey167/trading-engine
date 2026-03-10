@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { OrderWriter } from './order-writer.js';
 import { TypedEventBus } from '../event-bus.js';
 import type { AppEventMap } from '../services/event-map.js';
-import type { CanonicalId } from '../lib/canonical-id.js';
+import type { CanonicalId } from '../lib/canonical-id/index.js';
 
 describe('OrderWriter', () => {
   function makeEvent(action: AppEventMap['order']['action']) {
