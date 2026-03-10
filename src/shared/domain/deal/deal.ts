@@ -1,5 +1,5 @@
 import { Type, type Static } from '@sinclair/typebox';
-import { DealType, DealEntry } from '../history/history.js';
+import { DealType, DealEntry, DealReason } from '../history/history.js';
 import type { CanonicalId } from '../../lib/canonical-id/index.js';
 
 // ─────────────────────────────────────────────────────────────
@@ -25,6 +25,7 @@ export const DealInfoVOSchema = Type.Object({
   profit:     Type.Number(),
   time:       Type.String({ format: 'date-time' }),
   comment:     Type.String(),
+  reason:      Type.Optional(Type.Union(Object.values(DealReason).map(v => Type.Literal(v)))),
   canonicalId: Type.Optional(Type.String()),
 });
 export type DealInfoVO = Static<typeof DealInfoVOSchema>;
@@ -73,6 +74,7 @@ export class Deal {
     public readonly profit:     number,
     public readonly time:       Date,
     public readonly comment:    string,
+    public readonly reason?:    DealReason,
     public readonly canonicalId?: CanonicalId,
   ) {}
 
@@ -102,6 +104,16 @@ export class Deal {
 
   isProfitable(): boolean { return this.netProfit() > 0; }
 
+  // ── Reason predicates ─────────────────────────────────────
+  /** True when this deal was closed by a stop-loss trigger. */
+  isClosedBySL(): boolean { return this.reason === DealReason.SL; }
+  /** True when this deal was closed by a take-profit trigger. */
+  isClosedByTP(): boolean { return this.reason === DealReason.TP; }
+  /** True when this deal was triggered by a stop-out. */
+  isStopOut():    boolean { return this.reason === DealReason.SO; }
+  /** True when this deal was placed by an EA/script. */
+  isExpert():     boolean { return this.reason === DealReason.Expert; }
+
   // ── Conversion ───────────────────────────────────────────
 
   /** Construct a Deal from a serialized VO. */
@@ -122,6 +134,7 @@ export class Deal {
       vo.profit,
       new Date(vo.time),
       vo.comment,
+      vo.reason as DealReason | undefined,
       vo.canonicalId as CanonicalId | undefined,
     );
   }
@@ -144,6 +157,7 @@ export class Deal {
       profit:     this.profit,
       time:       this.time.toISOString(),
       comment:    this.comment,
+      ...(this.reason    !== undefined ? { reason:      this.reason      } : {}),
       ...(this.canonicalId !== undefined ? { canonicalId: this.canonicalId } : {}),
     };
   }

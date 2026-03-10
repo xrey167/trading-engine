@@ -22,11 +22,11 @@ import {
 } from './metrics/trade-params.js';
 import { PositionInfoVOSchema, Position, PositionVOFactory, PositionType } from './position/position.js';
 import { Deal, DealInfoVOFactory } from './deal/deal.js';
-import { DealType, DealEntry, PositionReason, OrderReason } from './history/history.js';
+import { DealType, DealEntry, DealReason, PositionReason, OrderReason } from './history/history.js';
 import { Order, OrderVOFactory } from './order/order.js';
 import { OrderType } from './order/order.js';
 import { OrderState } from './history/history.js';
-import { AccountInfoVOSchema } from './account/account.js';
+import { AccountInfoVOSchema, Account, AccountVOFactory, AccountTradeMode, AccountStopoutMode } from './account/account.js';
 import {
   SymbolInfoVOSchema, TickSchema, SymbolInfoVOFactory,
   TradingSymbol, AssetType,
@@ -854,6 +854,88 @@ describe('DealPool', () => {
     expect(mixed.filter(exitMatcher).size).toBe(1);
     // composed filter: entryMatcher AND exitMatcher still keeps it (InOut satisfies both)
     expect(mixed.filter(entryMatcher).filter(exitMatcher).size).toBe(1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// Account domain class
+// ─────────────────────────────────────────────────────────────
+
+describe('Account', () => {
+  const base = AccountVOFactory.make();
+
+  it('fromVO / toVO round-trip', () => {
+    const a = Account.fromVO(base);
+    expect(a.toVO()).toMatchObject(base);
+  });
+
+  it('allowsTrade / allowsExpertTrade', () => {
+    const allowed    = Account.fromVO(base);
+    const disallowed = Account.fromVO(AccountVOFactory.make({ tradeAllowed: false, tradeExpertAllowed: false }));
+    expect(allowed.allowsTrade()).toBe(true);
+    expect(allowed.allowsExpertTrade()).toBe(true);
+    expect(disallowed.allowsTrade()).toBe(false);
+    expect(disallowed.allowsExpertTrade()).toBe(false);
+  });
+
+  it('floatingProfit = equity - balance', () => {
+    const a = Account.fromVO(AccountVOFactory.make({ balance: 10_000, equity: 10_500 }));
+    expect(a.floatingProfit()).toBeCloseTo(500);
+  });
+
+  it('floatingProfit negative when in drawdown', () => {
+    const a = Account.fromVO(AccountVOFactory.make({ balance: 10_000, equity: 9_000 }));
+    expect(a.floatingProfit()).toBeCloseTo(-1000);
+  });
+
+  it('isPercentStopout / isCurrencyStopout', () => {
+    const pct  = Account.fromVO(AccountVOFactory.make({ stopOutMode: AccountStopoutMode.Percent }));
+    const cash = Account.fromVO(AccountVOFactory.make({ stopOutMode: AccountStopoutMode.Money  }));
+    expect(pct.isPercentStopout()).toBe(true);
+    expect(pct.isCurrencyStopout()).toBe(false);
+    expect(cash.isCurrencyStopout()).toBe(true);
+  });
+
+  it('isUnderMarginCall when marginLevel <= callLevel', () => {
+    const a = Account.fromVO(AccountVOFactory.make({ margin: 500, marginLevel: 80 }));
+    expect(a.isUnderMarginCall(100)).toBe(true);
+    expect(a.isUnderMarginCall(50)).toBe(false);
+  });
+
+  it('isHedging for hedge trade modes', () => {
+    const hedge   = Account.fromVO(AccountVOFactory.make({ tradeMode: AccountTradeMode.Hedge }));
+    const netting = Account.fromVO(AccountVOFactory.make({ tradeMode: AccountTradeMode.SingleNoHedge }));
+    expect(hedge.isHedging()).toBe(true);
+    expect(netting.isHedging()).toBe(false);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// Deal reason predicates
+// ─────────────────────────────────────────────────────────────
+
+describe('Deal reason predicates', () => {
+  const base = DealInfoVOFactory.make({ userId: 'u1', symbol: 'EURUSD' });
+
+  it('isClosedBySL / isClosedByTP / isStopOut', () => {
+    const sl = Deal.fromVO({ ...base, reason: DealReason.SL });
+    const tp = Deal.fromVO({ ...base, reason: DealReason.TP });
+    const so = Deal.fromVO({ ...base, reason: DealReason.SO });
+    expect(sl.isClosedBySL()).toBe(true);
+    expect(sl.isClosedByTP()).toBe(false);
+    expect(tp.isClosedByTP()).toBe(true);
+    expect(so.isStopOut()).toBe(true);
+  });
+
+  it('reason is optional', () => {
+    const d = Deal.fromVO(base);
+    expect(d.reason).toBeUndefined();
+    expect(d.toVO().reason).toBeUndefined();
+  });
+
+  it('fromVO / toVO round-trip preserves reason', () => {
+    const d = Deal.fromVO({ ...base, reason: DealReason.TP });
+    expect(d.toVO().reason).toBe(DealReason.TP);
   });
 });
 
