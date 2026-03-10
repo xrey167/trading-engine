@@ -144,7 +144,7 @@ export class Position {
       vo.profit,
       vo.comment,
       vo.externalId,
-      vo.reason as PositionReason | undefined,
+      vo.reason,
       vo.canonicalId as CanonicalId | undefined,
     );
   }

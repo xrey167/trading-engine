@@ -91,13 +91,13 @@ export class BrokerService extends BaseService {
   async getPositions(userId: string): Promise<Result<PositionInfoVO[], DomainError>> {
     const r = await this.broker.getPositions(userId);
     if (!r.ok) return r;
-    return ok(r.value.map(p => this._enrichPosition(p)));
+    return ok(r.value.map(p => this._enrichWithCanonical(p)));
   }
 
   async getPositionByTicket(ticket: number, userId: string): Promise<Result<PositionInfoVO, DomainError>> {
     const r = await this.broker.getPositionByTicket(ticket, userId);
     if (!r.ok) return r;
-    return ok(this._enrichPosition(r.value));
+    return ok(this._enrichWithCanonical(r.value));
   }
 
   async closePositionByTicket(ticket: number, deviation: number, userId: string) {
@@ -111,35 +111,25 @@ export class BrokerService extends BaseService {
   async getDeals(userId: string, from: Date, to: Date): Promise<Result<DealInfoVO[], DomainError>> {
     const r = await this.broker.getDeals(userId, from, to);
     if (!r.ok) return r;
-    return ok(r.value.map(d => this._enrichDeal(d)));
+    return ok(r.value.map(d => this._enrichWithCanonical(d)));
   }
 
   async getDealByTicket(ticket: number, userId: string): Promise<Result<DealInfoVO, DomainError>> {
     const r = await this.broker.getDealByTicket(ticket, userId);
     if (!r.ok) return r;
-    return ok(this._enrichDeal(r.value));
+    return ok(this._enrichWithCanonical(r.value));
   }
 
   async getHistoryOrders(userId: string, from: Date, to: Date): Promise<Result<HistoryOrderInfoVO[], DomainError>> {
     const r = await this.broker.getHistoryOrders(userId, from, to);
     if (!r.ok) return r;
-    return ok(r.value.map(o => this._enrichHistoryOrder(o)));
+    return ok(r.value.map(o => this._enrichWithCanonical(o)));
   }
 
   // ── Private enrichment helpers ────────────────────────────────────────────
 
-  private _enrichPosition(p: PositionInfoVO): PositionInfoVO {
-    const cid = this.canonicalRegistry.getCanonicalId(p.ticket);
-    return cid !== undefined ? { ...p, canonicalId: cid } : p;
-  }
-
-  private _enrichDeal(d: DealInfoVO): DealInfoVO {
-    const cid = this.canonicalRegistry.getCanonicalId(d.ticket);
-    return cid !== undefined ? { ...d, canonicalId: cid } : d;
-  }
-
-  private _enrichHistoryOrder(o: HistoryOrderInfoVO): HistoryOrderInfoVO {
-    const cid = this.canonicalRegistry.getCanonicalId(o.ticket);
-    return cid !== undefined ? { ...o, canonicalId: cid } : o;
+  private _enrichWithCanonical<T extends { ticket: number; canonicalId?: string }>(vo: T): T {
+    const cid = this.canonicalRegistry.getCanonicalId(vo.ticket);
+    return cid !== undefined ? { ...vo, canonicalId: cid } : vo;
   }
 }

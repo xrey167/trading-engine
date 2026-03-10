@@ -225,7 +225,7 @@ export class Order extends OrderBase {
       vo.priceOpen, vo.stopLoss, vo.takeProfit,
       new Date(vo.timeSetup), new Date(vo.timeDone),
       vo.comment,
-      vo.reason as OrderReason | undefined,
+      vo.reason,
       vo.canonicalId as CanonicalId | undefined,
     );
   }

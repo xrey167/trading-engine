@@ -135,7 +135,7 @@ export class Deal {
       vo.profit,
       new Date(vo.time),
       vo.comment,
-      vo.reason as DealReason | undefined,
+      vo.reason,
       vo.canonicalId as CanonicalId | undefined,
     );
   }

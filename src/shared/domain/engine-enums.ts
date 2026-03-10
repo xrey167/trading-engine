@@ -1,5 +1,4 @@
-// Backward-compat re-exports — symbols now live in their domain sub-modules.
-// Direct importers of engine-enums.ts continue to work unchanged.
+// Barrel re-exports — convenience aggregation of domain symbols.
 export { Side, OrderAttr, LimitConfirm, ExitReason, OrderBase } from './order/order.js';
 export { OrderPool, OrderMatcher, buyMatcher, sellMatcher, hasSlMatcher, hasTpMatcher } from './order/order-pool.js';
 export { BarsAtrMode, BarBase } from './bar/bar.js';
