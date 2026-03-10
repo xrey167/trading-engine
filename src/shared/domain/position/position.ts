@@ -1,4 +1,5 @@
 import { Type, type Static } from '@sinclair/typebox';
+import { enumSchema } from '../../schemas/common.js';
 import { PositionReason } from '../history/history.js';
 import type { CanonicalId } from '../../lib/canonical-id/index.js';
 
@@ -9,14 +10,12 @@ export type PositionType = (typeof PositionType)[keyof typeof PositionType];
 // Schema + VO (serialization / API boundary)
 // ─────────────────────────────────────────────────────────────
 
-const PositionTypeSchema = Type.Union(Object.values(PositionType).map(v => Type.Literal(v)));
-
 export const PositionInfoVOSchema = Type.Object({
   ticket:         Type.Number(),
   userId:         Type.String(),
   brokerId:       Type.Optional(Type.String()),
   symbol:         Type.String(),
-  type:           PositionTypeSchema,
+  type:           enumSchema(PositionType),
   magic:          Type.Number(),
   identifier:     Type.Number(),
   time:           Type.String({ format: 'date-time' }),
@@ -32,7 +31,7 @@ export const PositionInfoVOSchema = Type.Object({
   profit:         Type.Number(),
   comment:        Type.String(),
   externalId:     Type.String(),
-  reason:      Type.Optional(Type.Union(Object.values(PositionReason).map(v => Type.Literal(v)))),
+  reason:      Type.Optional(enumSchema(PositionReason)),
   canonicalId: Type.Optional(Type.String()),
 });
 export type PositionInfoVO = Static<typeof PositionInfoVOSchema>;

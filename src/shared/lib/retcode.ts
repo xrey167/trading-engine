@@ -82,7 +82,7 @@ interface RetcodeEntry {
 
 const RETCODE_TABLE: ReadonlyMap<number, RetcodeEntry> = new Map<number, RetcodeEntry>([
   [10004, { description: 'Requote',                                                                 category: RetcodeCategory.Transient         }],
-  [10006, { description: 'Request rejected',                                                        category: RetcodeCategory.Transient         }],
+  [10006, { description: 'Request rejected',                                                        category: RetcodeCategory.MarketCondition   }],
   [10007, { description: 'Request canceled by trader',                                              category: RetcodeCategory.MarketCondition   }],
   [10008, { description: 'Order placed',                                                            category: RetcodeCategory.Success           }],
   [10009, { description: 'Request completed',                                                       category: RetcodeCategory.Success           }],

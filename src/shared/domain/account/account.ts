@@ -1,4 +1,5 @@
 import { Type, type Static } from '@sinclair/typebox';
+import { enumSchema } from '../../schemas/common.js';
 
 export const AccountType = { Demo: 0, Contest: 1, Real: 2 } as const;
 export type AccountType = (typeof AccountType)[keyof typeof AccountType];
@@ -11,10 +12,6 @@ export const AccountTradeMode = {
 } as const;
 export type AccountTradeMode = (typeof AccountTradeMode)[keyof typeof AccountTradeMode];
 
-export const AccountTradeModeSchema = Type.Union(
-  Object.values(AccountTradeMode).map(v => Type.Literal(v))
-);
-
 export const AccountMarginMode = { Retail: 0, Exchange: 2 } as const;
 export type AccountMarginMode = (typeof AccountMarginMode)[keyof typeof AccountMarginMode];
 
@@ -26,10 +23,11 @@ export type AccountStopoutMode = (typeof AccountStopoutMode)[keyof typeof Accoun
 
 export const AccountInfoVOSchema = Type.Object({
   login:                 Type.Number(),
-  tradeMode:             AccountTradeModeSchema,
+  accountType:           enumSchema(AccountType),
+  tradeMode:             enumSchema(AccountTradeMode),
   leverage:              Type.Number(),
-  marginMode:            Type.Union([Type.Literal(0), Type.Literal(2)]),
-  stopOutMode:           Type.Union([Type.Literal(0), Type.Literal(1)]),
+  marginMode:            enumSchema(AccountMarginMode),
+  stopOutMode:           enumSchema(AccountStopoutMode),
   marginSoMode:          Type.Number(),
   tradeAllowed:          Type.Boolean(),
   tradeExpertAllowed:    Type.Boolean(),
@@ -61,6 +59,7 @@ export const AccountVOFactory = {
   make(overrides: Partial<AccountInfoVO> = {}): AccountInfoVO {
     return {
       login:              0,
+      accountType:        AccountType.Real,
       tradeMode:          AccountTradeMode.Hedge,
       leverage:           100,
       marginMode:         AccountMarginMode.Retail,
@@ -97,6 +96,7 @@ export const AccountVOFactory = {
 export class Account {
   constructor(
     public readonly login:              number,
+    public readonly accountType:        AccountType,
     public readonly tradeMode:          AccountTradeMode,
     public readonly leverage:           number,
     public readonly marginMode:         AccountMarginMode,
@@ -125,14 +125,9 @@ export class Account {
 
   // ── Account type predicates ───────────────────────────────
 
-  /** True for all live (non-demo) account trade modes. */
-  isReal(): boolean {
-    return this.tradeMode === AccountTradeMode.Hedge
-        || this.tradeMode === AccountTradeMode.SingleHedge
-        || this.tradeMode === AccountTradeMode.SingleNoHedge
-        || this.tradeMode === AccountTradeMode.Future;
-  }
-  isDemo():    boolean { return !this.isReal(); }
+  isReal():    boolean { return this.accountType === AccountType.Real; }
+  isDemo():    boolean { return this.accountType === AccountType.Demo; }
+  isContest(): boolean { return this.accountType === AccountType.Contest; }
   isHedging(): boolean {
     return this.tradeMode === AccountTradeMode.Hedge
         || this.tradeMode === AccountTradeMode.SingleHedge;
@@ -163,10 +158,11 @@ export class Account {
   static fromVO(vo: AccountInfoVO): Account {
     return new Account(
       vo.login,
+      vo.accountType,
       vo.tradeMode,
       vo.leverage,
-      vo.marginMode as AccountMarginMode,
-      vo.stopOutMode as AccountStopoutMode,
+      vo.marginMode,
+      vo.stopOutMode,
       vo.marginSoMode,
       vo.tradeAllowed,
       vo.tradeExpertAllowed,
@@ -193,6 +189,7 @@ export class Account {
   toVO(): AccountInfoVO {
     return {
       login:              this.login,
+      accountType:        this.accountType,
       tradeMode:          this.tradeMode,
       leverage:           this.leverage,
       marginMode:         this.marginMode,

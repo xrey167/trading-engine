@@ -1,4 +1,5 @@
 import { Type, type Static } from '@sinclair/typebox';
+import { enumSchema } from '../../schemas/common.js';
 import { DealType, DealEntry, DealReason } from '../history/history.js';
 import type { CanonicalId } from '../../lib/canonical-id/index.js';
 
@@ -6,8 +7,8 @@ import type { CanonicalId } from '../../lib/canonical-id/index.js';
 // Schema + VO (serialization / API boundary)
 // ─────────────────────────────────────────────────────────────
 
-const DealTypeSchema  = Type.Union(Object.values(DealType).map(v  => Type.Literal(v)));
-const DealEntrySchema = Type.Union(Object.values(DealEntry).map(v => Type.Literal(v)));
+const DealTypeSchema  = enumSchema(DealType);
+const DealEntrySchema = enumSchema(DealEntry);
 
 export const DealInfoVOSchema = Type.Object({
   ticket:     Type.Number(),
@@ -25,7 +26,7 @@ export const DealInfoVOSchema = Type.Object({
   profit:     Type.Number(),
   time:       Type.String({ format: 'date-time' }),
   comment:     Type.String(),
-  reason:      Type.Optional(Type.Union(Object.values(DealReason).map(v => Type.Literal(v)))),
+  reason:      Type.Optional(enumSchema(DealReason)),
   canonicalId: Type.Optional(Type.String()),
 });
 export type DealInfoVO = Static<typeof DealInfoVOSchema>;

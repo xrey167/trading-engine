@@ -1,4 +1,5 @@
 import { Type, type Static } from '@sinclair/typebox';
+import { enumSchema } from '../../schemas/common.js';
 import { OrderState, OrderReason } from '../history/history.js';
 import type { CanonicalId } from '../../lib/canonical-id/index.js';
 
@@ -80,16 +81,13 @@ export type OrderEntryType = (typeof OrderEntryType)[keyof typeof OrderEntryType
 // Schema + VO (serialization / API boundary)
 // ─────────────────────────────────────────────────────────────
 
-const OrderTypeSchema  = Type.Union(Object.values(OrderType).map(v  => Type.Literal(v)));
-const OrderStateSchema = Type.Union(Object.values(OrderState).map(v => Type.Literal(v)));
-
 export const HistoryOrderInfoVOSchema = Type.Object({
   ticket:        Type.Number(),
   userId:        Type.String(),
   brokerId:      Type.String(),
   symbol:        Type.String(),
-  type:          OrderTypeSchema,
-  state:         OrderStateSchema,
+  type:          enumSchema(OrderType),
+  state:         enumSchema(OrderState),
   volumeInitial: Type.Number(),
   volumeCurrent: Type.Number(),
   priceOpen:     Type.Number(),
@@ -98,7 +96,7 @@ export const HistoryOrderInfoVOSchema = Type.Object({
   timeSetup:     Type.String({ format: 'date-time' }),
   timeDone:      Type.String({ format: 'date-time' }),
   comment:     Type.String(),
-  reason:      Type.Optional(Type.Union(Object.values(OrderReason).map(v => Type.Literal(v)))),
+  reason:      Type.Optional(enumSchema(OrderReason)),
   canonicalId: Type.Optional(Type.String()),
 });
 export type HistoryOrderInfoVO = Static<typeof HistoryOrderInfoVOSchema>;

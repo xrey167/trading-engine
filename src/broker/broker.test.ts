@@ -38,6 +38,7 @@ function makePosition(overrides: Partial<PositionInfoVO> = {}): PositionInfoVO {
 function makeAccount(overrides: Partial<AccountInfoVO> = {}): AccountInfoVO {
   return {
     login: 1001,
+    accountType: 2,
     tradeMode: 'HEDGE',
     leverage: 100,
     marginMode: 0,

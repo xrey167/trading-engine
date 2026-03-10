@@ -26,7 +26,7 @@ import { DealType, DealEntry, DealReason, PositionReason, OrderReason, TradeEven
 import { Order, OrderVOFactory } from './order/order.js';
 import { OrderType } from './order/order.js';
 import { OrderState } from './history/history.js';
-import { AccountInfoVOSchema, Account, AccountVOFactory, AccountTradeMode, AccountStopoutMode } from './account/account.js';
+import { AccountInfoVOSchema, Account, AccountVOFactory, AccountType, AccountTradeMode, AccountStopoutMode } from './account/account.js';
 import {
   SymbolInfoVOSchema, TickSchema, SymbolInfoVOFactory,
   TradingSymbol, AssetType,
@@ -167,6 +167,7 @@ describe('AccountInfoVOSchema', () => {
   it('validates a valid account object', () => {
     const valid = {
       login: 123,
+      accountType: 2,
       tradeMode: 'HEDGE',
       leverage: 100,
       marginMode: 0,
@@ -907,6 +908,18 @@ describe('Account', () => {
     const netting = Account.fromVO(AccountVOFactory.make({ tradeMode: AccountTradeMode.SingleNoHedge }));
     expect(hedge.isHedging()).toBe(true);
     expect(netting.isHedging()).toBe(false);
+  });
+
+  it('isReal / isDemo / isContest from AccountType', () => {
+    const real    = Account.fromVO(AccountVOFactory.make({ accountType: AccountType.Real }));
+    const demo    = Account.fromVO(AccountVOFactory.make({ accountType: AccountType.Demo }));
+    const contest = Account.fromVO(AccountVOFactory.make({ accountType: AccountType.Contest }));
+    expect(real.isReal()).toBe(true);
+    expect(real.isDemo()).toBe(false);
+    expect(demo.isDemo()).toBe(true);
+    expect(demo.isReal()).toBe(false);
+    expect(contest.isContest()).toBe(true);
+    expect(contest.isReal()).toBe(false);
   });
 });
 

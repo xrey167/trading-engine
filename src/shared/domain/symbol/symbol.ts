@@ -1,4 +1,5 @@
 import { Type, type Static } from '@sinclair/typebox';
+import { enumSchema } from '../../schemas/common.js';
 import { AssetType } from './symbol-info.js';
 
 // Re-export everything so all existing `symbol/symbol.js` importers keep working.
@@ -9,12 +10,10 @@ export * from './symbol-service.js';
 // SymbolInfoVO — serialization / API boundary
 // ─────────────────────────────────────────────────────────────
 
-const AssetTypeSchema = Type.Union(Object.values(AssetType).map(v => Type.Literal(v)));
-
 export const SymbolInfoVOSchema = Type.Object({
   name:             Type.String(),
   description:      Type.String(),
-  assetType:        AssetTypeSchema,
+  assetType:        enumSchema(AssetType),
   digits:           Type.Integer(),
   point:            Type.Number(),
   tickSize:         Type.Number(),
