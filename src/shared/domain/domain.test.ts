@@ -22,7 +22,7 @@ import {
 } from './metrics/trade-params.js';
 import { PositionInfoVOSchema, Position, PositionVOFactory, PositionType } from './position/position.js';
 import { Deal, DealInfoVOFactory } from './deal/deal.js';
-import { DealType, DealEntry, DealReason, PositionReason, OrderReason } from './history/history.js';
+import { DealType, DealEntry, DealReason, PositionReason, OrderReason, TradeEventFlag, tradeEventFlags, hasTradeEventFlag, OrderStatus } from './history/history.js';
 import { Order, OrderVOFactory } from './order/order.js';
 import { OrderType } from './order/order.js';
 import { OrderState } from './history/history.js';
@@ -1014,5 +1014,46 @@ describe('Order', () => {
     const o  = Order.fromVO(vo);
     expect(o.ticket).toBe(77);
     expect(o.toVO().reason).toBe(OrderReason.TP);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// TradeEventFlag
+// ─────────────────────────────────────────────────────────────
+
+describe('TradeEventFlag', () => {
+  it('individual flags are unique powers of 2', () => {
+    const values = Object.values(TradeEventFlag).filter(v => v !== 0) as number[];
+    const unique = new Set(values);
+    expect(unique.size).toBe(values.length);
+    for (const v of values) expect(v & (v - 1)).toBe(0); // power-of-2 check
+  });
+
+  it('tradeEventFlags combines bits', () => {
+    const mask = tradeEventFlags(TradeEventFlag.PositionOpened, TradeEventFlag.ClosedBySL);
+    expect(hasTradeEventFlag(mask, TradeEventFlag.PositionOpened)).toBe(true);
+    expect(hasTradeEventFlag(mask, TradeEventFlag.ClosedBySL)).toBe(true);
+    expect(hasTradeEventFlag(mask, TradeEventFlag.ClosedByTP)).toBe(false);
+  });
+
+  it('None flag matches nothing', () => {
+    const mask = tradeEventFlags(TradeEventFlag.OrderPlaced);
+    expect(hasTradeEventFlag(mask, TradeEventFlag.None)).toBe(false);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// OrderStatus
+// ─────────────────────────────────────────────────────────────
+
+describe('OrderStatus enum', () => {
+  it('has 9 distinct values', () => {
+    expect(Object.keys(OrderStatus)).toHaveLength(9);
+  });
+
+  it('values are stable strings', () => {
+    expect(OrderStatus.MarketPosition).toBe('MARKET_POSITION');
+    expect(OrderStatus.Deal).toBe('DEAL');
+    expect(OrderStatus.Unknown).toBe('UNKNOWN');
   });
 });
